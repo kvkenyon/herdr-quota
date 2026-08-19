@@ -63,7 +63,21 @@ Remove the `[[keys.command]]` block from `config.toml` and reload configuration 
 | `r`          | Refresh while keeping the last reading visible |
 | `q` / Escape | Close and restore the prior layout             |
 
-The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height without scrolling; a shorter pane cuts whole rows and says how many are hidden. Restrained color marks at-risk tiers, but the words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
+The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height without scrolling; a shorter pane cuts whole rows and says how many are hidden. Restrained color marks at-risk tiers, but the words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
+
+### Reading the gauges
+
+Each tier draws a small gauge of what is **still left**, so the bar and the percentage next to it always agree - a long bar means a full tank, never a spent one.
+
+| Gauge  | Meaning                                                      |
+| ------ | ------------------------------------------------------------ |
+| `████` | Exactly full. Nothing of this tier has been spent.           |
+| `██──` | Part spent. The rule is the runway still ahead.              |
+| `▏───` | Nearly gone. Any remaining allowance keeps a visible sliver. |
+| `────` | Exactly empty. This tier is spent.                           |
+| blank  | No reading. Nothing is drawn, so empty is never implied.     |
+
+Gauges are drawn to an eighth of a cell, so tiers a few points apart stay apart on screen. The filled part takes the same colour as its percentage, and the tier that limits the provider is shown in bold.
 
 Tier rows follow each provider's own quota model:
 

@@ -1,4 +1,5 @@
 import { pad, stripAnsi, truncate, visibleLength } from "./ansi.js";
+import { BAR_TRACK, remainingBar } from "./bar.js";
 import {
   ageText,
   compactCountdown,
@@ -8,6 +9,7 @@ import {
 import {
   presentProvider,
   providerAnnotation,
+  type ProviderPresentation,
   type TierConclusion,
   type TierRow,
 } from "./tiers.js";
@@ -20,6 +22,11 @@ const COLORS = {
   red: "\x1b[38;5;203m",
   white: "\x1b[38;5;255m",
   dim: "\x1b[38;5;244m",
+  // A healthy gauge is a large solid shape, so it is drawn quieter than the
+  // text at the same level of risk and leaves the colour to the tiers that
+  // need attention.
+  steel: "\x1b[38;5;251m",
+  track: "\x1b[38;5;238m",
   bold: "\x1b[1m",
 };
 type Tone = keyof typeof COLORS;
@@ -42,8 +49,10 @@ const PERCENT_WIDTH = 4;
 const RESET_WIDTH = 3;
 const SEPARATOR = " · ";
 const MIN_PACE_WIDTH = 7;
-// Shared label column across ordinary sections, so Claude, Codex, and Kimi
-// tiers align vertically; only wider labels (Cursor) widen their own section.
+const MIN_BAR_WIDTH = 4;
+const MAX_BAR_WIDTH = 10;
+// One label column for the whole sidebar, so every percentage and gauge lines
+// up from the first tier to the last.
 const PREFERRED_LABEL_WIDTH = 11;
 // indent + label gap + percent column + reset gap + reset column
 const ROW_OVERHEAD = INDENT + 1 + PERCENT_WIDTH + 1 + RESET_WIDTH;
@@ -106,49 +115,103 @@ function fittingText(candidates: string[], width: number): string {
   return candidates.find((text) => text.length <= width) ?? "";
 }
 
-function resetCell(row: TierRow, now: Date): string {
-  if (!row.resetsAt) return "--";
+function resetCell(row: TierRow, now: Date): string | undefined {
+  if (!row.resetsAt) return undefined;
   const seconds = (Date.parse(row.resetsAt) - now.getTime()) / 1000;
-  return Number.isFinite(seconds) ? compactCountdown(seconds) : "--";
+  return Number.isFinite(seconds) ? compactCountdown(seconds) : undefined;
 }
 
-interface SectionColumns {
+interface TierColumns {
   labelWidth: number;
-  compact: boolean;
+  barWidth: number;
   paceWidth: number;
 }
 
-function sectionColumns(rows: TierRow[], width: number): SectionColumns {
-  const fullWidest = Math.max(...rows.map((row) => row.label.length));
-  const compactWidest = Math.max(...rows.map((row) => row.compactLabel.length));
-  const withPace =
-    width >= ROW_OVERHEAD + SEPARATOR.length + MIN_PACE_WIDTH + 9;
-  const budget = withPace
-    ? width - ROW_OVERHEAD - SEPARATOR.length - MIN_PACE_WIDTH
-    : width - ROW_OVERHEAD;
-  const compact = fullWidest > budget;
-  const natural = compact ? compactWidest : fullWidest;
-  const labelWidth = Math.min(Math.max(natural, PREFERRED_LABEL_WIDTH), budget);
-  const paceWidth = withPace
-    ? width - ROW_OVERHEAD - SEPARATOR.length - labelWidth
-    : 0;
-  return { labelWidth, compact, paceWidth };
+/** The full label when it fits, otherwise the provider's shorter form. */
+function labelFor(row: TierRow, labelWidth: number): string {
+  return row.label.length <= labelWidth ? row.label : row.compactLabel;
 }
 
-function tierLine(
-  row: TierRow,
-  columns: SectionColumns,
-  layout: Layout,
-): string {
-  const label = truncate(
-    columns.compact ? row.compactLabel : row.label,
-    columns.labelWidth,
+/**
+ * Solves one set of columns for every tier in the sidebar.
+ *
+ * Columns are claimed in the order they earn their space: the label, then the
+ * pace conclusion that no other column can replace, then the gauge, which
+ * restates a percentage that is already on the row. The gauge is reserved
+ * before the label is sized, though, because one long label would otherwise
+ * eat the few cells the gauges need and drop them from every row.
+ */
+function tierColumns(rows: TierRow[], width: number): TierColumns {
+  const withPace =
+    width >= ROW_OVERHEAD + SEPARATOR.length + MIN_PACE_WIDTH + 9;
+  const paceReserve = withPace ? SEPARATOR.length + MIN_PACE_WIDTH : 0;
+  const barReserve =
+    width >=
+    ROW_OVERHEAD + PREFERRED_LABEL_WIDTH + MIN_BAR_WIDTH + 1 + paceReserve
+      ? MIN_BAR_WIDTH + 1
+      : 0;
+
+  const budget = width - ROW_OVERHEAD - paceReserve - barReserve;
+  const widest = Math.max(
+    ...rows.map((row) => labelFor(row, budget).length),
+    PREFERRED_LABEL_WIDTH,
   );
-  const paddedLabel = label.padEnd(columns.labelWidth);
+  // Past the preferred column, a long label only earns its width on a pane
+  // wide enough to carry a pace conclusion. Narrower panes keep their rows
+  // tight instead of stretching a mostly empty column.
+  const labelWidth = Math.min(
+    withPace ? widest : PREFERRED_LABEL_WIDTH,
+    budget,
+  );
+
+  const slack = width - ROW_OVERHEAD - labelWidth - paceReserve;
+  const barWidth = barReserve ? Math.min(MAX_BAR_WIDTH, slack - 1) : 0;
+  const paceWidth = withPace
+    ? width -
+      ROW_OVERHEAD -
+      labelWidth -
+      (barWidth ? barWidth + 1 : 0) -
+      SEPARATOR.length
+    : 0;
+  return { labelWidth, barWidth, paceWidth };
+}
+
+/**
+ * The gauge. Its fill answers to the same risk level as the percentage beside
+ * it, so a row never signals two different levels, but a healthy fill is
+ * muted: it is a far larger shape than the text and would otherwise shout
+ * over the tiers that actually need attention.
+ */
+function barCell(row: TierRow, columns: TierColumns, layout: Layout): string {
+  if (columns.barWidth <= 0) return "";
+  const bar = remainingBar(row.percentRemaining, columns.barWidth);
+  if (!layout.color || row.percentRemaining === undefined) return `${bar} `;
+
+  const risk = percentTone(row.percentRemaining);
+  const tone: Tone = risk === "white" ? "steel" : risk;
+  const trackAt = bar.indexOf(BAR_TRACK);
+  // An exhausted tier is all track, and that bare track is the loudest thing
+  // on the row, so it takes the alert tone instead of receding into grey.
+  if (trackAt === 0) return `${colorize(bar, tone, true)} `;
+  const fill = trackAt === -1 ? bar : bar.slice(0, trackAt);
+  const track = trackAt === -1 ? "" : bar.slice(trackAt);
+  return `${colorize(fill, tone, true)}${track ? colorize(track, "track", true) : ""} `;
+}
+
+function conclusionTone(row: TierRow, alert: boolean): Tone {
+  if (!alert) return "dim";
+  return row.percentRemaining !== undefined && row.percentRemaining <= 10
+    ? "red"
+    : "yellow";
+}
+
+function tierLine(row: TierRow, columns: TierColumns, layout: Layout): string {
+  const label = truncate(
+    labelFor(row, columns.labelWidth),
+    columns.labelWidth,
+  ).padEnd(columns.labelWidth);
   const styledLabel =
-    layout.color && row.limiting
-      ? colorize(paddedLabel, "bold", true)
-      : paddedLabel;
+    layout.color && row.limiting ? colorize(label, "bold", true) : label;
 
   const percent = formatPercent(row.percentRemaining).padStart(PERCENT_WIDTH);
   const styledPercent = colorize(
@@ -156,29 +219,33 @@ function tierLine(
     percentTone(row.percentRemaining),
     layout.color,
   );
-
-  if (row.conclusion.kind === "not_reported" && columns.paceWidth > 0) {
-    const note = fittingText(
-      ["not reported", "--"],
-      layout.width - INDENT - columns.labelWidth - 1 - PERCENT_WIDTH - 2,
-    );
-    return `${" ".repeat(INDENT)}${styledLabel} ${styledPercent}  ${colorize(note, "dim", layout.color)}`;
-  }
-
-  const reset = resetCell(row, layout.now).padStart(RESET_WIDTH);
-  const styledReset = colorize(reset, "dim", layout.color);
-  const base = `${" ".repeat(INDENT)}${styledLabel} ${styledPercent} ${styledReset}`;
-  if (columns.paceWidth <= 0) return base;
+  const head = `${" ".repeat(INDENT)}${styledLabel} ${barCell(row, columns, layout)}${styledPercent}`;
 
   const { texts, alert } = conclusionCandidates(row.conclusion, layout.now);
+  const reset = resetCell(row, layout.now);
+
+  // A tier with no reset countdown gives that column back to its conclusion,
+  // so a real figure is shown where a placeholder dash would otherwise sit.
+  if (reset === undefined) {
+    // Nothing is known about this tier beyond the dash already in the
+    // percentage, so the row ends rather than repeating it.
+    if (row.conclusion.kind === "unknown" && columns.paceWidth > 0) return head;
+    const zone =
+      RESET_WIDTH +
+      (columns.paceWidth > 0 ? SEPARATOR.length + columns.paceWidth : 0);
+    const text = fittingText([...texts, "--"], zone);
+    if (!text) return head;
+    // With no pace column the zone is just the reset column, so what lands
+    // there stays right-aligned under the other countdowns.
+    const cell = columns.paceWidth > 0 ? text : text.padStart(RESET_WIDTH);
+    return `${head} ${colorize(cell, conclusionTone(row, alert), layout.color)}`;
+  }
+
+  const base = `${head} ${colorize(reset.padStart(RESET_WIDTH), "dim", layout.color)}`;
+  if (columns.paceWidth <= 0) return base;
   const pace = fittingText(texts, columns.paceWidth);
   if (!pace) return base;
-  const paceTone: Tone = alert
-    ? row.percentRemaining !== undefined && row.percentRemaining <= 10
-      ? "red"
-      : "yellow"
-    : "dim";
-  return `${base}${colorize(SEPARATOR, "dim", layout.color)}${colorize(pace, paceTone, layout.color)}`;
+  return `${base}${colorize(SEPARATOR, "dim", layout.color)}${colorize(pace, conclusionTone(row, alert), layout.color)}`;
 }
 
 function headerLine(provider: ProviderQuota, layout: Layout): string {
@@ -194,9 +261,13 @@ function headerLine(provider: ProviderQuota, layout: Layout): string {
   return `${colorize(shownName, "bold", layout.color)}${" ".repeat(gap)}${colorize(status, annotationTone(annotation.tone), layout.color)}`;
 }
 
-function sectionLines(provider: ProviderQuota, layout: Layout): string[] {
+function sectionLines(
+  provider: ProviderQuota,
+  presentation: ProviderPresentation,
+  columns: TierColumns,
+  layout: Layout,
+): string[] {
   const lines = [headerLine(provider, layout)];
-  const presentation = presentProvider(provider);
   if (presentation.kind === "recovery") {
     lines.push(
       `${" ".repeat(INDENT)}${truncate(presentation.instruction, layout.width - INDENT)}`,
@@ -206,7 +277,6 @@ function sectionLines(provider: ProviderQuota, layout: Layout): string[] {
       `${" ".repeat(INDENT)}${colorize(truncate(presentation.message, layout.width - INDENT), "dim", layout.color)}`,
     );
   } else {
-    const columns = sectionColumns(presentation.rows, layout.width);
     for (const row of presentation.rows)
       lines.push(tierLine(row, columns, layout));
   }
@@ -227,9 +297,21 @@ function contentLines(
     return ["", colorize(message, "cyan", layout.color), hint];
   }
 
-  const lines = providers.flatMap((provider, index) => [
+  const sections = providers.map((provider) => ({
+    provider,
+    presentation: presentProvider(provider),
+  }));
+  // One column solve for the whole sidebar keeps the gauges and percentages
+  // on a single vertical line across every provider.
+  const columns = tierColumns(
+    sections.flatMap((section) =>
+      section.presentation.kind === "tiers" ? section.presentation.rows : [],
+    ),
+    layout.width,
+  );
+  const lines = sections.flatMap((section, index) => [
     ...(index > 0 ? [""] : []),
-    ...sectionLines(provider, layout),
+    ...sectionLines(section.provider, section.presentation, columns, layout),
   ]);
   if (lines.length < height) lines.unshift("");
   if (lines.length <= height) return lines;
