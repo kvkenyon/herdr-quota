@@ -2,7 +2,7 @@
   "name": "herdr-quota",
   "version": "0.1.0",
   "private": true,
-  "description": "Herdr popup dashboard for local AI subscription quota",
+  "description": "Slim Herdr sidebar for local AI subscription quota",
   "type": "module",
   "engines": {
     "node": ">=22.19"

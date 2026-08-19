@@ -1,5 +1,4 @@
-export type DashboardAction =
-  "quit" | "refresh" | "scroll-up" | "scroll-down" | "none";
+export type DashboardAction = "quit" | "refresh" | "none";
 
 export function actionsForInput(input: Buffer | string): DashboardAction[] {
   const value = Buffer.isBuffer(input) ? input.toString("utf8") : input;
@@ -11,16 +10,12 @@ export function actionsForInput(input: Buffer | string): DashboardAction[] {
       value[index + 1] === "[" &&
       (value[index + 2] === "A" || value[index + 2] === "B")
     ) {
-      actions.push(value[index + 2] === "A" ? "scroll-up" : "scroll-down");
+      actions.push("none");
       index += 2;
     } else if (key === "q" || key === "Q" || key === "\x1b" || key === "\x03") {
       actions.push("quit");
     } else if (key === "r" || key === "R") {
       actions.push("refresh");
-    } else if (key === "k") {
-      actions.push("scroll-up");
-    } else if (key === "j") {
-      actions.push("scroll-down");
     }
   }
   return actions.length ? actions : ["none"];

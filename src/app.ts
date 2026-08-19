@@ -3,6 +3,7 @@ import { collectQuota } from "./collect.js";
 import { TerminalInputParser } from "./keys.js";
 import { renderDashboard } from "./render.js";
 import { sanitizeProcessError } from "./sanitize.js";
+import { releaseSidebarStateSync } from "./sidebar-state.js";
 import type { DashboardState } from "./types.js";
 
 const ALT_ENTER = "\x1b[?1049h\x1b[?25l";
@@ -76,13 +77,6 @@ export class DashboardApp {
         this.close();
         return;
       } else if (action === "refresh") void this.refresh();
-      else if (action === "scroll-up") {
-        this.state.scroll = Math.max(0, this.state.scroll - 2);
-        this.render();
-      } else if (action === "scroll-down") {
-        this.state.scroll += 2;
-        this.render();
-      }
     }
   }
 
@@ -131,6 +125,10 @@ export class DashboardApp {
       process.stdin.setRawMode(false);
       process.stdin.pause();
     }
+    releaseSidebarStateSync(
+      process.env.HERDR_QUOTA_STATE_FILE,
+      process.env.HERDR_QUOTA_STATE_TOKEN,
+    );
     process.stdout.write(ALT_EXIT);
     process.exitCode = 0;
   };

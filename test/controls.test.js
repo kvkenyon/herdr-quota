@@ -7,20 +7,20 @@ import {
 } from "../dist/keys.js";
 import { ChildProcessTracker } from "../dist/app.js";
 
-test("q and Escape close, r refreshes, arrows and vim keys scroll", () => {
+test("q and Escape close, r refreshes, and secondary keys are inert", () => {
   assert.equal(actionForInput("q"), "quit");
   assert.equal(actionForInput("\x1b"), "quit");
   assert.equal(actionForInput("r"), "refresh");
-  assert.equal(actionForInput("j"), "scroll-down");
-  assert.equal(actionForInput("\x1b[A"), "scroll-up");
+  assert.equal(actionForInput("j"), "none");
+  assert.equal(actionForInput("\x1b[A"), "none");
   assert.equal(actionForInput("x"), "none");
 });
 
-test("fragmented arrow sequences are not mistaken for Escape", () => {
+test("fragmented escape sequences are never mistaken for bare Escape", () => {
   const parser = new TerminalInputParser();
   assert.deepEqual(parser.push("\x1b"), []);
   assert.deepEqual(parser.push("["), []);
-  assert.deepEqual(parser.push("A"), ["scroll-up"]);
+  assert.deepEqual(parser.push("A"), []);
   assert.deepEqual(parser.push("\x1b"), []);
   assert.deepEqual(parser.flush(), ["quit"]);
 });
@@ -51,15 +51,7 @@ function fakeChild() {
   };
 }
 
-test("coalesced terminal input preserves repeated actions", () => {
-  assert.deepEqual(actionsForInput("jjkr"), [
-    "scroll-down",
-    "scroll-down",
-    "scroll-up",
-    "refresh",
-  ]);
-  assert.deepEqual(actionsForInput("\x1b[B\x1b[A"), [
-    "scroll-down",
-    "scroll-up",
-  ]);
+test("coalesced input preserves repeated essential actions", () => {
+  assert.deepEqual(actionsForInput("rrq"), ["refresh", "refresh", "quit"]);
+  assert.deepEqual(actionsForInput("jk\x1b[B\x1b[A"), ["none", "none"]);
 });
