@@ -128,3 +128,15 @@ test("color emphasizes risk while text keeps the meaning", async () => {
   assert.ok(output.includes("\x1b[1mClaude\x1b[0m"));
   assert.match(stripAnsi(output), /Fable week {3,}9% 33h · out in 13h/);
 });
+
+test("expired exhaustion projections fall back to ahead", async () => {
+  const complete = await report("complete");
+  const fable = complete.providers
+    .find((provider) => provider.provider === "claude")
+    .windows.find((window) => window.id === "model:fable");
+  fable.pace.projectedExhaustedAt = "2026-08-18T17:59:59.000Z";
+
+  const output = render(complete);
+  assert.match(output, /Fable week {3,}9% 33h · ahead/);
+  assert.doesNotMatch(output, /out(?: in)? now/);
+});

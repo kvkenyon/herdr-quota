@@ -74,7 +74,7 @@ function conclusionCandidates(
       if (conclusion.projectedExhaustedAt) {
         const runway =
           (Date.parse(conclusion.projectedExhaustedAt) - now.getTime()) / 1000;
-        if (Number.isFinite(runway)) {
+        if (Number.isFinite(runway) && runway > 0) {
           const countdown = compactCountdown(runway);
           return {
             texts: [`out in ${countdown}`, `out ${countdown}`, "ahead"],

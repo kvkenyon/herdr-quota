@@ -156,12 +156,14 @@ test("keychain approval is asked for, not conflated with sign-out", () => {
   const provider = bareProvider("claude", {
     status: "unavailable",
     stale: false,
+    authStatus: "unusable",
     reason: "keychain_access_required",
   });
   assert.deepEqual(presentProvider(provider), {
     kind: "message",
     message: "Keychain approval required",
   });
+  assert.equal(providerAnnotation(provider), undefined);
 });
 
 test("an unreadable provider is distinct from zero quota", async () => {

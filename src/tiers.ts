@@ -207,6 +207,9 @@ function needsSignIn(provider: ProviderQuota): boolean {
  * quota.
  */
 export function presentProvider(provider: ProviderQuota): ProviderPresentation {
+  if (provider.state.reason === "keychain_access_required") {
+    return { kind: "message", message: "Keychain approval required" };
+  }
   if (needsSignIn(provider)) {
     return {
       kind: "recovery",
@@ -214,9 +217,6 @@ export function presentProvider(provider: ProviderQuota): ProviderPresentation {
         RECOVERY_INSTRUCTIONS[provider.provider.toLowerCase()] ??
         "sign in with the provider CLI",
     };
-  }
-  if (provider.state.reason === "keychain_access_required") {
-    return { kind: "message", message: "Keychain approval required" };
   }
   if (!provider.windows.length) {
     return {
@@ -232,6 +232,7 @@ export function presentProvider(provider: ProviderQuota): ProviderPresentation {
 export function providerAnnotation(
   provider: ProviderQuota,
 ): ProviderAnnotation | undefined {
+  if (provider.state.reason === "keychain_access_required") return undefined;
   if (needsSignIn(provider)) return { text: "signed out", tone: "bad" };
   if (provider.state.stale || provider.state.status === "stale")
     return { text: "stale", tone: "warn" };
