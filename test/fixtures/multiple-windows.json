@@ -4,35 +4,62 @@
   "providers": [
     {
       "provider": "claude",
+      "label": "Claude",
+      "source": "oauth",
+      "plan": "max_20x",
       "windows": [
         {
           "id": "five_hour",
           "label": "session",
           "kind": "session",
           "percentRemaining": 88,
-          "resetsAt": "2026-08-18T21:00:00.000Z"
+          "resetsAt": "2026-08-18T21:00:00.000Z",
+          "windowSeconds": 18000,
+          "pace": { "status": "behind", "burnMultiple": 0.3 }
         },
         {
           "id": "seven_day",
           "label": "week",
           "kind": "weekly",
           "percentRemaining": 44,
-          "resetsAt": "2026-08-22T18:00:00.000Z"
+          "resetsAt": "2026-08-22T18:00:00.000Z",
+          "windowSeconds": 604800,
+          "pace": { "status": "on_pace", "burnMultiple": 1.01 }
         },
         {
-          "id": "model:opus",
+          "id": "seven_day_opus",
           "label": "Opus week",
-          "kind": "model",
+          "kind": "weekly",
           "percentRemaining": 31,
-          "resetsAt": "2026-08-21T18:00:00.000Z"
+          "resetsAt": "2026-08-22T18:00:00.000Z",
+          "windowSeconds": 604800,
+          "pace": {
+            "status": "ahead",
+            "burnMultiple": 1.4,
+            "projectedExhaustedAt": "2026-08-20T06:00:00.000Z"
+          }
+        },
+        {
+          "id": "model:fable",
+          "label": "Fable week",
+          "kind": "model",
+          "percentRemaining": 9,
+          "resetsAt": "2026-08-22T18:00:00.000Z",
+          "windowSeconds": 604800,
+          "pace": {
+            "status": "ahead",
+            "burnMultiple": 1.9,
+            "projectedExhaustedAt": "2026-08-19T07:21:00.000Z"
+          }
         },
         {
           "id": "extra_usage",
           "label": "extra usage",
           "kind": "credits",
+          "percentRemaining": 65,
           "spentUsd": 8.75,
           "limitUsd": 25,
-          "resetsAt": "2026-09-01T00:00:00.000Z"
+          "pace": { "status": "unknown", "reason": "missing_cycle" }
         }
       ],
       "quotaSemantics": {
@@ -50,11 +77,64 @@
             }
           },
           {
-            "scope": "model:opus",
+            "scope": "model:fable",
             "status": "known",
-            "effectivePercentRemaining": 31,
-            "boundedBy": ["five_hour", "seven_day", "model:opus"],
-            "limitingWindowIds": ["model:opus"],
+            "effectivePercentRemaining": 9,
+            "boundedBy": ["five_hour", "seven_day", "model:fable"],
+            "limitingWindowIds": ["model:fable"],
+            "runway": {
+              "status": "projected_exhaustion",
+              "usableRunwaySeconds": 48150,
+              "projectedExhaustedAt": "2026-08-19T07:21:00.000Z",
+              "limitingWindowId": "model:fable",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false }
+    },
+    {
+      "provider": "kimi",
+      "label": "Kimi",
+      "source": "api",
+      "windows": [
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 71,
+          "resetsAt": "2026-08-21T14:00:00.000Z",
+          "windowSeconds": 604800,
+          "pace": { "status": "behind", "burnMultiple": 0.5 }
+        },
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "percentRemaining": 90,
+          "resetsAt": "2026-08-18T19:30:00.000Z",
+          "windowSeconds": 18000,
+          "pace": { "status": "behind", "burnMultiple": 0.2 }
+        },
+        {
+          "id": "limit:2",
+          "label": "daily boost",
+          "kind": "unknown",
+          "percentRemaining": 55,
+          "resetsAt": "2026-08-19T00:00:00.000Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "partial",
+        "unresolvedWindowIds": ["limit:2"],
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 71,
+            "boundedBy": ["weekly", "five_hour"],
+            "limitingWindowIds": ["weekly"],
             "runway": {
               "status": "through_reset",
               "projectionConfidence": "established"

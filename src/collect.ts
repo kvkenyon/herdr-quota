@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adaptQuotaResponse } from "./schema.js";
 import { sanitizeProcessError } from "./sanitize.js";
+import { ALLOWED_PROVIDERS } from "./tiers.js";
 import type { QuotaReport } from "./types.js";
 
 const MAX_STDOUT = 2 * 1024 * 1024;
@@ -38,7 +39,13 @@ export async function collectQuota(
     let stdout = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
     let settled = false;
-    const child = spawnProcess(executable, ["--json", "--full"], {
+    const args = [
+      "--json",
+      "--full",
+      "--provider",
+      ALLOWED_PROVIDERS.join(","),
+    ];
+    const child = spawnProcess(executable, args, {
       cwd: resolve(dirname(fileURLToPath(import.meta.url)), ".."),
       env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
       stdio: ["ignore", "pipe", "pipe"],

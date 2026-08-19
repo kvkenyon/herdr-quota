@@ -5,9 +5,9 @@
 
 A slim, full-height quota sidebar for Herdr. It keeps the current tab and split arrangement intact, adds a narrow column on the right, and restores the prior layout when closed.
 
-![AI Quota sidebar showing provider health, headroom, reset, and pace](docs/dashboard-preview.svg)
+![AI Quota sidebar showing per-provider quota tiers with remaining percentage, reset countdown, and pace](docs/dashboard-preview.svg)
 
-Each provider is deliberately limited to the facts needed for a two-second scan: health, effective remaining percentage, reset countdown, and whether the current pace lasts.
+The sidebar covers Claude, OpenAI Codex, Cursor, and Kimi. Each provider section lists its real quota tiers - for example Claude's session, week, per-model, and extra-usage windows, or Cursor's included, auto, and 3rd-party model buckets - as one aligned row per tier: tier name, remaining percentage, reset countdown, and the pace conclusion that tells you whether that tier lasts through its reset.
 
 ## Install and bind `prefix+u`
 
@@ -63,9 +63,29 @@ Remove the `[[keys.command]]` block from `config.toml` and reload configuration 
 | `r`          | Refresh while keeping the last reading visible |
 | `q` / Escape | Close and restore the prior layout             |
 
-The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow. The normal Claude, OpenAI Codex, Cursor, and Kimi set fits at ordinary terminal height without scrolling. Tiny color accents help recognition, but provider names and health text remain authoritative. Unknown readings stay unknown rather than becoming a misleading zero.
+The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height without scrolling; a shorter pane cuts whole rows and says how many are hidden. Restrained color marks at-risk tiers, but the words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
 
-The default view intentionally omits plans, sources, credits, confidence prose, complete window lists, and bounding details. Those fields remain in the normalized in-memory model so effective headroom and the limiting reset continue to be calculated truthfully.
+Tier rows follow each provider's own quota model:
+
+- **Claude** - session, week, optional Opus and per-model weekly windows (for example `Fable week`), and extra usage with its spend.
+- **OpenAI Codex** - account session/week windows, per-model windows such as `Spark week`, and code-review windows. When no code-review window is returned, an explicit `Code review -- not reported` row says so instead of pretending review shares the base quota.
+- **Cursor** - `Included`, `Auto`, and `3rd-party models` (Cursor's "API usage" bucket, which meters third-party model calls, not your own API keys).
+- **Kimi** - session, week, and any additional limits Kimi describes, in provider order.
+
+Grok and GitHub Copilot are neither queried nor rendered. Only the four providers above are part of this product.
+
+### When a provider is signed out
+
+A provider that needs authentication shows `signed out` and a single recovery command instead of numbers, so an unavailable reading is never mistaken for zero quota:
+
+| Provider     | Sign in with            |
+| ------------ | ----------------------- |
+| Claude       | `claude`, then `/login` |
+| OpenAI Codex | `codex login`           |
+| Cursor       | `cursor-agent login`    |
+| Kimi         | `kimi login`            |
+
+The sidebar itself never starts an interactive login and never touches credentials; sign in with the provider's own CLI, then press `r`.
 
 ## Data and privacy
 
@@ -90,11 +110,13 @@ npx --yes quota-axi@0.1.29 --allow-keychain-prompt --provider claude,cursor
 
 The approval and non-secret access marker belong to `quota-axi`; this plugin never receives or stores the credential.
 
+The Keychain grant only lets `quota-axi` read a credential that already works. Expired or missing credentials still require signing in with the owning CLI (`claude` then `/login`, or `cursor-agent login`); no Keychain approval can refresh them.
+
 ## Troubleshooting
 
 **The direct action works but `prefix+u` does nothing.** The plugin is installed, but the binding is missing or has not been reloaded. Add the exact config block above, run `herdr config check`, then `herdr server reload-config`.
 
-**A provider says authentication required.** Sign in with that provider's official CLI. On macOS, Claude or Cursor may also need the one-time Keychain approval above.
+**A provider shows `signed out`.** Run the recovery command the sidebar shows for that provider (see the table above). On macOS, Claude or Cursor may also need the one-time Keychain approval above - but only a real sign-in fixes expired credentials.
 
 **A reading is stale or unknown.** The sidebar preserves truthful state when a provider cannot be reached. Press `r` after connectivity or authentication recovers.
 

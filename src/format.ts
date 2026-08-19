@@ -4,10 +4,6 @@ import type {
   QuotaWindow,
 } from "./types.js";
 
-export function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 export function formatPercent(value?: number): string {
   return value === undefined ? "--" : `${Math.round(value)}%`;
 }
@@ -23,12 +19,15 @@ export function formatDuration(seconds: number): string {
   return `${days}d ${hours % 24}h`;
 }
 
-export function relativeTime(iso?: string, now = new Date()): string {
-  if (!iso) return "reset unknown";
-  const millis = Date.parse(iso) - now.getTime();
-  if (!Number.isFinite(millis)) return "reset unknown";
-  if (millis <= 0) return `reset ${formatDuration(-millis / 1000)} ago`;
-  return `resets in ${formatDuration(millis / 1000)}`;
+/** At most three characters, for the aligned tier reset column. */
+export function compactCountdown(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "now";
+  if (seconds < 60) return "<1m";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 export function ageText(iso?: string, now = new Date()): string {
@@ -38,24 +37,19 @@ export function ageText(iso?: string, now = new Date()): string {
   return seconds < 10 ? "just now" : `${formatDuration(seconds)} ago`;
 }
 
-export function displayName(provider: ProviderQuota): string {
-  const known: Record<string, string> = {
-    claude: "Claude",
-    codex: "OpenAI Codex",
-    cursor: "Cursor",
-    kimi: "Kimi",
-  };
-  return (
-    provider.label ??
-    known[provider.provider.toLowerCase()] ??
-    titleCase(provider.provider)
-  );
-}
+const MARKETED_NAMES: Record<string, string> = {
+  claude: "Claude",
+  codex: "OpenAI Codex",
+  cursor: "Cursor",
+  kimi: "Kimi",
+};
 
-function titleCase(value: string): string {
-  return value
-    .replaceAll(/[-_]+/g, " ")
-    .replaceAll(/\b\w/g, (letter) => letter.toUpperCase());
+export function displayName(provider: ProviderQuota): string {
+  return (
+    MARKETED_NAMES[provider.provider.toLowerCase()] ??
+    provider.label ??
+    provider.provider
+  );
 }
 
 export function primaryEffective(
@@ -84,75 +78,12 @@ export function limitingWindow(
     )[0];
 }
 
+/**
+ * Effective aggregate availability. It stays available for emphasis and
+ * ordering decisions, but the sidebar never substitutes it for tier rows.
+ */
 export function effectivePercent(provider: ProviderQuota): number | undefined {
   const effective = primaryEffective(provider)?.effectivePercentRemaining;
   if (effective !== undefined) return effective;
   return limitingWindow(provider)?.percentRemaining;
-}
-
-export function paceSummary(provider: ProviderQuota): string {
-  const effective = primaryEffective(provider);
-  const runway = effective?.runway;
-  if (runway?.status === "exhausted_now") return "exhausted now";
-  if (runway?.status === "projected_exhaustion") {
-    return runway.usableRunwaySeconds === undefined
-      ? "may run out before reset"
-      : `may run out in ${formatDuration(runway.usableRunwaySeconds)}`;
-  }
-  if (runway?.status === "through_reset") return "on pace";
-  const pace = effective?.pace?.status;
-  if (pace === "ahead" || pace === "mixed") return "may run out before reset";
-  if (pace === "on_pace" || pace === "behind") return "on pace";
-  return "pace unknown";
-}
-
-export function health(provider: ProviderQuota): {
-  label: string;
-  tone: "good" | "warn" | "bad" | "muted";
-} {
-  if (
-    provider.state.status === "auth_required" ||
-    provider.state.authStatus === "unusable"
-  ) {
-    return { label: "AUTH REQUIRED", tone: "bad" };
-  }
-  if (provider.state.stale || provider.state.status === "stale") {
-    return { label: "STALE", tone: "warn" };
-  }
-  if (provider.state.status === "rate_limited")
-    return { label: "RATE LIMITED", tone: "warn" };
-  if (provider.state.status === "unavailable")
-    return { label: "UNAVAILABLE", tone: "muted" };
-  if (provider.state.status === "error") return { label: "ERROR", tone: "bad" };
-  const hasReading =
-    effectivePercent(provider) !== undefined ||
-    provider.windows.some(
-      (window) =>
-        window.percentRemaining !== undefined ||
-        window.spentUsd !== undefined ||
-        window.limitUsd !== undefined,
-    ) ||
-    provider.credits?.remaining !== undefined ||
-    provider.credits?.unlimited === true;
-  if (!hasReading) return { label: "UNAVAILABLE", tone: "muted" };
-  return { label: "HEALTHY", tone: "good" };
-}
-
-export function formatCredits(provider: ProviderQuota): string | undefined {
-  const credits = provider.credits;
-  if (credits?.unlimited) return "credits unlimited";
-  if (credits?.remaining === undefined) return undefined;
-  return credits.unit === "usd"
-    ? `$${credits.remaining.toFixed(2)} credits`
-    : `${credits.remaining.toLocaleString("en-US")} credits`;
-}
-
-export function spendText(window: QuotaWindow): string | undefined {
-  if (window.spentUsd === undefined && window.limitUsd === undefined)
-    return undefined;
-  const spent =
-    window.spentUsd === undefined ? "--" : `$${window.spentUsd.toFixed(2)}`;
-  const limit =
-    window.limitUsd === undefined ? "--" : `$${window.limitUsd.toFixed(2)}`;
-  return `${spent} / ${limit}`;
 }
