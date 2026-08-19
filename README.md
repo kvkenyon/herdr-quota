@@ -1,25 +1,24 @@
 # AI Quota for Herdr
 
+**See Claude, OpenAI Codex, Cursor, and Kimi subscription quota at a glance without leaving Herdr.**
+
+```bash
+herdr plugin install kvkenyon/herdr-quota --yes
+```
+
+![AI Quota sliding into Herdr with provider-specific tiers, remaining-allowance gauges, reset countdowns, and pace](docs/readme-demo.gif)
+
 [![CI](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml/badge.svg)](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/kvkenyon/herdr-quota)](https://github.com/kvkenyon/herdr-quota/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A slim, full-height quota sidebar for Herdr. It keeps the current tab and split arrangement intact, adds a narrow column on the right, and restores the prior layout when closed.
+A slim, full-height sidebar shows every trustworthy provider tier with the allowance still remaining, reset countdown, and pace conclusion. It keeps the current tab and split arrangement intact, adds one narrow column on the right, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
 
-![AI Quota sidebar showing per-provider quota tiers with remaining percentage, reset countdown, and pace](docs/dashboard-preview.svg)
-
-The sidebar covers Claude, OpenAI Codex, Cursor, and Kimi. Each provider section lists its real quota tiers - for example Claude's session, week, per-model, and extra-usage windows, or Cursor's included, auto, and 3rd-party model buckets - as one aligned row per tier: tier name, remaining percentage, reset countdown, and the pace conclusion that tells you whether that tier lasts through its reset.
-
-## Install and bind `prefix+u`
+## Bind `prefix+u`
 
 Requirements: Herdr 0.7.3 or newer, Node.js 22.19 or newer, npm, and at least one supported provider's official app or CLI signed in locally.
 
-1. Install the plugin:
-
-   ```bash
-   herdr plugin install kvkenyon/herdr-quota
-   ```
-
-2. Add this command binding to `~/.config/herdr/config.toml`:
+1. Add this command binding to `~/.config/herdr/config.toml`:
 
    ```toml
    [[keys.command]]
@@ -29,7 +28,7 @@ Requirements: Herdr 0.7.3 or newer, Node.js 22.19 or newer, npm, and at least on
    description = "AI quota"
    ```
 
-3. Load the new binding into the running Herdr server:
+2. Load the new binding into the running Herdr server:
 
    ```bash
    herdr server reload-config
