@@ -29,3 +29,27 @@ export function actionsForInput(input: Buffer | string): DashboardAction[] {
 export function actionForInput(input: Buffer | string): DashboardAction {
   return actionsForInput(input)[0] ?? "none";
 }
+
+export class TerminalInputParser {
+  private pending = "";
+
+  push(input: Buffer | string): DashboardAction[] {
+    const chunk = Buffer.isBuffer(input) ? input.toString("utf8") : input;
+    const value = this.pending + chunk;
+    this.pending = "";
+    if (value.endsWith("\x1b") || value.endsWith("\x1b[")) {
+      const pendingLength = value.endsWith("\x1b[") ? 2 : 1;
+      this.pending = value.slice(-pendingLength);
+      const complete = value.slice(0, -pendingLength);
+      return complete ? actionsForInput(complete) : [];
+    }
+    return actionsForInput(value).filter((action) => action !== "none");
+  }
+
+  flush(): DashboardAction[] {
+    if (!this.pending) return [];
+    const value = this.pending;
+    this.pending = "";
+    return actionsForInput(value).filter((action) => action !== "none");
+  }
+}

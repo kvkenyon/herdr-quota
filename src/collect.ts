@@ -13,7 +13,7 @@ export interface CollectorOptions {
   executable?: string;
   timeoutMs?: number;
   spawnProcess?: typeof spawn;
-  onChild?: (child: ChildProcess | undefined) => void;
+  onChild?: (child: ChildProcess, active: boolean) => void;
 }
 
 export function localQuotaAxiExecutable(): string {
@@ -44,13 +44,13 @@ export async function collectQuota(
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
     });
-    options.onChild?.(child);
+    options.onChild?.(child, true);
 
     const finish = (error?: unknown, report?: QuotaReport) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      options.onChild?.(undefined);
+      options.onChild?.(child, false);
       if (error) reject(new Error(sanitizeProcessError(error)));
       else if (report) resolvePromise(report);
       else reject(new Error("Quota refresh failed"));

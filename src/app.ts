@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { collectQuota } from "./collect.js";
-import { actionsForInput } from "./keys.js";
+import { TerminalInputParser } from "./keys.js";
 import { renderDashboard } from "./render.js";
 import { sanitizeProcessError } from "./sanitize.js";
 import type { DashboardState } from "./types.js";
@@ -8,9 +8,30 @@ import type { DashboardState } from "./types.js";
 const ALT_ENTER = "\x1b[?1049h\x1b[?25l";
 const ALT_EXIT = "\x1b[?25h\x1b[?1049l\x1b[0m";
 
+export class ChildProcessTracker {
+  private readonly active = new Set<ChildProcess>();
+
+  update(child: ChildProcess, active: boolean) {
+    if (active) this.active.add(child);
+    else this.active.delete(child);
+  }
+
+  terminateAll() {
+    for (const child of this.active) {
+      if (!child.killed) child.kill("SIGTERM");
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null)
+          child.kill("SIGKILL");
+      }, 250).unref();
+    }
+  }
+}
+
 export class DashboardApp {
   private state: DashboardState = { loading: true, scroll: 0 };
-  private child?: ChildProcess;
+  private readonly children = new ChildProcessTracker();
+  private readonly inputParser = new TerminalInputParser();
+  private inputTimer?: NodeJS.Timeout;
   private closed = false;
   private refreshSequence = 0;
   private ageTimer?: NodeJS.Timeout;
@@ -41,7 +62,16 @@ export class DashboardApp {
   };
 
   private readonly onInput = (input: Buffer) => {
-    for (const action of actionsForInput(input)) {
+    if (this.inputTimer) clearTimeout(this.inputTimer);
+    this.handleActions(this.inputParser.push(input));
+    this.inputTimer = setTimeout(() => {
+      this.inputTimer = undefined;
+      this.handleActions(this.inputParser.flush());
+    }, 30);
+  };
+
+  private handleActions(actions: ReturnType<TerminalInputParser["push"]>) {
+    for (const action of actions) {
       if (action === "quit") {
         this.close();
         return;
@@ -54,17 +84,24 @@ export class DashboardApp {
         this.render();
       }
     }
-  };
+  }
+
+  private terminateChildren() {
+    this.children.terminateAll();
+  }
 
   private async refresh(): Promise<void> {
     const sequence = ++this.refreshSequence;
+    this.terminateChildren();
     this.state.loading = true;
     this.state.error = undefined;
     this.state.lastAttemptAt = new Date();
     this.render();
     try {
       const report = await collectQuota({
-        onChild: (child) => (this.child = child),
+        onChild: (child, active) => {
+          this.children.update(child, active);
+        },
       });
       if (this.closed || sequence !== this.refreshSequence) return;
       this.state.report = report;
@@ -86,14 +123,8 @@ export class DashboardApp {
     this.closed = true;
     this.refreshSequence++;
     if (this.ageTimer) clearInterval(this.ageTimer);
-    if (this.child && !this.child.killed) {
-      const child = this.child;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null)
-          child.kill("SIGKILL");
-      }, 250).unref();
-    }
+    if (this.inputTimer) clearTimeout(this.inputTimer);
+    this.terminateChildren();
     process.stdin.off("data", this.onInput);
     process.stdout.off("resize", this.render);
     if (process.stdin.isTTY) {
