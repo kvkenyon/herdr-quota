@@ -13,8 +13,9 @@ Inspected 2026-08-18 against `quota-axi` 0.1.29 at commit [`b8b1a2c`](https://gi
 
 - Runtime dependency: `quota-axi@~0.1.29`, resolved by the lockfile. The tilde range accepts compatible 0.1.x patch fixes and prevents an automatic minor-contract jump.
 - Accepted response: top-level schema version 5 with an ISO `generatedAt` and provider array.
+- The refresh is scoped with `--provider claude,codex,cursor,kimi`, and adaptation drops any other provider (Grok, GitHub Copilot, future IDs) even when one is returned. Only an entry whose provider ID cannot be read at all is kept as a visible error card.
 - Provider adaptation is independent. A malformed provider becomes an error card while valid siblings continue rendering.
-- Unknown fields are ignored; unknown provider IDs are preserved and receive the generic ASCII mark.
+- Unknown fields are ignored. Unknown window and tier IDs inside an allowed provider are preserved with quota-axi's own label (for example a future Kimi `limit:<n>`), never reclassified.
 - Unknown percentages, resets, pace, or spend stay absent and render as `--` or `unknown`. They are never coerced to zero.
 - A top-level schema-version change fails the refresh while preserving the previous in-memory reading. Updating that boundary requires fixtures, adapter tests, this table, and a dependency-range review.
 

@@ -1,0 +1,120 @@
+{
+  "generatedAt": "2026-08-18T17:58:30.000Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "claude",
+      "label": "Claude",
+      "windows": [
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 53,
+          "resetsAt": "2026-08-20T03:00:00.000Z",
+          "windowSeconds": 604800,
+          "pace": { "status": "behind", "burnMultiple": 0.585 }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 53,
+            "boundedBy": ["seven_day"],
+            "limitingWindowIds": ["seven_day"],
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false }
+    },
+    {
+      "provider": "copilot",
+      "label": "GitHub Copilot",
+      "source": "unavailable",
+      "windows": [],
+      "quotaSemantics": { "status": "unknown", "effectiveAvailability": [] },
+      "state": {
+        "status": "auth_required",
+        "stale": false,
+        "error": "GitHub Copilot sign-in required"
+      }
+    },
+    {
+      "provider": "grok",
+      "label": "Grok",
+      "source": "unavailable",
+      "windows": [],
+      "quotaSemantics": { "status": "unknown", "effectiveAvailability": [] },
+      "state": {
+        "status": "auth_required",
+        "stale": false,
+        "error": "Grok sign-in required",
+        "authStatus": "unusable"
+      }
+    },
+    {
+      "provider": "future-lab",
+      "label": "Future Lab",
+      "source": "api",
+      "windows": [
+        {
+          "id": "monthly",
+          "label": "month",
+          "kind": "monthly",
+          "percentRemaining": 73,
+          "resetsAt": "2026-09-01T00:00:00.000Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 73,
+            "boundedBy": ["monthly"],
+            "limitingWindowIds": ["monthly"],
+            "runway": { "status": "through_reset" }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false }
+    },
+    {
+      "provider": "kimi",
+      "label": "Kimi",
+      "windows": [
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 100,
+          "resetsAt": "2026-08-21T14:00:00.000Z",
+          "windowSeconds": 604800,
+          "pace": { "status": "behind", "burnMultiple": 0 }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 100,
+            "boundedBy": ["weekly"],
+            "limitingWindowIds": ["weekly"],
+            "runway": { "status": "through_reset" }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false }
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "generatedAt": "2026-08-18T17:58:30.000Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "codex",
+      "label": "Codex",
+      "source": "oauth",
+      "plan": "pro",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "5h",
+          "kind": "session",
+          "percentUsed": 12,
+          "percentRemaining": 88,
+          "resetsAt": "2026-08-18T22:00:00.000Z",
+          "windowSeconds": 18000,
+          "pace": { "status": "behind", "burnMultiple": 0.4 }
+        },
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentUsed": 21,
+          "percentRemaining": 79,
+          "resetsAt": "2026-08-19T17:35:00.000Z",
+          "windowSeconds": 604800,
+          "pace": { "status": "behind", "burnMultiple": 0.2443 }
+        },
+        {
+          "id": "model:codex_bengalfox:7d",
+          "label": "GPT-5.3-Codex-Spark week",
+          "kind": "model",
+          "percentUsed": 0,
+          "percentRemaining": 100,
+          "resetsAt": "2026-08-25T18:00:00.000Z",
+          "windowSeconds": 604800,
+          "pace": { "status": "on_pace", "burnMultiple": 0 }
+        },
+        {
+          "id": "code_review_five_hour",
+          "label": "code review 5h",
+          "kind": "session",
+          "percentUsed": 8,
+          "percentRemaining": 92,
+          "resetsAt": "2026-08-18T20:15:00.000Z",
+          "windowSeconds": 18000,
+          "pace": { "status": "behind", "burnMultiple": 0.2 }
+        },
+        {
+          "id": "code_review_weekly",
+          "label": "code review week",
+          "kind": "weekly",
+          "percentUsed": 36,
+          "percentRemaining": 64,
+          "resetsAt": "2026-08-21T09:00:00.000Z",
+          "windowSeconds": 604800,
+          "pace": {
+            "status": "ahead",
+            "burnMultiple": 1.3,
+            "projectedExhaustedAt": "2026-08-20T15:00:00.000Z"
+          }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 79,
+            "boundedBy": ["five_hour", "weekly"],
+            "limitingWindowIds": ["weekly"],
+            "pace": {
+              "status": "behind",
+              "worstReservePercentPoints": 40.1,
+              "worstReserveWindowId": "weekly"
+            },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-08-18T17:58:28.000Z"
+      }
+    }
+  ]
+}

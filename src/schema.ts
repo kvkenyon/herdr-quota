@@ -6,6 +6,7 @@ import type {
   QuotaWindow,
 } from "./types.js";
 import { stripAnsi } from "./ansi.js";
+import { isAllowedProvider } from "./tiers.js";
 
 const STATUSES = new Set([
   "fresh",
@@ -308,10 +309,17 @@ export function adaptQuotaResponse(value: unknown): QuotaReport {
     throw new Error("Invalid quota-axi schema v5 response");
   }
   const warnings: string[] = [];
+  // The product renders only the marketed providers. An entry whose provider
+  // id cannot even be read still becomes a visible error card rather than
+  // being silently discarded.
+  const accepted = raw.providers.filter((item) => {
+    const id = text(object(item)?.provider);
+    return id === undefined || isAllowedProvider(id);
+  });
   return {
     generatedAt,
     schemaVersion: 5,
-    providers: raw.providers.map((item, index) =>
+    providers: accepted.map((item, index) =>
       adaptProvider(item, index, warnings),
     ),
     adaptationWarnings: warnings,
