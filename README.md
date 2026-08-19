@@ -73,7 +73,7 @@ The plugin delegates provider access to its plugin-local `quota-axi@~0.1.29` exe
 
 - Credentials remain in stores owned by official provider tools.
 - Provider requests go directly from `quota-axi` to first-party endpoints.
-- The normalized response remains in dashboard memory and is not persisted.
+- The normalized response remains in sidebar memory and is not persisted.
 - Raw responses, account identifiers, credentials, and credential paths are never logged.
 - Refreshes have a 12-second process deadline and 2 MiB output limit.
 - Child-process and provider errors are bounded and sanitized; one failed provider does not hide the others.
