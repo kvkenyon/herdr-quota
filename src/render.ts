@@ -67,8 +67,11 @@ function cardHeader(
   provider: ProviderQuota,
   width: number,
   color: boolean,
+  details: readonly string[],
 ): string[] {
   const logo = providerLogo(provider.provider);
+  const logoWidth = Math.max(...logo.map(visibleLength));
+  const detailWidth = Math.max(0, width - logoWidth - 2);
   const tone = providerColor(provider.provider);
   const state = health(provider);
   const stateColor =
@@ -84,12 +87,45 @@ function cardHeader(
     [provider.plan, provider.source].filter(Boolean).join(" | ") ||
     "local provider";
   const badge = colorize(`[${state.label}]`, stateColor, color);
-  const first = `${colorize(logo[0] ?? "", tone, color)}  ${colorize(name, "bold", color)}`;
-  return [
-    pad(first, Math.max(0, width - visibleLength(badge) - 1)) + " " + badge,
-    `${colorize(logo[1] ?? "", tone, color)}  ${truncate(metadata, width - 6)}`,
-    `${colorize(logo[2] ?? "", tone, color)}  `,
-  ];
+  const firstDetail =
+    pad(
+      colorize(
+        truncate(name, detailWidth - visibleLength(badge) - 1),
+        "bold",
+        color,
+      ),
+      Math.max(0, detailWidth - visibleLength(badge) - 1),
+    ) +
+    " " +
+    badge;
+  const content = [firstDetail, metadata, ...details];
+  return logo.map(
+    (row, index) =>
+      `${colorize(row, tone, color)}  ${truncate(content[index] ?? "", detailWidth)}`,
+  );
+}
+
+function projectionSummary(
+  provider: ProviderQuota,
+  width: number,
+  now: Date,
+): string {
+  const runway = primaryEffective(provider)?.runway;
+  if (runway?.projectedExhaustedAt) {
+    const exhaustion = relativeTime(runway.projectedExhaustedAt, now).replace(
+      /^resets in /,
+      "",
+    );
+    const confidence = runway.projectionConfidence;
+    const full = `exhausts in ${exhaustion}${confidence ? ` | confidence ${confidence}` : ""}`;
+    if (full.length <= width) return full;
+    const abbreviatedConfidence =
+      confidence === "established" ? "est." : confidence;
+    return `projection ${exhaustion}${abbreviatedConfidence ? ` | conf ${abbreviatedConfidence}` : ""}`;
+  }
+  return runway?.projectionConfidence
+    ? `projection confidence ${runway.projectionConfidence}`
+    : "";
 }
 
 function windowLine(window: QuotaWindow, width: number, now: Date): string {
@@ -115,7 +151,6 @@ function cardLines(
   color: boolean,
   now: Date,
 ): string[] {
-  const lines = cardHeader(provider, width, color);
   const remaining = effectivePercent(provider);
   const limited = limitingWindow(provider);
   const effective = primaryEffective(provider);
@@ -136,24 +171,16 @@ function cardLines(
         : remaining <= 30
           ? "yellow"
           : "green";
-  lines[2] = `${lines[2]}${colorize(remainingText, primaryTone, color)} | ${pace}`;
-  lines.push(truncate(`  ${limitText} | ${reset}`, width));
+  const logoWidth = Math.max(
+    ...providerLogo(provider.provider).map(visibleLength),
+  );
+  const detailWidth = Math.max(0, width - logoWidth - 2);
+  const lines = cardHeader(provider, width, color, [
+    `${colorize(remainingText, primaryTone, color)} | ${pace}`,
+    `${limitText} | ${reset}`,
+    projectionSummary(provider, detailWidth, now),
+  ]);
 
-  const runway = effective?.runway;
-  if (runway?.projectedExhaustedAt) {
-    const exhaustion = relativeTime(runway.projectedExhaustedAt, now).replace(
-      /^resets in /,
-      "",
-    );
-    const confidence = runway.projectionConfidence
-      ? ` | confidence ${runway.projectionConfidence}`
-      : "";
-    lines.push(
-      truncate(`  projected exhaustion in ${exhaustion}${confidence}`, width),
-    );
-  } else if (runway?.projectionConfidence) {
-    lines.push(`  projection confidence ${runway.projectionConfidence}`);
-  }
   const credits = formatCredits(provider);
   if (credits) lines.push(truncate(`  ${credits}`, width));
 

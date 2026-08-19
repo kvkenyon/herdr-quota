@@ -27,6 +27,12 @@ test("renders the complete wide scan path and all provider labels", async () => 
   assert.match(output, /limited by week/);
   assert.match(output, /pace lasts to reset/);
   assert.match(output, /may run out in 1h 12m/);
+  assert.match(output, /exhausts in 1h 12m \| confidence established/);
+  const projectionLine = output
+    .split("\n")
+    .find((line) => line.includes("exhausts in 1h 12m"));
+  assert.ok(projectionLine);
+  assert.doesNotMatch(projectionLine, />/);
   assert.match(output, /bounds: five_hour \+ seven_day/);
 });
 
@@ -77,11 +83,59 @@ test("stale and unknown data do not render zero percent", async () => {
 
 test("future providers use a tasteful generic cell logo", async () => {
   assert.equal(isFallbackLogo("future-lab"), true);
-  assert.equal(providerLogo("future-lab").length, 3);
+  assert.deepEqual(providerLogo("future-lab"), [
+    "   #   ",
+    "  # #  ",
+    " #   # ",
+    "  # #  ",
+    "   #   ",
+  ]);
   const output = renderPlain(
     { report: await report("extra-provider"), loading: false, scroll: 0 },
     { width: 64, height: 22, now: NOW },
   );
   assert.match(output, /Future Lab/);
-  assert.match(output, / # /);
+  assert.ok(output.includes(" #   # "));
+});
+
+test("known providers have distinct recognizable monochrome silhouettes", () => {
+  assert.deepEqual(providerLogo("claude"), [
+    "#  #  #",
+    " # # # ",
+    "#######",
+    " # # # ",
+    "#  #  #",
+  ]);
+  assert.deepEqual(providerLogo("codex"), [
+    "  ###  ",
+    " ## ## ",
+    "## # ##",
+    " ## ## ",
+    "  ###  ",
+  ]);
+  assert.deepEqual(providerLogo("cursor"), [
+    "#      ",
+    "##     ",
+    "# #    ",
+    "#  #   ",
+    "#####  ",
+  ]);
+  assert.deepEqual(providerLogo("kimi"), [
+    "  ###  ",
+    " ##    ",
+    "##     ",
+    " ##    ",
+    "  ###  ",
+  ]);
+});
+
+test("live rendering color-enhances marks while keeping text labels", async () => {
+  const output = renderDashboard(
+    { report: await report("complete"), loading: false, scroll: 0 },
+    { width: 112, height: 40, now: NOW, color: true },
+  );
+  assert.ok(output.includes("\x1b[38;5;215m#  #  #\x1b[0m"));
+  assert.ok(output.includes("\x1b[38;5;81m  ###  \x1b[0m"));
+  assert.match(stripAnsi(output), /Claude/);
+  assert.match(stripAnsi(output), /OpenAI Codex/);
 });

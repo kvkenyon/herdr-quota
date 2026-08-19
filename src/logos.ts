@@ -1,13 +1,22 @@
-export type PixelLogo = readonly string[];
+export type PixelLogo = readonly [string, string, string, string, string];
 
 const LOGOS: Record<string, PixelLogo> = {
-  claude: ["# #", "###", "# #"],
-  codex: ["###", "#  ", "###"],
-  cursor: ["#  ", "## ", "###"],
-  kimi: [" ##", "#  ", " ##"],
+  // Claude's radial spark, OpenAI's woven rosette, Cursor's pointer, and
+  // Kimi's crescent are deliberately ASCII-only so their silhouettes survive
+  // monochrome terminals and fonts without block or private-use glyphs.
+  claude: ["#  #  #", " # # # ", "#######", " # # # ", "#  #  #"],
+  codex: ["  ###  ", " ## ## ", "## # ##", " ## ## ", "  ###  "],
+  cursor: ["#      ", "##     ", "# #    ", "#  #   ", "#####  "],
+  kimi: ["  ###  ", " ##    ", "##     ", " ##    ", "  ###  "],
 };
 
-const FALLBACK: PixelLogo = [" # ", "# #", " # "];
+const FALLBACK: PixelLogo = [
+  "   #   ",
+  "  # #  ",
+  " #   # ",
+  "  # #  ",
+  "   #   ",
+];
 
 export function providerLogo(provider: string): PixelLogo {
   return LOGOS[provider.toLowerCase()] ?? FALLBACK;
