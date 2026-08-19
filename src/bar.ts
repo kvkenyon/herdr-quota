@@ -3,9 +3,8 @@ const FULL = "█";
 const EIGHTHS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
 
 /**
- * The unspent part of the gauge, drawn as a rule rather than a shaded block:
- * it reads as runway still ahead, and it keeps a spent tier legible as a bare
- * line instead of a slab of texture.
+ * The unfilled part of the gauge, drawn as a rule rather than a shaded block.
+ * It keeps a spent tier legible as a bare line instead of a slab of texture.
  */
 export const BAR_TRACK = "─";
 

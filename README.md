@@ -72,7 +72,7 @@ Each tier draws a small gauge of what is **still left**, so the bar and the perc
 | Gauge  | Meaning                                                      |
 | ------ | ------------------------------------------------------------ |
 | `████` | Exactly full. Nothing of this tier has been spent.           |
-| `██──` | Part spent. The rule is the runway still ahead.              |
+| `██──` | Part spent. The blocks show the allowance still left.        |
 | `▏───` | Nearly gone. Any remaining allowance keeps a visible sliver. |
 | `────` | Exactly empty. This tier is spent.                           |
 | blank  | No reading. Nothing is drawn, so empty is never implied.     |
