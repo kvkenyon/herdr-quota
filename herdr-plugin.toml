@@ -1,0 +1,30 @@
+id = "herdr-quota"
+name = "AI Quota"
+version = "0.1.0"
+min_herdr_version = "0.7.3"
+description = "A session-modal dashboard for local AI subscription-quota windows"
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["npm", "ci"]
+
+[[build]]
+command = ["npm", "run", "build"]
+
+[[panes]]
+id = "dashboard"
+title = "AI Quota"
+placement = "overlay"
+command = ["node", "dist/index.js"]
+
+[[actions]]
+id = "open-dashboard"
+title = "Open AI quota dashboard"
+contexts = ["workspace", "pane"]
+command = ["bash", "bin/open-dashboard.sh"]
+
+[[keys.command]]
+key = "prefix+u"
+type = "plugin_action"
+command = "herdr-quota.open-dashboard"
+description = "open AI quota dashboard"

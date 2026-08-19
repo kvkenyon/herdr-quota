@@ -1,0 +1,10 @@
+node_modules
+dist
+.firecrawl
+.research
+CodexBar
+herdr-agent-usage
+herdr-token-dashboard
+quota-axi
+docs/dashboard-preview.svg
+package-lock.json

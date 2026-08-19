@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-08-18T17:58:30.000Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "claude",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "percentRemaining": 88,
+          "resetsAt": "2026-08-18T21:00:00.000Z"
+        },
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 44,
+          "resetsAt": "2026-08-22T18:00:00.000Z"
+        },
+        {
+          "id": "model:opus",
+          "label": "Opus week",
+          "kind": "model",
+          "percentRemaining": 31,
+          "resetsAt": "2026-08-21T18:00:00.000Z"
+        },
+        {
+          "id": "extra_usage",
+          "label": "extra usage",
+          "kind": "credits",
+          "spentUsd": 8.75,
+          "limitUsd": 25,
+          "resetsAt": "2026-09-01T00:00:00.000Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 44,
+            "boundedBy": ["five_hour", "seven_day"],
+            "limitingWindowIds": ["seven_day"],
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          },
+          {
+            "scope": "model:opus",
+            "status": "known",
+            "effectivePercentRemaining": 31,
+            "boundedBy": ["five_hour", "seven_day", "model:opus"],
+            "limitingWindowIds": ["model:opus"],
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false }
+    }
+  ]
+}

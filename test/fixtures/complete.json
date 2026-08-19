@@ -1,0 +1,204 @@
+{
+  "generatedAt": "2026-08-18T17:58:30.000Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "claude",
+      "label": "Claude",
+      "source": "oauth",
+      "plan": "Max 5x",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "percentRemaining": 78,
+          "resetsAt": "2026-08-18T20:30:00.000Z",
+          "pace": {
+            "status": "behind",
+            "reservePercentPoints": 18.2,
+            "burnMultiple": 0.71
+          }
+        },
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 64,
+          "resetsAt": "2026-08-22T18:00:00.000Z",
+          "pace": {
+            "status": "behind",
+            "reservePercentPoints": 9.4,
+            "burnMultiple": 0.83
+          }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 64,
+            "boundedBy": ["five_hour", "seven_day"],
+            "limitingWindowIds": ["seven_day"],
+            "pace": { "status": "behind", "worstReservePercentPoints": 9.4 },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "credits": { "remaining": 18.5, "unit": "usd" },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-08-18T17:58:29.000Z"
+      }
+    },
+    {
+      "provider": "codex",
+      "label": "OpenAI Codex",
+      "source": "oauth",
+      "plan": "Plus",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "5 hour",
+          "kind": "session",
+          "percentRemaining": 42,
+          "resetsAt": "2026-08-18T20:10:00.000Z",
+          "pace": {
+            "status": "ahead",
+            "projectedExhaustedAt": "2026-08-18T19:12:00.000Z"
+          }
+        },
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 71,
+          "resetsAt": "2026-08-23T15:00:00.000Z",
+          "pace": { "status": "behind" }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 42,
+            "boundedBy": ["five_hour", "weekly"],
+            "limitingWindowIds": ["five_hour"],
+            "pace": {
+              "status": "mixed",
+              "worstReservePercentPoints": -13.1,
+              "worstReserveWindowId": "five_hour"
+            },
+            "runway": {
+              "status": "projected_exhaustion",
+              "usableRunwaySeconds": 4320,
+              "projectedExhaustedAt": "2026-08-18T19:12:00.000Z",
+              "limitingWindowId": "five_hour",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "credits": { "remaining": 31, "unit": "credits" },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-08-18T17:58:28.000Z"
+      }
+    },
+    {
+      "provider": "cursor",
+      "label": "Cursor",
+      "source": "api",
+      "plan": "Pro",
+      "windows": [
+        {
+          "id": "included_usage",
+          "label": "included",
+          "kind": "monthly",
+          "percentRemaining": 83,
+          "resetsAt": "2026-09-01T00:00:00.000Z",
+          "spentUsd": 3.4,
+          "limitUsd": 20,
+          "pace": { "status": "behind" }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 83,
+            "boundedBy": ["included_usage"],
+            "limitingWindowIds": ["included_usage"],
+            "pace": { "status": "behind" },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-08-18T17:58:27.000Z"
+      }
+    },
+    {
+      "provider": "kimi",
+      "label": "Kimi",
+      "source": "api",
+      "plan": "Moderato",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "5 hour",
+          "kind": "session",
+          "percentRemaining": 57,
+          "resetsAt": "2026-08-18T21:05:00.000Z",
+          "pace": { "status": "on_pace" }
+        },
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 69,
+          "resetsAt": "2026-08-24T12:00:00.000Z",
+          "pace": { "status": "behind" }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 57,
+            "boundedBy": ["five_hour", "weekly"],
+            "limitingWindowIds": ["five_hour"],
+            "pace": { "status": "on_pace" },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "early"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-08-18T17:58:26.000Z"
+      }
+    }
+  ]
+}
