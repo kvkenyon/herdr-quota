@@ -28,14 +28,14 @@ test("36-cell sidebar shows every provider tier without scrolling", async () => 
     assert.match(output, new RegExp(label));
   assert.match(output, /Session {5,}98% {1,2}3h · on pace/);
   assert.match(output, /Week {8,}53% 33h · on pace/);
-  assert.match(output, /Fable week {3,}9% 33h · empty ~13h/);
+  assert.match(output, /Fable week {3,}9% 33h · out in 13h/);
   assert.match(output, /Extra usage {2}59% {2}-- · \$207 of \$500/);
   assert.match(output, /Week {8,}79% 23h · on pace/);
   assert.match(output, /Spark week {2}100% {2}7d · on pace/);
   assert.match(output, /Code review {3}-- {2}not reported/);
   assert.match(output, /Included {10}69% 22d · on pace/);
   assert.match(output, /Auto {14}74% 22d · on pace/);
-  assert.match(output, /3rd-party models {2}49% 22d · ahead/);
+  assert.match(output, /3rd-party models {2}49% 22d · out 9d/);
   assert.match(output, /Week {8,}100% {2}2d · on pace/);
   assert.match(output, /Session {5}100% 57m · on pace/);
   assert.match(output, /^r refresh · q\/esc close$/m);
@@ -123,8 +123,8 @@ test("color emphasizes risk while text keeps the meaning", async () => {
     { width: 36, height: 23, now: NOW, color: true },
   );
   assert.ok(output.includes("\x1b[38;5;203m  9%\x1b[0m"));
-  assert.ok(output.includes("\x1b[38;5;203mempty ~13h\x1b[0m"));
-  assert.ok(output.includes("\x1b[38;5;220mahead\x1b[0m"));
+  assert.ok(output.includes("\x1b[38;5;203mout in 13h\x1b[0m"));
+  assert.ok(output.includes("\x1b[38;5;220mout 9d\x1b[0m"));
   assert.ok(output.includes("\x1b[1mClaude\x1b[0m"));
-  assert.match(stripAnsi(output), /Fable week {3,}9% 33h · empty ~13h/);
+  assert.match(stripAnsi(output), /Fable week {3,}9% 33h · out in 13h/);
 });
