@@ -99,10 +99,10 @@ export function paceSummary(provider: ProviderQuota): string {
       ? "may run out before reset"
       : `may run out in ${formatDuration(runway.usableRunwaySeconds)}`;
   }
-  if (runway?.status === "through_reset") return "pace lasts to reset";
+  if (runway?.status === "through_reset") return "on pace";
   const pace = effective?.pace?.status;
-  if (pace === "ahead" || pace === "mixed") return "pace at risk";
-  if (pace === "on_pace" || pace === "behind") return "pace lasts to reset";
+  if (pace === "ahead" || pace === "mixed") return "may run out before reset";
+  if (pace === "on_pace" || pace === "behind") return "on pace";
   return "pace unknown";
 }
 

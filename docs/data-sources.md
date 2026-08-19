@@ -20,4 +20,4 @@ Inspected 2026-08-18 against `quota-axi` 0.1.29 at commit [`b8b1a2c`](https://gi
 
 ## Security boundary
 
-Do not add credential parsing, cookie import, token refresh, or vendor response persistence to this plugin. When a provider changes, update or contribute to `quota-axi` first, then adapt its published normalized contract here. Error text shown by the dashboard must remain allow-listed or sanitized; never forward response bodies, authorization headers, local account identifiers, or credential paths.
+Do not add credential parsing, cookie import, token refresh, or vendor response persistence to this plugin. When a provider changes, update or contribute to `quota-axi` first, then adapt its published normalized contract here. Error text shown by the sidebar must remain allow-listed or sanitized; never forward response bodies, authorization headers, local account identifiers, or credential paths.

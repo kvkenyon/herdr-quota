@@ -1,47 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="768" viewBox="0 0 1180 768">
-  <rect width="1180" height="100%" rx="14" fill="#0d1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="340" height="462" viewBox="0 0 340 462">
+  <rect width="340" height="100%" rx="14" fill="#0d1117"/>
   <circle cx="24" cy="18" r="5" fill="#ff5f56"/><circle cx="42" cy="18" r="5" fill="#ffbd2e"/><circle cx="60" cy="18" r="5" fill="#27c93f"/>
   <g fill="#e6edf3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">
-    <text x="24" y="42" xml:space="preserve">AI SUBSCRIPTION QUOTA                                                                             updated 1m ago</text>
-    <text x="24" y="60" xml:space="preserve">----------------------------------------------------------------------------------------------------------------</text>
-    <text x="24" y="78" xml:space="preserve">#  #  #  Claude                              [HEALTHY] |   ###    OpenAI Codex                        [HEALTHY]</text>
-    <text x="24" y="96" xml:space="preserve"> # # #   Max 5x | oauth                                |  ## ##   Plus | oauth                                 </text>
-    <text x="24" y="114" xml:space="preserve">#######  64% remaining | pace lasts to reset           | ## # ##  42% remaining | may run out in 1h 12m        </text>
-    <text x="24" y="132" xml:space="preserve"> # # #   limited by week | resets in 4d 0h             |  ## ##   limited by 5 hour | resets in 2h 10m         </text>
-    <text x="24" y="150" xml:space="preserve">#  #  #  projection confidence established             |   ###    exhausts in 1h 12m | confidence established  </text>
-    <text x="24" y="168" xml:space="preserve">  $18.50 credits                                       |   31 credits                                          </text>
-    <text x="24" y="186" xml:space="preserve">  WINDOWS                                              |   WINDOWS                                             </text>
-    <text x="24" y="204" xml:space="preserve">  session          [#########---]  78% | resets in 2h&gt; |   5 hour           [#####-------]  42% | resets in 2h&gt;</text>
-    <text x="24" y="222" xml:space="preserve">  week             [########----]  64% | resets in 4d&gt; |   week             [#########---]  71% | resets in 4d&gt;</text>
-    <text x="24" y="240" xml:space="preserve">  bounds: five_hour + seven_day                        |   bounds: five_hour + weekly                          </text>
+    <text x="24" y="42" xml:space="preserve">AI quota                      1m ago</text>
+    <text x="24" y="60" xml:space="preserve">\|/ Claude OK                       </text>
+    <text x="24" y="78" xml:space="preserve">-*- 64% left · in 4d 0h             </text>
+    <text x="24" y="96" xml:space="preserve">    on pace                         </text>
+    <text x="24" y="114" xml:space="preserve"></text>
+    <text x="24" y="132" xml:space="preserve">o-o OpenAI Codex OK                 </text>
+    <text x="24" y="150" xml:space="preserve">-o- 42% left · in 2h 10m            </text>
+    <text x="24" y="168" xml:space="preserve">    may run out in 1h 12m           </text>
+    <text x="24" y="186" xml:space="preserve"></text>
+    <text x="24" y="204" xml:space="preserve">|\  Cursor OK                       </text>
+    <text x="24" y="222" xml:space="preserve">|_&gt; 83% left · in 13d 6h            </text>
+    <text x="24" y="240" xml:space="preserve">    on pace                         </text>
     <text x="24" y="258" xml:space="preserve"></text>
-    <text x="24" y="276" xml:space="preserve">#        Cursor                              [HEALTHY] |   ###    Kimi                                [HEALTHY]</text>
-    <text x="24" y="294" xml:space="preserve">##       Pro | api                                     |  ##      Moderato | api                               </text>
-    <text x="24" y="312" xml:space="preserve"># #      83% remaining | pace lasts to reset           | ##       57% remaining | pace lasts to reset          </text>
-    <text x="24" y="330" xml:space="preserve">#  #     limited by included | resets in 13d 6h        |  ##      limited by 5 hour | resets in 3h 5m          </text>
-    <text x="24" y="348" xml:space="preserve">#####    projection confidence established             |   ###    projection confidence early                  </text>
-    <text x="24" y="366" xml:space="preserve">  WINDOWS                                              |   WINDOWS                                             </text>
-    <text x="24" y="384" xml:space="preserve">  included         [##########--]  83% | resets in 13&gt; |   5 hour           [#######-----]  57% | resets in 3h&gt;</text>
-    <text x="24" y="402" xml:space="preserve">    spend $3.40 / $20.00                               |   week             [########----]  69% | resets in 5d&gt;</text>
-    <text x="24" y="420" xml:space="preserve">  bounds: included_usage                               |   bounds: five_hour + weekly                          </text>
-    <text x="24" y="438" xml:space="preserve"></text>
-    <text x="24" y="456" xml:space="preserve"></text>
-    <text x="24" y="474" xml:space="preserve"></text>
-    <text x="24" y="492" xml:space="preserve"></text>
-    <text x="24" y="510" xml:space="preserve"></text>
-    <text x="24" y="528" xml:space="preserve"></text>
-    <text x="24" y="546" xml:space="preserve"></text>
-    <text x="24" y="564" xml:space="preserve"></text>
-    <text x="24" y="582" xml:space="preserve"></text>
-    <text x="24" y="600" xml:space="preserve"></text>
-    <text x="24" y="618" xml:space="preserve"></text>
-    <text x="24" y="636" xml:space="preserve"></text>
-    <text x="24" y="654" xml:space="preserve"></text>
-    <text x="24" y="672" xml:space="preserve"></text>
-    <text x="24" y="690" xml:space="preserve"></text>
-    <text x="24" y="708" xml:space="preserve"></text>
-    <text x="24" y="726" xml:space="preserve">----------------------------------------------------------------------------------------------------------------</text>
-    <text x="24" y="744" xml:space="preserve">r refresh  |  j/k scroll  |  q/esc close</text>
+    <text x="24" y="276" xml:space="preserve">(_  Kimi OK                         </text>
+    <text x="24" y="294" xml:space="preserve"> (_ 57% left · in 3h 5m             </text>
+    <text x="24" y="312" xml:space="preserve">    on pace                         </text>
+    <text x="24" y="330" xml:space="preserve"></text>
+    <text x="24" y="348" xml:space="preserve"></text>
+    <text x="24" y="366" xml:space="preserve"></text>
+    <text x="24" y="384" xml:space="preserve"></text>
+    <text x="24" y="402" xml:space="preserve"></text>
+    <text x="24" y="420" xml:space="preserve"></text>
+    <text x="24" y="438" xml:space="preserve">r refresh · q/esc close</text>
   </g>
 </svg>
