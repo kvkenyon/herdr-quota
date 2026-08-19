@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-08-18T17:58:30.000Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "claude",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "percentRemaining": 55,
+          "resetsAt": "2026-08-18T20:00:00.000Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 55,
+            "boundedBy": ["five_hour"],
+            "limitingWindowIds": ["five_hour"]
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false }
+    },
+    {
+      "provider": "cursor",
+      "windows": [],
+      "quotaSemantics": { "status": "unknown", "effectiveAvailability": [] },
+      "state": {
+        "status": "auth_required",
+        "stale": false,
+        "error": "credentials_missing",
+        "authStatus": "unusable"
+      }
+    },
+    {
+      "provider": "kimi",
+      "windows": [],
+      "quotaSemantics": { "status": "unknown", "effectiveAvailability": [] },
+      "state": {
+        "status": "unavailable",
+        "stale": false,
+        "error": "network_unavailable"
+      }
+    }
+  ]
+}

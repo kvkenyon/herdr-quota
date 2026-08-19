@@ -1,0 +1,33 @@
+{
+  "name": "herdr-quota",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Herdr popup dashboard for local AI subscription quota",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "node scripts/clean.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint src scripts test",
+    "preview": "npm run build --silent && node dist/preview.js",
+    "preview:svg": "npm run build --silent && node scripts/capture-preview.mjs",
+    "test": "npm run build --silent && node --test test/*.test.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run preview:svg"
+  },
+  "dependencies": {
+    "quota-axi": "~0.1.29"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@types/node": "^22.19.0",
+    "eslint": "^9.34.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.40.0"
+  }
+}

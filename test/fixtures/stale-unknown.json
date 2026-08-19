@@ -1,0 +1,59 @@
+{
+  "generatedAt": "2026-08-18T12:00:00.000Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "codex",
+      "source": "cache",
+      "windows": [
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 24,
+          "resetsAt": "2026-08-20T12:00:00.000Z",
+          "pace": { "status": "unknown" }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "partial",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "unknown",
+            "boundedBy": ["weekly"],
+            "pace": { "status": "unknown", "unknownWindowIds": ["weekly"] },
+            "runway": {
+              "status": "unknown",
+              "unmeasurableWindowIds": ["weekly"]
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "stale",
+        "stale": true,
+        "refreshedAt": "2026-08-18T12:00:00.000Z",
+        "error": "request_timeout"
+      }
+    },
+    {
+      "provider": "cursor",
+      "windows": [
+        { "id": "included_usage", "label": "included", "kind": "monthly" }
+      ],
+      "quotaSemantics": {
+        "status": "unknown",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "unknown",
+            "boundedBy": ["included_usage"],
+            "runway": { "status": "unknown" }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false }
+    }
+  ]
+}

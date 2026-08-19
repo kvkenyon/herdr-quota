@@ -1,0 +1,137 @@
+import type { ChildProcess } from "node:child_process";
+import { collectQuota } from "./collect.js";
+import { TerminalInputParser } from "./keys.js";
+import { renderDashboard } from "./render.js";
+import { sanitizeProcessError } from "./sanitize.js";
+import type { DashboardState } from "./types.js";
+
+const ALT_ENTER = "\x1b[?1049h\x1b[?25l";
+const ALT_EXIT = "\x1b[?25h\x1b[?1049l\x1b[0m";
+
+export class ChildProcessTracker {
+  private readonly active = new Set<ChildProcess>();
+
+  update(child: ChildProcess, active: boolean) {
+    if (active) this.active.add(child);
+    else this.active.delete(child);
+  }
+
+  terminateAll() {
+    for (const child of this.active) {
+      if (!child.killed) child.kill("SIGTERM");
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null)
+          child.kill("SIGKILL");
+      }, 250).unref();
+    }
+  }
+}
+
+export class DashboardApp {
+  private state: DashboardState = { loading: true, scroll: 0 };
+  private readonly children = new ChildProcessTracker();
+  private readonly inputParser = new TerminalInputParser();
+  private inputTimer?: NodeJS.Timeout;
+  private closed = false;
+  private refreshSequence = 0;
+  private ageTimer?: NodeJS.Timeout;
+
+  async run(): Promise<void> {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      throw new Error("AI Quota needs an interactive terminal");
+    }
+    process.stdout.write(ALT_ENTER);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on("data", this.onInput);
+    process.stdout.on("resize", this.render);
+    process.once("SIGTERM", this.close);
+    process.once("SIGINT", this.close);
+    this.ageTimer = setInterval(this.render, 30_000);
+    this.render();
+    await this.refresh();
+  }
+
+  private readonly render = () => {
+    if (this.closed) return;
+    const screen = renderDashboard(this.state, {
+      width: process.stdout.columns || 80,
+      height: process.stdout.rows || 24,
+    });
+    process.stdout.write(`\x1b[H${screen}\x1b[J`);
+  };
+
+  private readonly onInput = (input: Buffer) => {
+    if (this.inputTimer) clearTimeout(this.inputTimer);
+    this.handleActions(this.inputParser.push(input));
+    this.inputTimer = setTimeout(() => {
+      this.inputTimer = undefined;
+      this.handleActions(this.inputParser.flush());
+    }, 30);
+  };
+
+  private handleActions(actions: ReturnType<TerminalInputParser["push"]>) {
+    for (const action of actions) {
+      if (action === "quit") {
+        this.close();
+        return;
+      } else if (action === "refresh") void this.refresh();
+      else if (action === "scroll-up") {
+        this.state.scroll = Math.max(0, this.state.scroll - 2);
+        this.render();
+      } else if (action === "scroll-down") {
+        this.state.scroll += 2;
+        this.render();
+      }
+    }
+  }
+
+  private terminateChildren() {
+    this.children.terminateAll();
+  }
+
+  private async refresh(): Promise<void> {
+    const sequence = ++this.refreshSequence;
+    this.terminateChildren();
+    this.state.loading = true;
+    this.state.error = undefined;
+    this.state.lastAttemptAt = new Date();
+    this.render();
+    try {
+      const report = await collectQuota({
+        onChild: (child, active) => {
+          this.children.update(child, active);
+        },
+      });
+      if (this.closed || sequence !== this.refreshSequence) return;
+      this.state.report = report;
+      this.state.error = undefined;
+      this.state.scroll = 0;
+    } catch (error) {
+      if (this.closed || sequence !== this.refreshSequence) return;
+      this.state.error = sanitizeProcessError(error);
+    } finally {
+      if (!this.closed && sequence === this.refreshSequence) {
+        this.state.loading = false;
+        this.render();
+      }
+    }
+  }
+
+  readonly close = () => {
+    if (this.closed) return;
+    this.closed = true;
+    this.refreshSequence++;
+    if (this.ageTimer) clearInterval(this.ageTimer);
+    if (this.inputTimer) clearTimeout(this.inputTimer);
+    this.terminateChildren();
+    process.stdin.off("data", this.onInput);
+    process.stdout.off("resize", this.render);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+    }
+    process.stdout.write(ALT_EXIT);
+    process.exitCode = 0;
+  };
+}
