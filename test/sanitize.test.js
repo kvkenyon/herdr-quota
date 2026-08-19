@@ -19,6 +19,7 @@ test("strips terminal control sequences while preserving readable text", () => {
   const clean = sanitizeProcessError(raw);
 
   assert.equal(clean, "beforeredafter31m");
+  // eslint-disable-next-line no-control-regex -- assertion covers forbidden control bytes
   assert.doesNotMatch(clean, /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
 });
 

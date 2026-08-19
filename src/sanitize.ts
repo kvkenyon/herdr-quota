@@ -11,6 +11,7 @@ const SAFE_CODES: Record<string, string> = {
   quota_unavailable: "Quota unavailable",
 };
 
+/* eslint-disable no-control-regex -- terminal sanitization intentionally matches control bytes */
 const TERMINAL_STRING = new RegExp(
   "\\u001b(?:\\][^\\u0007\\u001b]*(?:\\u0007|\\u001b\\\\)|[PX^_][\\s\\S]*?\\u001b\\\\)",
   "g",
@@ -23,6 +24,7 @@ const TERMINAL_CONTROL = new RegExp(
   "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f]",
   "g",
 );
+/* eslint-enable no-control-regex */
 
 export function friendlyProviderError(code?: string): string {
   if (!code) return "Quota unavailable";
