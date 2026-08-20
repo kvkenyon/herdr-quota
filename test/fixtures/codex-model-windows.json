@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 5,
+  "generatedAt": "2026-08-20T15:00:00.000Z",
+  "providers": [
+    {
+      "provider": "codex",
+      "label": "OpenAI Codex",
+      "source": "oauth",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "percentRemaining": 82,
+          "resetsAt": "2026-08-20T18:00:00.000Z"
+        },
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 61,
+          "resetsAt": "2026-08-24T15:00:00.000Z"
+        },
+        {
+          "id": "model:codex_bengalfox:5h",
+          "label": "GPT-5.3-Codex-Spark session",
+          "kind": "model",
+          "percentRemaining": 98,
+          "resetsAt": "2026-08-20T18:00:00.000Z"
+        },
+        {
+          "id": "model:codex_bengalfox:7d",
+          "label": "GPT-5.3-Codex-Spark weekly",
+          "kind": "model",
+          "percentRemaining": 92,
+          "resetsAt": "2026-08-24T15:00:00.000Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 61,
+            "boundedBy": ["five_hour", "weekly"],
+            "limitingWindowIds": ["weekly"],
+            "pace": {
+              "status": "on_pace",
+              "worstReserveWindowId": "weekly"
+            },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          },
+          {
+            "scope": "model:codex_bengalfox",
+            "status": "known",
+            "effectivePercentRemaining": 61,
+            "boundedBy": [
+              "five_hour",
+              "weekly",
+              "model:codex_bengalfox:5h",
+              "model:codex_bengalfox:7d"
+            ],
+            "limitingWindowIds": ["weekly"],
+            "pace": {
+              "status": "on_pace",
+              "worstReserveWindowId": "weekly"
+            },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-08-20T15:00:00.000Z"
+      }
+    }
+  ]
+}

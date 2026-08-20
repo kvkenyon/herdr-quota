@@ -22,3 +22,7 @@ Inspected 2026-08-18 against `quota-axi` 0.1.29 at commit [`b8b1a2c`](https://gi
 ## Security boundary
 
 Do not add credential parsing, cookie import, token refresh, or vendor response persistence to this plugin. When a provider changes, update or contribute to `quota-axi` first, then adapt its published normalized contract here. Error text shown by the sidebar must remain allow-listed or sanitized; never forward response bodies, authorization headers, local account identifiers, or credential paths.
+
+## Collection and freshness
+
+The pane invokes only the plugin-local executable described above. It refreshes once on open and again five minutes after a successful attempt completes; collectors never overlap. A whole-collector failure preserves the last in-memory report and retries after 10, 20, then at most 30 minutes. Manual refresh preempts the active child and resets scheduling. Provider-level stale, auth, rate-limit, and error states remain quota-axi-owned data states rather than being converted into collection failures or local estimates. Closing the pane cancels pending refresh timers and terminates an active child.

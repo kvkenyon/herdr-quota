@@ -79,7 +79,10 @@ function claudeTierLabel(window: QuotaWindow): TierLabel {
 }
 
 function codexModelName(window: QuotaWindow): string {
-  const base = window.label.replace(/\s+(?:week|5h|5 hour)$/i, "");
+  const base = window.label.replace(
+    /\s+(?:sessions?|weekly|week|5h|5 hours?|7d|7 days?)$/i,
+    "",
+  );
   const stripped = base.replace(/^GPT-[\d.]+-Codex-?/i, "");
   return stripped || base;
 }
