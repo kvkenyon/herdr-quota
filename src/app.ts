@@ -58,10 +58,11 @@ export class DashboardApp {
         this.state.lastAttemptAt = new Date();
         this.render();
       },
-      onSuccess: async (report) => {
+      onSuccess: async (report, isCurrent) => {
         this.state.report = report;
         this.state.failure = undefined;
-        this.state.history = await this.history.record(report);
+        const history = await this.history.record(report);
+        if (isCurrent()) this.state.history = history;
       },
       onFailure: (error) => {
         this.state.failure = safeCollectorFailure(error);

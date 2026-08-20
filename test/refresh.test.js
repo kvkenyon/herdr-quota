@@ -265,3 +265,44 @@ test("successful async post-collection work completes before scheduling", async 
   assert.equal(timers.current().delayMs, NORMAL_REFRESH_MS);
   scheduler.close();
 });
+
+test("manual refresh serializes history commits and rejects a superseded view", async () => {
+  const timers = fakeTimers();
+  const firstHistory = deferred();
+  const attempts = [];
+  const persisted = [];
+  const published = [];
+  const scheduler = new RefreshScheduler({
+    collect() {
+      const attempt = deferred();
+      attempts.push(attempt);
+      return attempt.promise;
+    },
+    onStart() {},
+    async onSuccess(value, isCurrent) {
+      if (value === "older") await firstHistory.promise;
+      persisted.push(value);
+      if (isCurrent()) published.push(value);
+    },
+    onFailure() {},
+    onSettled() {},
+    cancelActive() {},
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+
+  const older = scheduler.start();
+  attempts[0].resolve("older");
+  await flush();
+  const newer = scheduler.manual();
+  attempts[1].resolve("newer");
+  await flush();
+
+  assert.deepEqual(persisted, []);
+  assert.deepEqual(published, []);
+  firstHistory.resolve();
+  await Promise.all([older, newer]);
+  assert.deepEqual(persisted, ["older", "newer"]);
+  assert.deepEqual(published, ["newer"]);
+  scheduler.close();
+});
