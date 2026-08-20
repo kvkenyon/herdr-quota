@@ -12,7 +12,20 @@ const report = adaptQuotaResponse(
 );
 process.stdout.write(
   `${renderPlain(
-    { report, loading: false, scroll: 0 },
+    {
+      report,
+      history: {
+        availability: "ready",
+        evidence: {
+          kind: "pace_worse",
+          provider: "Claude",
+          scope: "Fable",
+          limit: "Fable",
+        },
+      },
+      loading: false,
+      scroll: 0,
+    },
     { width, height, now: new Date("2026-08-18T18:00:00.000Z") },
   )}\n`,
 );

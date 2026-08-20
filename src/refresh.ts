@@ -6,7 +6,7 @@ type Timer = ReturnType<typeof setTimeout>;
 export interface RefreshSchedulerOptions<T> {
   collect: () => Promise<T>;
   onStart: () => void;
-  onSuccess: (value: T) => void;
+  onSuccess: (value: T) => void | Promise<void>;
   onFailure: (error: unknown) => void;
   onScheduled?: (delayMs: number, afterFailure: boolean) => void;
   onSettled: () => void;
@@ -77,7 +77,7 @@ export class RefreshScheduler<T> {
     try {
       const value = await this.options.collect();
       if (this.closed || sequence !== this.sequence) return;
-      this.options.onSuccess(value);
+      await this.options.onSuccess(value);
       this.failures = 0;
       succeeded = true;
     } catch (error) {

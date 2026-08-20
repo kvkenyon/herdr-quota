@@ -1,0 +1,182 @@
+{
+  "provider": "Claude",
+  "scope": "Fable",
+  "limit": "Fable",
+  "resetAt": "2026-08-21T00:00:00.000Z",
+  "timelines": {
+    "paceWorsening": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 64,
+        "pace": "on_pace",
+        "reserve": 12,
+        "runway": "through_reset"
+      },
+      {
+        "at": "2026-08-20T12:05:00.000Z",
+        "remaining": 59,
+        "pace": "ahead",
+        "reserve": -4,
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-20T20:00:00.000Z"
+      }
+    ],
+    "paceImproving": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 48,
+        "pace": "ahead",
+        "reserve": -13,
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-20T20:00:00.000Z"
+      },
+      {
+        "at": "2026-08-20T12:05:00.000Z",
+        "remaining": 47,
+        "pace": "on_pace",
+        "reserve": 3,
+        "runway": "through_reset"
+      }
+    ],
+    "ordinary": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 62,
+        "pace": "on_pace",
+        "reserve": 8,
+        "runway": "through_reset"
+      },
+      {
+        "at": "2026-08-20T12:15:00.000Z",
+        "remaining": 60,
+        "pace": "on_pace",
+        "reserve": 7,
+        "runway": "through_reset"
+      },
+      {
+        "at": "2026-08-20T12:30:00.000Z",
+        "remaining": 58,
+        "pace": "on_pace",
+        "reserve": 6,
+        "runway": "through_reset"
+      }
+    ],
+    "meaningfulDrop": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 61,
+        "pace": "on_pace",
+        "runway": "through_reset"
+      },
+      {
+        "at": "2026-08-20T12:05:00.000Z",
+        "remaining": 44,
+        "pace": "on_pace",
+        "runway": "through_reset"
+      }
+    ],
+    "reset": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 7,
+        "pace": "ahead",
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-20T14:00:00.000Z",
+        "resetAt": "2026-08-20T13:00:00.000Z"
+      },
+      {
+        "at": "2026-08-20T13:05:00.000Z",
+        "remaining": 100,
+        "pace": "on_pace",
+        "runway": "through_reset",
+        "resetAt": "2026-08-21T13:00:00.000Z"
+      },
+      {
+        "at": "2026-08-20T13:20:00.000Z",
+        "remaining": 98,
+        "pace": "on_pace",
+        "runway": "through_reset",
+        "resetAt": "2026-08-21T13:00:00.000Z"
+      }
+    ],
+    "projectionEarlier": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 46,
+        "pace": "ahead",
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-21T02:00:00.000Z"
+      },
+      {
+        "at": "2026-08-20T12:05:00.000Z",
+        "remaining": 44,
+        "pace": "ahead",
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-20T21:00:00.000Z"
+      }
+    ],
+    "projectionLater": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 46,
+        "pace": "ahead",
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-20T21:00:00.000Z"
+      },
+      {
+        "at": "2026-08-20T12:05:00.000Z",
+        "remaining": 45,
+        "pace": "ahead",
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-21T02:00:00.000Z"
+      }
+    ],
+    "providerGap": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 70,
+        "pace": "on_pace",
+        "runway": "through_reset"
+      },
+      {
+        "at": "2026-08-20T12:05:00.000Z",
+        "present": false
+      },
+      {
+        "at": "2026-08-20T12:10:00.000Z",
+        "remaining": 40,
+        "pace": "ahead",
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-20T18:00:00.000Z"
+      }
+    ],
+    "authGap": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 70,
+        "pace": "on_pace",
+        "runway": "through_reset"
+      },
+      {
+        "at": "2026-08-20T12:05:00.000Z",
+        "authEligible": false
+      },
+      {
+        "at": "2026-08-20T12:10:00.000Z",
+        "remaining": 40,
+        "pace": "ahead",
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-20T18:00:00.000Z"
+      }
+    ],
+    "firstRun": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 50,
+        "pace": "ahead",
+        "runway": "projected_exhaustion",
+        "projection": "2026-08-20T18:00:00.000Z"
+      }
+    ]
+  }
+}

@@ -233,3 +233,35 @@ test("close clears the timer, cancels children, and ignores late results", async
   scheduler.close();
   assert.equal(cancellations, 1);
 });
+
+test("successful async post-collection work completes before scheduling", async () => {
+  const timers = fakeTimers();
+  const persisted = deferred();
+  const events = [];
+  const scheduler = new RefreshScheduler({
+    collect: async () => "fresh",
+    async onSuccess() {
+      events.push("history-start");
+      await persisted.promise;
+      events.push("history-done");
+    },
+    onStart() {},
+    onFailure() {},
+    onSettled() {
+      events.push("settled");
+    },
+    cancelActive() {},
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+
+  const running = scheduler.start();
+  await flush();
+  assert.deepEqual(events, ["history-start"]);
+  assert.equal(timers.current(), undefined);
+  persisted.resolve();
+  await running;
+  assert.deepEqual(events, ["history-start", "history-done", "settled"]);
+  assert.equal(timers.current().delayMs, NORMAL_REFRESH_MS);
+  scheduler.close();
+});

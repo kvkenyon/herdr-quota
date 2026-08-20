@@ -513,3 +513,185 @@ test("expired exhaustion projections fall back to ahead", async () => {
   assert.match(output, /Fable week {2}▎─── {3}9% 33h · ahead/);
   assert.doesNotMatch(output, /out(?: in)? now/);
 });
+
+test("history evidence has exact responsive hierarchy at product pane sizes", async () => {
+  const value = await report("complete");
+  const history = {
+    availability: "ready",
+    evidence: {
+      kind: "pace_worse",
+      provider: "Claude",
+      scope: "Fable",
+      limit: "Fable",
+    },
+  };
+  const at = (width, height) =>
+    renderPlain(
+      { report: value, history, loading: false, scroll: 0 },
+      { width, height, now: NOW },
+    )
+      .split("\n")
+      .map((line) => line.trimEnd());
+
+  assert.deepEqual(at(36, 23), [
+    "AI Quota                      1m ago",
+    "! Claude Fable · out 13h",
+    "↓ Claude Fable · pace worse",
+    "Claude",
+    " Session     ███▉  98%  3h · on pace",
+    " Week        ██──  53% 33h · on pace",
+    " Fable week  ▎───   9% 33h · out 13h",
+    " Extra usage ██▎─  59% $207 of $500",
+    "",
+    "OpenAI Codex",
+    " Week        ███▏  79% 23h · on pace",
+    " Spark week  ████ 100%  7d · on pace",
+    " Code review        -- not reported",
+    "",
+    "Cursor",
+    " Included    ██▊─  69% 22d · on pace",
+    " Auto        ██▉─  74% 22d · on pace",
+    " 3rd-party   █▉──  49% 22d · out 9d",
+    "",
+    "Kimi",
+    " Week        ████ 100%  2d · on pace",
+    " Session     ████ 100% 57m · on pace",
+    "j/k scroll · PgUp/PgDn · r · q/esc",
+  ]);
+  assert.deepEqual(at(24, 12), [
+    "Quota             1m ago",
+    "! Claude Fable · out 13h",
+    "↓ Claude Fable pace",
+    "Claude",
+    " Session      98%  3h",
+    " Week         53% 33h",
+    " Fable week    9% 33h",
+    " Extra usage  59%  --",
+    "OpenAI Codex",
+    " Week         79% 23h",
+    "Rows 1–7 of 16",
+    "j/k PgUp/PgDn r/q",
+  ]);
+  assert.deepEqual(at(20, 8), [
+    "Quota         1m ago",
+    "! Claude · out 13h",
+    "Claude",
+    " Session     98%  3h",
+    " Week        53% 33h",
+    " Fable week   9% 33h",
+    "Rows 1–4 of 16",
+    "j/k PgUp/PgDn r/q",
+  ]);
+});
+
+test("history keeps every live row reachable at all required widths and heights", async () => {
+  const value = await report("complete");
+  const history = {
+    availability: "ready",
+    evidence: {
+      kind: "remaining_drop",
+      provider: "Claude",
+      scope: "Fable",
+      limit: "Fable",
+      amount: 17,
+    },
+  };
+  for (const width of [20, 24, 36]) {
+    const reference = render(value, { width, height: 40 })
+      .split("\n")
+      .slice(2, -1)
+      .map((line) => line.trimEnd())
+      .filter(Boolean);
+
+    for (const height of [6, 8, 12, 23]) {
+      const state = { report: value, history, loading: false, scroll: 0 };
+      const reached = Array(reference.length).fill(false);
+      while (true) {
+        const metrics = dashboardScrollMetrics(state, height);
+        const lines = renderPlain(state, { width, height, now: NOW })
+          .split("\n")
+          .map((line) => line.trimEnd());
+        assert.equal(lines.length, height, `${width}x${height}`);
+        assert.match(lines[1], /^! /);
+        assert.match(lines.at(-1), /^j\/k/);
+        const historyRows = height >= 10 ? 1 : 0;
+        if (historyRows) assert.match(lines[2], /^↓ /);
+        else assert.doesNotMatch(lines.join("\n"), /17pp/);
+
+        const detailStart = 2 + historyRows;
+        const detailEnd = metrics.overflowing ? -2 : -1;
+        const visible = lines.slice(detailStart, detailEnd).filter(Boolean);
+        assert.deepEqual(
+          visible,
+          reference.slice(
+            metrics.scroll,
+            metrics.scroll + metrics.viewportRows,
+          ),
+          `${width}x${height} at ${metrics.scroll}`,
+        );
+        for (
+          let index = metrics.scroll;
+          index < metrics.scroll + metrics.viewportRows;
+          index++
+        )
+          reached[index] = true;
+        for (const line of lines)
+          assert.ok(line.length <= width, `${width}x${height}: ${line}`);
+
+        if (metrics.scroll === metrics.maxScroll) break;
+        applyDashboardScroll(state, "scroll_down", height);
+      }
+      assert.ok(reached.every(Boolean), `${width}x${height} reachable`);
+    }
+  }
+});
+
+test("history availability notes are finite and collector failures suppress old signals", async () => {
+  const value = await report("complete");
+  for (const availability of [
+    "first_run",
+    "recovered",
+    "clock_skew",
+    "incompatible",
+    "unavailable",
+  ]) {
+    const output = renderPlain(
+      {
+        report: value,
+        history: {
+          availability,
+          raw: "Bearer secret /Users/alice/auth.json",
+        },
+        loading: false,
+        scroll: 0,
+      },
+      { width: 24, height: 12, now: NOW },
+    );
+    assert.match(output, /^~ History/m);
+    assert.doesNotMatch(output, /Bearer|secret|alice|auth\.json/i);
+  }
+
+  const failed = renderPlain(
+    {
+      report: value,
+      history: {
+        availability: "ready",
+        evidence: {
+          kind: "pace_worse",
+          provider: "Claude",
+          scope: "Fable",
+          limit: "Fable",
+        },
+      },
+      failure: {
+        kind: "network_process",
+        retryAt: new Date(NOW.getTime() + 10 * 60_000),
+      },
+      loading: false,
+      scroll: 0,
+    },
+    { width: 36, height: 12, now: NOW },
+  );
+  assert.match(failed, /^Network\/process failed/m);
+  assert.doesNotMatch(failed, /pace worse|^↓ /m);
+});

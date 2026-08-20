@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { collectQuota } from "./collect.js";
 import { safeCollectorFailure } from "./failure.js";
+import { LocalHistory } from "./history.js";
 import { TerminalInputParser, type DashboardAction } from "./keys.js";
 import { RefreshScheduler } from "./refresh.js";
 import {
@@ -40,6 +41,7 @@ export class DashboardApp {
   private inputTimer?: NodeJS.Timeout;
   private closed = false;
   private ageTimer?: NodeJS.Timeout;
+  private readonly history = new LocalHistory();
   private readonly refreshScheduler: RefreshScheduler<QuotaReport>;
 
   constructor() {
@@ -56,9 +58,10 @@ export class DashboardApp {
         this.state.lastAttemptAt = new Date();
         this.render();
       },
-      onSuccess: (report) => {
+      onSuccess: async (report) => {
         this.state.report = report;
         this.state.failure = undefined;
+        this.state.history = await this.history.record(report);
       },
       onFailure: (error) => {
         this.state.failure = safeCollectorFailure(error);

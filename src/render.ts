@@ -17,6 +17,7 @@ import {
 import type {
   CollectorFailureKind,
   DashboardState,
+  HistoryEvidence,
   ProviderQuota,
 } from "./types.js";
 
@@ -229,6 +230,154 @@ function attentionLine(
   );
 }
 
+function historySubject(evidence: HistoryEvidence): string {
+  const detail =
+    evidence.limit ??
+    (evidence.scope === "All models" || evidence.scope === "All products"
+      ? undefined
+      : evidence.scope);
+  return detail ? `${evidence.provider} ${detail}` : evidence.provider;
+}
+
+function historySparkline(values: number[]): string {
+  const cells = "▁▂▃▄▅▆▇█";
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  if (minimum === maximum) return values.map(() => "▄").join("");
+  return values
+    .map(
+      (value) =>
+        cells[
+          Math.min(
+            7,
+            Math.max(
+              0,
+              Math.round(((value - minimum) / (maximum - minimum)) * 7),
+            ),
+          )
+        ],
+    )
+    .join("");
+}
+
+function historyEvidenceCandidates(evidence: HistoryEvidence): string[] {
+  const subject = historySubject(evidence);
+  const provider = evidence.provider;
+  switch (evidence.kind) {
+    case "reset":
+      return [
+        `↻ ${subject} · reset`,
+        `↻ ${subject} reset`,
+        `↻ ${provider} reset`,
+      ];
+    case "remaining_drop": {
+      const amount = `${Math.round(evidence.amount ?? 0)}pp`;
+      return [
+        `↓ ${subject} · ${amount} drop`,
+        `↓ ${subject} ${amount}`,
+        `↓ ${provider} ${amount}`,
+      ];
+    }
+    case "pace_worse":
+      return [
+        `↓ ${subject} · pace worse`,
+        `↓ ${subject} pace`,
+        `↓ ${provider} pace`,
+      ];
+    case "pace_better":
+      return [
+        `↑ ${subject} · pace better`,
+        `↑ ${subject} pace`,
+        `↑ ${provider} pace`,
+      ];
+    case "projection_earlier": {
+      const movement = evidence.amount
+        ? `${compactCountdown(evidence.amount)} sooner`
+        : "runway worse";
+      return [
+        `↘ ${subject} · out ${movement}`,
+        `↘ ${subject} ${movement}`,
+        `↘ ${provider} ${movement}`,
+      ];
+    }
+    case "projection_later": {
+      const movement = evidence.amount
+        ? `${compactCountdown(evidence.amount)} later`
+        : "runway better";
+      return [
+        `↗ ${subject} · out ${movement}`,
+        `↗ ${subject} ${movement}`,
+        `↗ ${provider} ${movement}`,
+      ];
+    }
+    case "series": {
+      const values = evidence.remainingSeries ?? [];
+      const spark = historySparkline(values);
+      const first = values[0];
+      const current = values.at(-1);
+      const movement = `${first ?? "--"}→${current ?? "--"}%`;
+      return [
+        `~ ${subject} ${spark} · ${movement}`,
+        `~ ${subject} ${movement}`,
+        `~ ${provider} ${movement}`,
+      ];
+    }
+  }
+}
+
+function historyTone(evidence: HistoryEvidence): Tone {
+  return evidence.kind === "pace_better" ||
+    evidence.kind === "projection_later" ||
+    evidence.kind === "reset"
+    ? "cyan"
+    : evidence.kind === "series"
+      ? "dim"
+      : "yellow";
+}
+
+function historyLine(
+  state: DashboardState,
+  layout: Layout,
+): string | undefined {
+  const history = state.history;
+  if (!history || history.availability === "no_usable_data") return undefined;
+  if (history.evidence) {
+    const text =
+      fittingText(historyEvidenceCandidates(history.evidence), layout.width) ||
+      truncate(`~ ${history.evidence.provider} history`, layout.width);
+    return colorize(text, historyTone(history.evidence), layout.color);
+  }
+  const candidates =
+    history.availability === "first_run"
+      ? ["~ History starts with this sample", "~ History starts now"]
+      : history.availability === "recovered"
+        ? ["~ History restarted safely", "~ History restarted"]
+        : history.availability === "clock_skew"
+          ? ["~ History restarted after clock change", "~ History restarted"]
+          : history.availability === "incompatible" ||
+              history.availability === "unavailable"
+            ? ["~ Local history unavailable", "~ History unavailable"]
+            : ["~ History needs another sample", "~ History needs sample"];
+  const text =
+    fittingText(candidates, layout.width) ||
+    truncate("~ History unavailable", layout.width);
+  const tone =
+    history.availability === "incompatible" ||
+    history.availability === "unavailable"
+      ? "yellow"
+      : "dim";
+  return colorize(text, tone, layout.color);
+}
+
+function showsHistory(state: DashboardState, available: number): boolean {
+  return (
+    available >= 8 &&
+    !!state.history &&
+    !state.failure &&
+    state.history.availability !== "no_usable_data"
+  );
+}
+
 function resetCell(row: TierRow, now: Date): string | undefined {
   if (!row.resetsAt) return undefined;
   const seconds = (Date.parse(row.resetsAt) - now.getTime()) / 1000;
@@ -419,7 +568,10 @@ function scrollMetricsForAvailable(
   available: number,
 ): DashboardScrollMetrics {
   const rowCount = detailRowCount(state);
-  const fixedRows = (rowCount > 0 ? 1 : 0) + (state.failure ? 1 : 0);
+  const fixedRows =
+    (rowCount > 0 ? 1 : 0) +
+    (state.failure ? 1 : 0) +
+    (showsHistory(state, available) ? 1 : 0);
   const overflowing = fixedRows + rowCount > available;
   const viewportRows = overflowing
     ? Math.max(0, available - fixedRows - 1)
@@ -565,7 +717,10 @@ function contentLines(
   const detail = detailSections.flat();
   const attention = attentionLine(state, layout);
   const failure = failureLine(state, layout);
-  const fixed = [attention, failure].filter(
+  const history = showsHistory(state, height)
+    ? historyLine(state, layout)
+    : undefined;
+  const fixed = [attention, failure, history].filter(
     (line): line is string => line !== undefined,
   );
   const metrics = scrollMetricsForAvailable(state, height);

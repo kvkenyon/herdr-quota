@@ -6,13 +6,13 @@
 herdr plugin install kvkenyon/herdr-quota --yes
 ```
 
-![AI Quota open in Herdr from the first frame, leading with the limiting provider and exhaustion time above reachable provider tiers and keyboard navigation](docs/readme-demo.gif)
+![AI Quota open in Herdr from the first frame, leading with the limiting provider and exhaustion time, then an established local pace change above reachable provider tiers and keyboard navigation](docs/readme-demo.gif)
 
 [![CI](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml/badge.svg)](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kvkenyon/herdr-quota)](https://github.com/kvkenyon/herdr-quota/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A slim, full-height sidebar leads with the known provider tier most likely to block work first, then makes every trustworthy tier reachable with the allowance still remaining, reset countdown, and pace conclusion. It refreshes while it is open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
+A slim, full-height sidebar leads with the known provider tier most likely to block work first, then explains established local change before making every trustworthy tier reachable with the allowance still remaining, reset countdown, and pace conclusion. It refreshes while it is open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
 
 ## Bind `prefix+u`
 
@@ -66,7 +66,7 @@ Remove the `[[keys.command]]` block from `config.toml` and reload configuration 
 
 The sidebar refreshes immediately, then five minutes after each completed attempt without overlapping collectors. A whole-collector failure keeps the last good reading visible and retries after 10, 20, then at most 30 minutes. Pressing `r` preempts the current attempt, refreshes immediately, and resets that backoff.
 
-The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, limiting-capacity attention line, position (`Rows 5–8 of 16`), and keyboard footer stay pinned. Decorative provider gaps disappear before scrolling is needed and never inflate that row count. The full footer reads `j/k scroll · PgUp/PgDn · r · q/esc`; narrow panes use `j/k PgUp/PgDn r/q`. Restrained color marks at-risk tiers, but the marker and words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
+The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, limiting-capacity attention line, position (`Rows 5–8 of 16`), and keyboard footer stay pinned. Established history gets one compact change line when the pane is at least 10 rows tall; at 6 or 8 rows it steps aside entirely for live data. Decorative provider gaps disappear before scrolling is needed and never inflate that row count. The full footer reads `j/k scroll · PgUp/PgDn · r · q/esc`; narrow panes use `j/k PgUp/PgDn r/q`. Restrained color marks at-risk tiers, but the marker and words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
 
 ### Reading the attention line
 
@@ -79,6 +79,19 @@ The first content line is a decision summary built only from `quota-axi`'s schem
 | `?`    | Some provider or pace data is not current enough for a safe answer.    |
 
 An established projection shows when capacity runs out; an early projection remains `ahead` on its tier row without pretending its time is precise. A spent tier shows its reset when known. Signed-out, stale, unavailable, and error providers never contribute a precise forecast. When a stronger current constraint exists it remains the summary, while unreadable providers retain their own explicit status below. Unknown limiting IDs fall back to the provider name and are never exposed.
+
+### Reading the change line
+
+The optional second content line compares only consecutive, trustworthy samples from the same reset cycle. It never joins a post-reset series to the prior cycle and never signals from a single sample, signed-out provider, stale/unavailable/error state, unknown semantics, schema mismatch, or whole-check failure.
+
+| Marker    | Established local evidence                                                               |
+| --------- | ---------------------------------------------------------------------------------------- |
+| `↻`       | The reset time changed and remaining capacity materially replenished.                    |
+| `↓` / `↑` | Remaining capacity dropped meaningfully, or authoritative pace got worse/better.         |
+| `↘` / `↗` | An established exhaustion projection moved materially earlier/later.                     |
+| `~`       | A same-cycle remaining-capacity sparkline, first-sample note, or safe availability note. |
+
+Small ordinary changes become a neutral sparkline after two same-cycle samples instead of an alert. Meaningful capacity drops require at least 10 percentage points; pace reserve changes require at least 10 points; exhaustion projections must move by at least two hours. These thresholds avoid fabricating precision from routine refresh noise.
 
 ### Reading the gauges
 
@@ -131,11 +144,16 @@ Provider-level signed-out, stale, rate-limited, unavailable, and error states st
 
 ## Data and privacy
 
-The plugin delegates provider access to its plugin-local `quota-axi@~0.1.29` executable and consumes schema version 5 from `quota-axi --json --full`. It does not duplicate provider authentication, inspect browser databases itself, or implement vendor refresh-token flows.
+The plugin delegates provider access to its plugin-local `quota-axi@~0.1.29` executable and consumes schema version 5 from `quota-axi --json --full`. It does not duplicate provider authentication, inspect browser databases itself, or implement vendor refresh-token flows. History is local-only and never changes that credential boundary.
 
 - Credentials remain in stores owned by official provider tools.
 - Provider requests go directly from `quota-axi` to first-party endpoints.
-- The normalized response remains in sidebar memory and is not persisted.
+- The full normalized response remains in sidebar memory. History persists only its separate schema-v1 allow-list: collection timestamp, marketed provider/scope/limit display identity, effective remaining percentage, reset time, authoritative pace state/reserve, authoritative runway state/projection, and finite data-health/auth eligibility.
+- History never stores credentials, environment values, account identifiers, filesystem paths, source or plan content, raw child output, arbitrary errors, tokens, response bodies, or other provider fields.
+- The single compact JSON document lives at `${XDG_STATE_HOME:-~/.local/state}/herdr-quota/history-v1.json`, uses private directory/file modes, and is replaced atomically through a sibling temporary file.
+- Retention is bounded to 512 snapshots or 30 days, whichever removes data first. Equivalent samples are stored at most once every 15 minutes; real normalized changes may be recorded sooner.
+- Only a usable successful collection can write history. Ineligible providers keep finite health/auth gap markers but no quota facts, and an entirely stale, signed-out, unavailable, error, or unknown-semantics report produces no write.
+- Corrupt/truncated history restarts safely; schema mismatch, permission failure, clock rollback, and interrupted writes preserve the live dashboard and collapse to a finite local-history note. No local error or file content becomes display copy.
 - Automatic refresh exists only while the pane process is alive: five minutes after success, with bounded 10/20/30-minute whole-collector failure backoff.
 - Raw responses, account identifiers, credentials, and credential paths are never logged.
 - Refreshes have a 12-second process deadline and 2 MiB output limit.
@@ -164,6 +182,10 @@ The Keychain grant only lets `quota-axi` read a credential that already works. E
 
 **A reading is stale or unknown.** The sidebar preserves truthful state when a provider cannot be reached and keeps retrying while open. Press `r` to retry immediately after connectivity or authentication recovers.
 
+**History says it needs another sample.** Keep the pane open through another trustworthy refresh or press `r` later. A provider that disappeared, signed out, went stale, or crossed a reset starts a new comparison segment instead of connecting unrelated points.
+
+**History restarted or is unavailable.** `History restarted` means a corrupt/truncated file or clock rollback was isolated and a new safe segment began. `History unavailable` means the local schema is newer/incompatible or the file could not be read or atomically replaced. Live quota and refresh continue normally; check permissions on `${XDG_STATE_HOME:-~/.local/state}/herdr-quota` or update the plugin for a newer schema.
+
 **The position says more rows exist.** Use `j`/`k`, Down/Up, or Page Down/Page Up. The position counts provider headers and tier/recovery rows, not decorative blank lines.
 
 **The whole quota check fails.** `Timed out` and `Network/process failed` usually call for checking connectivity and pressing `r`. `quota-axi missing` calls for reinstalling the plugin. `Incompatible output` calls for updating the plugin. The displayed countdown is the next automatic retry; previous good detail stays available meanwhile.
@@ -180,7 +202,7 @@ npm run check
 npm run preview
 ```
 
-`npm run check` formats, lints, type-checks, runs the selector/refresh/layout suite, and regenerates the sanitized no-color preview. Exact responsive input/render fixtures cover 20/24/36 columns and 6/8/12/23 rows, every reachable row, pinned context, dynamic scroll clamping, safe whole-check failures, retry timing, and current Codex model session/week labels. The runtime provider boundary lives in `src/schema.ts` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
+`npm run check` formats, lints, type-checks, runs the selector/refresh/layout/history suite, and regenerates the sanitized no-color preview. Exact responsive input/render fixtures cover 20/24/36 columns and 6/8/12/23 rows, every reachable row, pinned context, dynamic scroll clamping, safe whole-check failures, retry timing, current Codex model session/week labels, bounded/atomic history, privacy allow-listing, reset segmentation, auth/data gaps, and deterministic change timelines. The runtime provider boundary lives in `src/schema.ts` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
 
 ## License and references
 

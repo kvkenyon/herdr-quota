@@ -9,7 +9,20 @@ const fixture = JSON.parse(
   ),
 );
 const text = renderPlain(
-  { report: adaptQuotaResponse(fixture), loading: false, scroll: 0 },
+  {
+    report: adaptQuotaResponse(fixture),
+    history: {
+      availability: "ready",
+      evidence: {
+        kind: "pace_worse",
+        provider: "Claude",
+        scope: "Fable",
+        limit: "Fable",
+      },
+    },
+    loading: false,
+    scroll: 0,
+  },
   { width: 36, height: 23, now: new Date("2026-08-18T18:00:00.000Z") },
 );
 const lines = text.split("\n");
