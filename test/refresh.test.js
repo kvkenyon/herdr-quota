@@ -266,12 +266,13 @@ test("successful async post-collection work completes before scheduling", async 
   scheduler.close();
 });
 
-test("manual refresh serializes history commits and rejects a superseded view", async () => {
+test("manual refresh publishes live data while serializing history commits", async () => {
   const timers = fakeTimers();
   const firstHistory = deferred();
   const attempts = [];
+  const livePublished = [];
   const persisted = [];
-  const published = [];
+  const historyPublished = [];
   const scheduler = new RefreshScheduler({
     collect() {
       const attempt = deferred();
@@ -279,10 +280,14 @@ test("manual refresh serializes history commits and rejects a superseded view", 
       return attempt.promise;
     },
     onStart() {},
-    async onSuccess(value, isCurrent) {
-      if (value === "older") await firstHistory.promise;
-      persisted.push(value);
-      if (isCurrent()) published.push(value);
+    async onSuccess(value, isCurrent, serialize) {
+      livePublished.push(value);
+      const history = await serialize(async () => {
+        if (value === "older") await firstHistory.promise;
+        persisted.push(value);
+        return value;
+      });
+      if (isCurrent()) historyPublished.push(history);
     },
     onFailure() {},
     onSettled() {},
@@ -298,11 +303,12 @@ test("manual refresh serializes history commits and rejects a superseded view", 
   attempts[1].resolve("newer");
   await flush();
 
+  assert.deepEqual(livePublished, ["older", "newer"]);
   assert.deepEqual(persisted, []);
-  assert.deepEqual(published, []);
+  assert.deepEqual(historyPublished, []);
   firstHistory.resolve();
   await Promise.all([older, newer]);
   assert.deepEqual(persisted, ["older", "newer"]);
-  assert.deepEqual(published, ["newer"]);
+  assert.deepEqual(historyPublished, ["newer"]);
   scheduler.close();
 });

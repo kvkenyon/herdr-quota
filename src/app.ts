@@ -58,10 +58,11 @@ export class DashboardApp {
         this.state.lastAttemptAt = new Date();
         this.render();
       },
-      onSuccess: async (report, isCurrent) => {
+      onSuccess: async (report, isCurrent, serialize) => {
         this.state.report = report;
         this.state.failure = undefined;
-        const history = await this.history.record(report);
+        this.render();
+        const history = await serialize(() => this.history.record(report));
         if (isCurrent()) this.state.history = history;
       },
       onFailure: (error) => {
