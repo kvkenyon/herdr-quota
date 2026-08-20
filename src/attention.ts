@@ -6,7 +6,7 @@ import type {
   QuotaReport,
 } from "./types.js";
 
-export type ConstraintKind = "exhausted" | "projected" | "low";
+export type ConstraintKind = "exhausted" | "projected";
 
 export type Attention =
   | {
@@ -84,15 +84,12 @@ function constraintFor(
   if (runway?.status === "exhausted_now") {
     constraint = "exhausted";
     rank = 0;
-  } else if (runway?.status === "projected_exhaustion") {
+  } else if (
+    runway?.status === "projected_exhaustion" &&
+    runway.projectionConfidence === "established"
+  ) {
     constraint = "projected";
-    rank = runway.projectionConfidence === "established" ? 1 : 2;
-  } else if (percent !== undefined && percent <= 10) {
-    constraint = "low";
-    rank = 3;
-  } else if (percent !== undefined && percent <= 25) {
-    constraint = "low";
-    rank = 4;
+    rank = 1;
   } else {
     return undefined;
   }
@@ -111,10 +108,7 @@ function constraintFor(
   return {
     attention: {
       kind: "constraint",
-      severity:
-        constraint !== "low" || (percent !== undefined && percent <= 10)
-          ? "critical"
-          : "warning",
+      severity: "critical",
       provider: providerName(provider),
       ...(row ? { tier: row.label, compactTier: row.compactLabel } : {}),
       constraint,
@@ -146,10 +140,10 @@ function compareNumber(left: number, right: number): number {
 function compareConstraint(left: RankedConstraint, right: RankedConstraint) {
   const rank = left.rank - right.rank;
   if (rank) return rank;
-  // Among forecasts, the first exhaustion wins. Among already exhausted or
-  // equally-low limits, the later/unknown recovery is the stronger block.
+  // Among forecasts, the first exhaustion wins. Among already exhausted
+  // limits, the later/unknown recovery is the stronger block.
   const withinRank =
-    left.rank === 1 || left.rank === 2
+    left.rank === 1
       ? compareNumber(left.time, right.time) ||
         compareNumber(left.remaining, right.remaining)
       : compareNumber(left.remaining, right.remaining) ||

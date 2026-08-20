@@ -48,7 +48,7 @@ test("the earliest established projected constraint wins across providers", asyn
   });
 });
 
-test("exhausted and low constraints retain provider-owned tier labels", async () => {
+test("exhausted constraints retain provider-owned tier labels", async () => {
   const exhausted = await report("complete");
   makeHealthy(exhausted);
   const fable = provider(exhausted, "claude").effective[1];
@@ -61,22 +61,28 @@ test("exhausted and low constraints retain provider-owned tier labels", async ()
   };
   assert.equal(selectAttention(exhausted).constraint, "exhausted");
   assert.equal(selectAttention(exhausted).compactTier, "Fable");
+});
 
-  const low = await report("complete");
-  makeHealthy(low);
-  const codex = provider(low, "codex").effective[0];
+test("low availability on pace remains healthy", async () => {
+  const value = await report("complete");
+  makeHealthy(value);
+  const codex = provider(value, "codex").effective[0];
   codex.effectivePercentRemaining = 10;
   codex.limitingWindowIds = ["weekly"];
-  assert.deepEqual(selectAttention(low), {
-    kind: "constraint",
-    severity: "critical",
-    provider: "Codex",
-    tier: "Week",
-    compactTier: "Week",
-    constraint: "low",
-    percentRemaining: 10,
-    resetsAt: "2026-08-19T17:35:00.000Z",
-  });
+  assert.deepEqual(selectAttention(value), { kind: "healthy", tracked: 4 });
+});
+
+test("early projections are not pinned as established constraints", async () => {
+  const value = await report("complete");
+  makeHealthy(value);
+  const fable = provider(value, "claude").effective[1];
+  fable.runway = {
+    status: "projected_exhaustion",
+    projectedExhaustedAt: "2026-08-18T19:00:00.000Z",
+    limitingWindowId: "model:fable",
+    projectionConfidence: "early",
+  };
+  assert.deepEqual(selectAttention(value), { kind: "healthy", tracked: 4 });
 });
 
 test("a weekly exhaustion beats a reassuring full session", async () => {
@@ -125,8 +131,12 @@ test("unknown limiting ids never escape into attention text", async () => {
   const value = await report("complete");
   makeHealthy(value);
   const cursor = provider(value, "cursor").effective[0];
-  cursor.effectivePercentRemaining = 5;
+  cursor.effectivePercentRemaining = 0;
   cursor.limitingWindowIds = ["internal:future-window"];
+  cursor.runway = {
+    status: "exhausted_now",
+    limitingWindowId: "internal:future-window",
+  };
 
   const attention = selectAttention(value);
   assert.equal(attention.provider, "Cursor");

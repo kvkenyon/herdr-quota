@@ -286,8 +286,7 @@ test("attention text is truthful for health, partial data, and early projections
     projectionConfidence: "established",
   };
   const output = render(early);
-  assert.match(output, /^! Claude Fable · ahead/m);
-  assert.doesNotMatch(output.split("\n")[1], /out \d/);
+  assert.match(output, /^\? Pace unavailable · 4 tracked/m);
 });
 
 test("unknown limiting ids render provider-only attention", async () => {
@@ -302,14 +301,18 @@ test("unknown limiting ids render provider-only attention", async () => {
   const cursor = value.providers.find(
     (provider) => provider.provider === "cursor",
   );
-  cursor.effective[0].effectivePercentRemaining = 5;
+  cursor.effective[0].effectivePercentRemaining = 0;
   cursor.effective[0].limitingWindowIds = ["internal:future-window"];
+  cursor.effective[0].runway = {
+    status: "exhausted_now",
+    limitingWindowId: "internal:future-window",
+  };
   const output = render(value);
-  assert.match(output, /^! Cursor · 5% left/m);
+  assert.match(output, /^! Cursor · spent/m);
   assert.doesNotMatch(output, /internal|future-window/);
 });
 
-test("exhausted and low attention explain the constraint without color", async () => {
+test("exhausted attention explains the constraint without color", async () => {
   const exhausted = await report("complete");
   for (const provider of exhausted.providers) {
     for (const effective of provider.effective) {
@@ -327,19 +330,6 @@ test("exhausted and low attention explain the constraint without color", async (
     projectionConfidence: "established",
   };
   assert.match(render(exhausted), /^! Claude Fable · spent · resets 33h/m);
-
-  const low = await report("complete");
-  for (const provider of low.providers) {
-    for (const effective of provider.effective) {
-      effective.effectivePercentRemaining = 60;
-      effective.pace = { status: "on_pace" };
-      effective.runway = { status: "through_reset" };
-    }
-  }
-  const codex = low.providers.find((provider) => provider.provider === "codex");
-  codex.effective[0].effectivePercentRemaining = 10;
-  codex.effective[0].limitingWindowIds = ["weekly"];
-  assert.match(render(low), /^! Codex Week · 10% left/m);
 });
 
 test("color emphasizes risk while text keeps the meaning", async () => {
