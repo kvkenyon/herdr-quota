@@ -1,5 +1,9 @@
 import { displayName } from "./format.js";
-import { isAllowedProvider, providerTiers } from "./tiers.js";
+import {
+  isAllowedProvider,
+  providerNeedsSignIn,
+  providerTiers,
+} from "./tiers.js";
 import type {
   EffectiveAvailability,
   ProviderQuota,
@@ -44,7 +48,11 @@ function providerName(provider: ProviderQuota): string {
 }
 
 function providerIsCurrent(provider: ProviderQuota): boolean {
-  return provider.state.status === "fresh" && !provider.state.stale;
+  return (
+    provider.state.status === "fresh" &&
+    !provider.state.stale &&
+    !providerNeedsSignIn(provider)
+  );
 }
 
 function knownEffective(provider: ProviderQuota): EffectiveAvailability[] {

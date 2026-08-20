@@ -191,3 +191,24 @@ test("a stale dangerous prior reading cannot produce a current forecast", async 
     tracked: 3,
   });
 });
+
+for (const authStatus of ["unusable", "expired_refreshable"]) {
+  test(`fresh ${authStatus} auth cannot produce a constraint`, async () => {
+    const value = await report("complete");
+    makeHealthy(value);
+    const claude = provider(value, "claude");
+    claude.state.authStatus = authStatus;
+    claude.effective[1].effectivePercentRemaining = 0;
+    claude.effective[1].runway = {
+      status: "exhausted_now",
+      limitingWindowId: "model:fable",
+    };
+
+    assert.deepEqual(selectAttention(value), {
+      kind: "data_health",
+      reason: "unreadable",
+      unreadable: 1,
+      tracked: 3,
+    });
+  });
+}

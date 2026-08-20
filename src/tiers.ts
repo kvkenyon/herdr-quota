@@ -196,7 +196,7 @@ export function providerTiers(provider: ProviderQuota): TierRow[] {
   return rows;
 }
 
-function needsSignIn(provider: ProviderQuota): boolean {
+export function providerNeedsSignIn(provider: ProviderQuota): boolean {
   return (
     provider.state.status === "auth_required" ||
     provider.state.authStatus === "unusable" ||
@@ -213,7 +213,7 @@ export function presentProvider(provider: ProviderQuota): ProviderPresentation {
   if (provider.state.reason === "keychain_access_required") {
     return { kind: "message", message: "Keychain approval required" };
   }
-  if (needsSignIn(provider)) {
+  if (providerNeedsSignIn(provider)) {
     return {
       kind: "recovery",
       instruction:
@@ -236,7 +236,8 @@ export function providerAnnotation(
   provider: ProviderQuota,
 ): ProviderAnnotation | undefined {
   if (provider.state.reason === "keychain_access_required") return undefined;
-  if (needsSignIn(provider)) return { text: "signed out", tone: "bad" };
+  if (providerNeedsSignIn(provider))
+    return { text: "signed out", tone: "bad" };
   if (provider.state.stale || provider.state.status === "stale")
     return { text: "stale", tone: "warn" };
   if (provider.state.status === "rate_limited")
