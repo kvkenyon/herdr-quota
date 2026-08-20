@@ -14,7 +14,11 @@ import {
   type TierConclusion,
   type TierRow,
 } from "./tiers.js";
-import type { DashboardState, ProviderQuota } from "./types.js";
+import type {
+  CollectorFailureKind,
+  DashboardState,
+  ProviderQuota,
+} from "./types.js";
 
 const RESET = "\x1b[0m";
 const COLORS = {
@@ -393,6 +397,135 @@ function sectionLines(
   return lines;
 }
 
+export interface DashboardScrollMetrics {
+  rowCount: number;
+  viewportRows: number;
+  scroll: number;
+  maxScroll: number;
+  overflowing: boolean;
+}
+
+function detailRowCount(state: DashboardState): number {
+  return (state.report?.providers ?? []).reduce((count, provider) => {
+    const presentation = presentProvider(provider);
+    return (
+      count + 1 + (presentation.kind === "tiers" ? presentation.rows.length : 1)
+    );
+  }, 0);
+}
+
+function scrollMetricsForAvailable(
+  state: DashboardState,
+  available: number,
+): DashboardScrollMetrics {
+  const rowCount = detailRowCount(state);
+  const fixedRows = (rowCount > 0 ? 1 : 0) + (state.failure ? 1 : 0);
+  const overflowing = fixedRows + rowCount > available;
+  const viewportRows = overflowing
+    ? Math.max(0, available - fixedRows - 1)
+    : rowCount;
+  const maxScroll = overflowing ? Math.max(0, rowCount - viewportRows) : 0;
+  const requested = Number.isFinite(state.scroll)
+    ? Math.max(0, Math.floor(state.scroll))
+    : 0;
+  return {
+    rowCount,
+    viewportRows,
+    scroll: Math.min(requested, maxScroll),
+    maxScroll,
+    overflowing,
+  };
+}
+
+export function dashboardScrollMetrics(
+  state: DashboardState,
+  height: number,
+): DashboardScrollMetrics {
+  const safeHeight = Math.max(6, Math.floor(height));
+  return scrollMetricsForAvailable(state, Math.max(1, safeHeight - 2));
+}
+
+export function clampDashboardScroll(
+  state: DashboardState,
+  height: number,
+): number {
+  return dashboardScrollMetrics(state, height).scroll;
+}
+
+type ScrollAction = "scroll_down" | "scroll_up" | "page_down" | "page_up";
+
+export function applyDashboardScroll(
+  state: DashboardState,
+  action: ScrollAction,
+  height: number,
+): number {
+  const metrics = dashboardScrollMetrics(state, height);
+  const page = Math.max(1, metrics.viewportRows);
+  const delta =
+    action === "scroll_down"
+      ? 1
+      : action === "scroll_up"
+        ? -1
+        : action === "page_down"
+          ? page
+          : -page;
+  state.scroll = Math.max(
+    0,
+    Math.min(metrics.maxScroll, metrics.scroll + delta),
+  );
+  return state.scroll;
+}
+
+function failureLabels(kind: CollectorFailureKind, retry: string): string[] {
+  switch (kind) {
+    case "timeout":
+      return [
+        `Quota check timed out · retry ${retry}`,
+        `Timeout · retry ${retry}`,
+      ];
+    case "missing_executable":
+      return [`quota-axi missing · retry ${retry}`, `Missing · retry ${retry}`];
+    case "incompatible_output":
+      return [
+        `Incompatible output · retry ${retry}`,
+        `Schema · retry ${retry}`,
+      ];
+    case "network_process":
+      return [
+        `Network/process failed · retry ${retry}`,
+        `Failed · retry ${retry}`,
+      ];
+  }
+}
+
+function failureLine(
+  state: DashboardState,
+  layout: Layout,
+): string | undefined {
+  if (!state.failure) return undefined;
+  const seconds = state.failure.retryAt
+    ? (state.failure.retryAt.getTime() - layout.now.getTime()) / 1000
+    : 0;
+  const retry = state.failure.retryAt ? compactCountdown(seconds) : "soon";
+  const text =
+    fittingText(failureLabels(state.failure.kind, retry), layout.width) ||
+    truncate("Refresh failed", layout.width);
+  return colorize(text, "red", layout.color);
+}
+
+function positionLine(metrics: DashboardScrollMetrics, layout: Layout): string {
+  const start = metrics.rowCount ? metrics.scroll + 1 : 0;
+  const end = Math.min(metrics.rowCount, metrics.scroll + metrics.viewportRows);
+  const text = fittingText(
+    [
+      `Rows ${start}–${end} of ${metrics.rowCount}`,
+      `${start}–${end} / ${metrics.rowCount}`,
+    ],
+    layout.width,
+  );
+  return colorize(text, "dim", layout.color);
+}
+
 function contentLines(
   state: DashboardState,
   layout: Layout,
@@ -400,11 +533,18 @@ function contentLines(
 ): string[] {
   const providers = state.report?.providers ?? [];
   if (!providers.length) {
+    const failure = failureLine(state, layout);
     const message = state.loading ? "Refreshing quota…" : "No quota readings";
     const hint = state.loading
       ? "This may take a few seconds"
-      : "Sign in, then press r";
-    return ["", colorize(message, "cyan", layout.color), hint];
+      : state.failure
+        ? "Press r to retry now"
+        : "Sign in, then press r";
+    return [
+      ...(failure ? [failure] : [""]),
+      colorize(message, state.failure ? "red" : "cyan", layout.color),
+      hint,
+    ].slice(0, height);
   }
 
   const sections = providers.map((provider) => ({
@@ -424,7 +564,11 @@ function contentLines(
   );
   const detail = detailSections.flat();
   const attention = attentionLine(state, layout);
-  const fixed = attention ? [attention] : [];
+  const failure = failureLine(state, layout);
+  const fixed = [attention, failure].filter(
+    (line): line is string => line !== undefined,
+  );
+  const metrics = scrollMetricsForAvailable(state, height);
 
   // Decorative provider gaps are admitted only after every real row fits.
   // When space is tight they disappear from the bottom upward and never
@@ -441,15 +585,14 @@ function contentLines(
     return [...fixed, ...withSeparators];
   }
 
-  const detailCapacity = Math.max(0, height - fixed.length - 1);
-  const shown = detail.slice(0, detailCapacity);
-  const hidden = detail.length - shown.length;
+  const shown = detail.slice(
+    metrics.scroll,
+    metrics.scroll + metrics.viewportRows,
+  );
   return [
     ...fixed,
     ...shown,
-    ...(hidden > 0
-      ? [colorize(`+${hidden} more rows`, "dim", layout.color)]
-      : []),
+    ...(metrics.overflowing ? [positionLine(metrics, layout)] : []),
   ].slice(0, height);
 }
 
@@ -470,20 +613,12 @@ function titleLine(state: DashboardState, layout: Layout): string {
   );
 }
 
-function footerLine(state: DashboardState, layout: Layout): string {
-  const { width, color } = layout;
-  const text = state.error
-    ? width >= 34
-      ? `${colorize("refresh failed", "red", color)} · r retry · q close`
-      : width >= 20
-        ? `${colorize("failed", "red", color)} · r retry · q`
-        : `${colorize("failed", "red", color)} · r · q`
-    : width >= 23
-      ? "r refresh · q/esc close"
-      : width >= 19
-        ? "r refresh · q close"
-        : "r · q/esc close";
-  return truncate(text, width);
+function footerLine(_state: DashboardState, layout: Layout): string {
+  const text =
+    layout.width >= 34
+      ? "j/k scroll · PgUp/PgDn · r · q/esc"
+      : "j/k PgUp/PgDn r/q";
+  return truncate(text, layout.width);
 }
 
 export function renderDashboard(

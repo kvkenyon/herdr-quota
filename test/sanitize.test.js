@@ -4,6 +4,7 @@ import {
   friendlyProviderError,
   sanitizeProcessError,
 } from "../dist/sanitize.js";
+import { safeCollectorFailure } from "../dist/failure.js";
 
 test("sanitizes tokens, accounts, paths, and multiline process errors", () => {
   const raw =
@@ -32,4 +33,14 @@ test("maps known provider codes and suppresses arbitrary raw messages", () => {
     friendlyProviderError("token=secret-account-detail"),
     "Quota unavailable",
   );
+});
+
+test("unknown collector exceptions collapse to a finite safe failure kind", () => {
+  const failure = safeCollectorFailure(
+    new Error(
+      "\u001b[31mBearer secret.token.value /Users/alice/.codex/auth.json\u001b[0m",
+    ),
+  );
+  assert.deepEqual(failure, { kind: "network_process" });
+  assert.doesNotMatch(JSON.stringify(failure), /secret|alice|auth\.json/i);
 });

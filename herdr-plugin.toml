@@ -1,6 +1,6 @@
 id = "herdr-quota"
 name = "AI Quota"
-version = "0.1.1"
+version = "0.1.2"
 min_herdr_version = "0.7.3"
 description = "A slim right-side view of local AI subscription quota"
 platforms = ["macos", "linux"]

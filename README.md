@@ -6,13 +6,13 @@
 herdr plugin install kvkenyon/herdr-quota --yes
 ```
 
-![AI Quota open in Herdr from the first frame, leading with the limiting provider and exhaustion time above provider tiers](docs/readme-demo.gif)
+![AI Quota open in Herdr from the first frame, leading with the limiting provider and exhaustion time above reachable provider tiers and keyboard navigation](docs/readme-demo.gif)
 
 [![CI](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml/badge.svg)](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kvkenyon/herdr-quota)](https://github.com/kvkenyon/herdr-quota/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A slim, full-height sidebar leads with the known provider tier most likely to block work first, then shows every trustworthy tier with the allowance still remaining, reset countdown, and pace conclusion. It refreshes while it is open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
+A slim, full-height sidebar leads with the known provider tier most likely to block work first, then makes every trustworthy tier reachable with the allowance still remaining, reset countdown, and pace conclusion. It refreshes while it is open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
 
 ## Bind `prefix+u`
 
@@ -56,15 +56,17 @@ Remove the `[[keys.command]]` block from `config.toml` and reload configuration 
 
 ## Use
 
-| Control      | Action                                     |
-| ------------ | ------------------------------------------ |
-| `prefix+u`   | Toggle the quota sidebar                   |
-| `r`          | Refresh now and reset automatic scheduling |
-| `q` / Escape | Close and restore the prior layout         |
+| Control                | Action                                        |
+| ---------------------- | --------------------------------------------- |
+| `prefix+u`             | Toggle the quota sidebar                      |
+| `j` / `k` or Down / Up | Move the provider/detail window one whole row |
+| Page Down / Page Up    | Move one visible page                         |
+| `r`                    | Refresh now and reset automatic scheduling    |
+| `q` / Escape           | Close and restore the prior layout            |
 
 The sidebar refreshes immediately, then five minutes after each completed attempt without overlapping collectors. A whole-collector failure keeps the last good reading visible and retries after 10, 20, then at most 30 minutes. Pressing `r` preempts the current attempt, refreshes immediately, and resets that backoff.
 
-The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height without scrolling. When height is tight, decorative provider gaps disappear before whole data rows; any hidden-row count excludes those gaps. Restrained color marks at-risk tiers, but the marker and words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
+The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, limiting-capacity attention line, position (`Rows 5–8 of 16`), and keyboard footer stay pinned. Decorative provider gaps disappear before scrolling is needed and never inflate that row count. The full footer reads `j/k scroll · PgUp/PgDn · r · q/esc`; narrow panes use `j/k PgUp/PgDn r/q`. Restrained color marks at-risk tiers, but the marker and words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
 
 ### Reading the attention line
 
@@ -114,6 +116,19 @@ A provider that needs authentication shows `signed out` and a single recovery co
 
 The sidebar itself never starts an interactive login and never touches credentials; sign in with the provider's own CLI, then press `r`.
 
+### When the whole quota check fails
+
+The last good provider details remain visible. A short, allow-listed failure line shows what class of check failed and the countdown to the scheduled automatic retry; press `r` to retry immediately and restart backoff at 10 minutes.
+
+| Sidebar failure          | What to do                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| `Quota check timed out`  | Check connectivity or vendor availability; press `r` to try again now.        |
+| `quota-axi missing`      | Reinstall or update the Herdr plugin so its local dependencies are rebuilt.   |
+| `Incompatible output`    | Update the plugin; its pinned schema adapter does not accept this output.     |
+| `Network/process failed` | Check connectivity, then press `r`; reinstall if the local process stays bad. |
+
+Provider-level signed-out, stale, rate-limited, unavailable, and error states stay inside their provider sections. They do not become a whole-check failure and do not hide healthy siblings.
+
 ## Data and privacy
 
 The plugin delegates provider access to its plugin-local `quota-axi@~0.1.29` executable and consumes schema version 5 from `quota-axi --json --full`. It does not duplicate provider authentication, inspect browser databases itself, or implement vendor refresh-token flows.
@@ -124,7 +139,8 @@ The plugin delegates provider access to its plugin-local `quota-axi@~0.1.29` exe
 - Automatic refresh exists only while the pane process is alive: five minutes after success, with bounded 10/20/30-minute whole-collector failure backoff.
 - Raw responses, account identifiers, credentials, and credential paths are never logged.
 - Refreshes have a 12-second process deadline and 2 MiB output limit.
-- Child-process and provider errors are bounded and sanitized; one failed provider does not hide the others.
+- Arbitrary child output is drained but never retained for display. Whole-check failures collapse to timeout, missing executable, incompatible output, or generic network/process state before rendering.
+- Provider errors remain bounded and sanitized; one failed provider does not hide the others.
 
 See [Data sources and maintenance](docs/data-sources.md) for the provider boundary and known uncertainties.
 
@@ -148,7 +164,11 @@ The Keychain grant only lets `quota-axi` read a credential that already works. E
 
 **A reading is stale or unknown.** The sidebar preserves truthful state when a provider cannot be reached and keeps retrying while open. Press `r` to retry immediately after connectivity or authentication recovers.
 
-**Refresh times out.** The sidebar terminates `quota-axi` after 12 seconds so an unavailable vendor cannot strand the pane. Independent provider results remain visible when available.
+**The position says more rows exist.** Use `j`/`k`, Down/Up, or Page Down/Page Up. The position counts provider headers and tier/recovery rows, not decorative blank lines.
+
+**The whole quota check fails.** `Timed out` and `Network/process failed` usually call for checking connectivity and pressing `r`. `quota-axi missing` calls for reinstalling the plugin. `Incompatible output` calls for updating the plugin. The displayed countdown is the next automatic retry; previous good detail stays available meanwhile.
+
+**Refresh times out.** The sidebar terminates `quota-axi` after 12 seconds so an unavailable vendor cannot strand the pane. Provider-level results from a valid report remain visible; a whole-check timeout keeps the previous good report.
 
 **The plugin does not build.** Confirm `node --version` is at least 22.19 and `npm --version` works, then rerun installation. Herdr retains the previous managed install when an update build fails.
 
@@ -160,7 +180,7 @@ npm run check
 npm run preview
 ```
 
-`npm run check` formats, lints, type-checks, runs the selector/refresh/layout suite, and regenerates the sanitized no-color preview. Responsive fixtures cover 20/24/36 columns and 12/23/30 rows, including current Codex model session/week labels. The runtime provider boundary lives in `src/schema.ts` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
+`npm run check` formats, lints, type-checks, runs the selector/refresh/layout suite, and regenerates the sanitized no-color preview. Exact responsive input/render fixtures cover 20/24/36 columns and 6/8/12/23 rows, every reachable row, pinned context, dynamic scroll clamping, safe whole-check failures, retry timing, and current Codex model session/week labels. The runtime provider boundary lives in `src/schema.ts` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
 
 ## License and references
 

@@ -76,10 +76,18 @@ export interface QuotaReport {
   adaptationWarnings: string[];
 }
 
+export type CollectorFailureKind =
+  "timeout" | "missing_executable" | "incompatible_output" | "network_process";
+
+export interface CollectorFailure {
+  kind: CollectorFailureKind;
+  retryAt?: Date;
+}
+
 export interface DashboardState {
   report?: QuotaReport;
   loading: boolean;
-  error?: string;
+  failure?: CollectorFailure;
   lastAttemptAt?: Date;
   scroll: number;
 }

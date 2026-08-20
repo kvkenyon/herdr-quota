@@ -22,9 +22,9 @@ test("manifest exposes a split-pane action without promising an unsupported bind
   assert.doesNotMatch(manifest, /\[\[(events|startup)\]\]/);
 });
 
-test("package and manifest advertise the same v0.1.1 implementation", () => {
-  assert.equal(packageJson.version, "0.1.1");
-  assert.match(manifest, /^version = "0\.1\.1"$/m);
+test("package and manifest advertise the same v0.1.2 implementation", () => {
+  assert.equal(packageJson.version, "0.1.2");
+  assert.match(manifest, /^version = "0\.1\.2"$/m);
   assert.match(readme, /five minutes after each completed attempt/);
   assert.match(readme, /10, 20, then at most 30 minutes/);
 });
@@ -38,4 +38,16 @@ test("first-use docs provide the supported binding and reload path", () => {
     /herdr plugin action invoke herdr-quota\.open-dashboard/,
   );
   assert.match(readme, /plugin manifests cannot install them/);
+});
+
+test("user docs name the exact navigation and safe failure states", () => {
+  assert.match(readme, /j\/k scroll · PgUp\/PgDn · r · q\/esc/);
+  assert.match(readme, /Rows 5–8 of 16/);
+  for (const label of [
+    "Quota check timed out",
+    "quota-axi missing",
+    "Incompatible output",
+    "Network/process failed",
+  ])
+    assert.ok(readme.includes(label), label);
 });

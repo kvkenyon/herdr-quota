@@ -25,6 +25,6 @@
     <text x="24" y="384" xml:space="preserve"> Week        ████ 100%  2d · on pace</text>
     <text x="24" y="402" xml:space="preserve"> Session     ████ 100% 57m · on pace</text>
     <text x="24" y="420" xml:space="preserve">                                    </text>
-    <text x="24" y="438" xml:space="preserve">r refresh · q/esc close</text>
+    <text x="24" y="438" xml:space="preserve">j/k scroll · PgUp/PgDn · r · q/esc</text>
   </g>
 </svg>

@@ -8,6 +8,7 @@ export interface RefreshSchedulerOptions<T> {
   onStart: () => void;
   onSuccess: (value: T) => void;
   onFailure: (error: unknown) => void;
+  onScheduled?: (delayMs: number, afterFailure: boolean) => void;
   onSettled: () => void;
   cancelActive: () => void;
   setTimer?: (callback: () => void, delayMs: number) => Timer;
@@ -85,13 +86,14 @@ export class RefreshScheduler<T> {
       this.options.onFailure(error);
     } finally {
       if (!this.closed && sequence === this.sequence) {
-        this.options.onSettled();
         const delay = succeeded
           ? NORMAL_REFRESH_MS
           : (FAILURE_BACKOFF_MS[
               Math.min(this.failures - 1, FAILURE_BACKOFF_MS.length - 1)
             ] ?? FAILURE_BACKOFF_MS.at(-1)!);
         this.schedule(delay);
+        this.options.onScheduled?.(delay, !succeeded);
+        this.options.onSettled();
       }
     }
   }

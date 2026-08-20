@@ -1,9 +1,13 @@
 import type { ChildProcess } from "node:child_process";
 import { collectQuota } from "./collect.js";
-import { TerminalInputParser } from "./keys.js";
+import { safeCollectorFailure } from "./failure.js";
+import { TerminalInputParser, type DashboardAction } from "./keys.js";
 import { RefreshScheduler } from "./refresh.js";
-import { renderDashboard } from "./render.js";
-import { sanitizeProcessError } from "./sanitize.js";
+import {
+  applyDashboardScroll,
+  clampDashboardScroll,
+  renderDashboard,
+} from "./render.js";
 import { releaseSidebarStateSync } from "./sidebar-state.js";
 import type { DashboardState, QuotaReport } from "./types.js";
 
@@ -48,17 +52,20 @@ export class DashboardApp {
         }),
       onStart: () => {
         this.state.loading = true;
-        this.state.error = undefined;
+        this.state.failure = undefined;
         this.state.lastAttemptAt = new Date();
         this.render();
       },
       onSuccess: (report) => {
         this.state.report = report;
-        this.state.error = undefined;
-        this.state.scroll = 0;
+        this.state.failure = undefined;
       },
       onFailure: (error) => {
-        this.state.error = sanitizeProcessError(error);
+        this.state.failure = safeCollectorFailure(error);
+      },
+      onScheduled: (delayMs, afterFailure) => {
+        if (afterFailure && this.state.failure)
+          this.state.failure.retryAt = new Date(Date.now() + delayMs);
       },
       onSettled: () => {
         this.state.loading = false;
@@ -86,6 +93,10 @@ export class DashboardApp {
 
   private readonly render = () => {
     if (this.closed) return;
+    this.state.scroll = clampDashboardScroll(
+      this.state,
+      process.stdout.rows || 24,
+    );
     const screen = renderDashboard(this.state, {
       width: process.stdout.columns || 80,
       height: process.stdout.rows || 24,
@@ -108,7 +119,22 @@ export class DashboardApp {
         this.close();
         return;
       } else if (action === "refresh") void this.refreshScheduler.manual();
+      else if (this.isScrollAction(action)) {
+        applyDashboardScroll(this.state, action, process.stdout.rows || 24);
+        this.render();
+      }
     }
+  }
+
+  private isScrollAction(
+    action: DashboardAction,
+  ): action is "scroll_down" | "scroll_up" | "page_down" | "page_up" {
+    return (
+      action === "scroll_down" ||
+      action === "scroll_up" ||
+      action === "page_down" ||
+      action === "page_up"
+    );
   }
 
   private terminateChildren() {
