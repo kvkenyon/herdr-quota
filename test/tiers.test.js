@@ -80,6 +80,21 @@ test("codex renders real code-review windows instead of the placeholder", async 
   assert.ok(!labels.includes("Code review"));
 });
 
+test("codex model session and week labels compact semantically", async () => {
+  const codex = byId(await providers("codex-model-windows"), "codex");
+  const rows = providerTiers(codex);
+  assert.deepEqual(
+    rows.slice(0, 4).map((row) => [row.label, row.compactLabel]),
+    [
+      ["Session", "Session"],
+      ["Week", "Week"],
+      ["Spark 5h", "Spark 5h"],
+      ["Spark week", "Spark"],
+    ],
+  );
+  assert.ok(rows.every((row) => !row.label.includes("session 5h")));
+});
+
 test("cursor separates included, auto, and 3rd-party model buckets", async () => {
   const cursor = byId(await providers("complete"), "cursor");
   const rows = providerTiers(cursor);

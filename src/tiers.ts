@@ -79,7 +79,10 @@ function claudeTierLabel(window: QuotaWindow): TierLabel {
 }
 
 function codexModelName(window: QuotaWindow): string {
-  const base = window.label.replace(/\s+(?:week|5h|5 hour)$/i, "");
+  const base = window.label.replace(
+    /\s+(?:sessions?|weekly|week|5h|5 hours?|7d|7 days?)$/i,
+    "",
+  );
   const stripped = base.replace(/^GPT-[\d.]+-Codex-?/i, "");
   return stripped || base;
 }
@@ -193,7 +196,7 @@ export function providerTiers(provider: ProviderQuota): TierRow[] {
   return rows;
 }
 
-function needsSignIn(provider: ProviderQuota): boolean {
+export function providerNeedsSignIn(provider: ProviderQuota): boolean {
   return (
     provider.state.status === "auth_required" ||
     provider.state.authStatus === "unusable" ||
@@ -210,7 +213,7 @@ export function presentProvider(provider: ProviderQuota): ProviderPresentation {
   if (provider.state.reason === "keychain_access_required") {
     return { kind: "message", message: "Keychain approval required" };
   }
-  if (needsSignIn(provider)) {
+  if (providerNeedsSignIn(provider)) {
     return {
       kind: "recovery",
       instruction:
@@ -233,7 +236,7 @@ export function providerAnnotation(
   provider: ProviderQuota,
 ): ProviderAnnotation | undefined {
   if (provider.state.reason === "keychain_access_required") return undefined;
-  if (needsSignIn(provider)) return { text: "signed out", tone: "bad" };
+  if (providerNeedsSignIn(provider)) return { text: "signed out", tone: "bad" };
   if (provider.state.stale || provider.state.status === "stale")
     return { text: "stale", tone: "warn" };
   if (provider.state.status === "rate_limited")

@@ -27,7 +27,7 @@ test("36-cell sidebar shows every provider tier without scrolling", async () => 
   const lines = output.split("\n").map((line) => line.trimEnd());
   assert.deepEqual(lines.slice(0, 21), [
     "AI Quota                      1m ago",
-    "",
+    "! Claude Fable · out 13h",
     "Claude",
     " Session     ███▉  98%  3h · on pace",
     " Week        ██──  53% 33h · on pace",
@@ -146,19 +146,23 @@ test("stale readings stay visible without pretending pace is known", async () =>
 });
 
 test("narrow widths degrade honestly without wrapping or clipping", async () => {
-  for (const width of [38, 32, 29, 24, 20]) {
-    for (const fixture of ["complete", "mixed-auth"]) {
-      const output = renderDashboard(
-        { report: await report(fixture), loading: false, scroll: 0 },
-        { width, height: 30, now: NOW, color: true },
-      );
-      const plain = stripAnsi(output);
-      for (const line of plain.split("\n")) {
-        assert.ok(line.length <= width, `${fixture}@${width}: ${line}`);
-        assert.equal(line.trimEnd().endsWith(">"), false, line);
+  for (const width of [38, 36, 32, 29, 24, 20]) {
+    for (const height of [12, 23, 30]) {
+      for (const fixture of ["complete", "mixed-auth", "codex-model-windows"]) {
+        const output = renderDashboard(
+          { report: await report(fixture), loading: false, scroll: 0 },
+          { width, height, now: NOW, color: true },
+        );
+        const plain = stripAnsi(output);
+        assert.match(plain.split("\n")[1], /^[!?=] /);
+        for (const line of plain.split("\n")) {
+          assert.ok(
+            line.length <= width,
+            `${fixture}@${width}x${height}: ${line}`,
+          );
+          assert.equal(line.trimEnd().endsWith(">"), false, line);
+        }
       }
-      assert.match(plain, /Claude/);
-      assert.match(plain, /Kimi/);
     }
   }
   const narrow = renderPlain(
@@ -190,7 +194,142 @@ test("a pane too narrow for both keeps the pace and drops the gauge", async () =
 test("short panes cut whole rows and say how much is hidden", async () => {
   const output = render(await report("complete"), { height: 12 });
   assert.equal(output.split("\n").length, 12);
-  assert.match(output, /\+\d+ more rows/);
+  assert.match(output, /^! Claude Fable · out 13h/m);
+  assert.match(output, /^\+8 more rows/m);
+  assert.doesNotMatch(output, /^\s*$/m);
+});
+
+test("24x30 and 20x12 no-color views are stable snapshots", async () => {
+  const value = await report("complete");
+  const at24 = render(value, { width: 24, height: 30 })
+    .split("\n")
+    .map((line) => line.trimEnd());
+  assert.deepEqual(at24, [
+    "Quota             1m ago",
+    "! Claude Fable · out 13h",
+    "Claude",
+    " Session      98%  3h",
+    " Week         53% 33h",
+    " Fable week    9% 33h",
+    " Extra usage  59%  --",
+    "",
+    "OpenAI Codex",
+    " Week         79% 23h",
+    " Spark week  100%  7d",
+    " Code review   --  --",
+    "",
+    "Cursor",
+    " Included     69% 22d",
+    " Auto         74% 22d",
+    " 3rd-party    49% 22d",
+    "",
+    "Kimi",
+    " Week        100%  2d",
+    " Session     100% 57m",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "r refresh · q/esc close",
+  ]);
+
+  const at20 = render(value, { width: 20, height: 12 })
+    .split("\n")
+    .map((line) => line.trimEnd());
+  assert.deepEqual(at20, [
+    "Quota         1m ago",
+    "! Claude · out 13h",
+    "Claude",
+    " Session     98%  3h",
+    " Week        53% 33h",
+    " Fable week   9% 33h",
+    " Extra       59%  --",
+    "OpenAI Codex",
+    " Week        79% 23h",
+    " Spark week 100%  7d",
+    "+8 more rows",
+    "r refresh · q close",
+  ]);
+});
+
+test("attention text is truthful for health, partial data, and early projections", async () => {
+  const healthy = await report("complete");
+  for (const provider of healthy.providers) {
+    provider.state.status = "fresh";
+    provider.state.stale = false;
+    for (const effective of provider.effective) {
+      effective.effectivePercentRemaining = 60;
+      effective.pace = { status: "on_pace" };
+      effective.runway = { status: "through_reset" };
+    }
+  }
+  assert.match(render(healthy), /^= All known limits on pace/m);
+  assert.match(
+    render(await report("partial-failure")),
+    /^\? 2 providers unreadable · 1 tracked/m,
+  );
+  assert.match(
+    render(await report("stale-unknown")),
+    /^\? 2 providers unreadable · 0 tracked/m,
+  );
+
+  const early = await report("complete");
+  early.providers[0].effective[1].runway.projectionConfidence = "early";
+  early.providers.find(
+    (provider) => provider.provider === "cursor",
+  ).effective[0].runway = {
+    status: "through_reset",
+    projectionConfidence: "established",
+  };
+  const output = render(early);
+  assert.match(output, /^\? Pace unavailable · 4 tracked/m);
+});
+
+test("unknown limiting ids render provider-only attention", async () => {
+  const value = await report("complete");
+  for (const provider of value.providers) {
+    for (const effective of provider.effective) {
+      effective.effectivePercentRemaining = 60;
+      effective.pace = { status: "on_pace" };
+      effective.runway = { status: "through_reset" };
+    }
+  }
+  const cursor = value.providers.find(
+    (provider) => provider.provider === "cursor",
+  );
+  cursor.effective[0].effectivePercentRemaining = 0;
+  cursor.effective[0].limitingWindowIds = ["internal:future-window"];
+  cursor.effective[0].runway = {
+    status: "exhausted_now",
+    limitingWindowId: "internal:future-window",
+  };
+  const output = render(value);
+  assert.match(output, /^! Cursor · spent/m);
+  assert.doesNotMatch(output, /internal|future-window/);
+});
+
+test("exhausted attention explains the constraint without color", async () => {
+  const exhausted = await report("complete");
+  for (const provider of exhausted.providers) {
+    for (const effective of provider.effective) {
+      effective.effectivePercentRemaining = 60;
+      effective.pace = { status: "on_pace" };
+      effective.runway = { status: "through_reset" };
+    }
+  }
+  const fable = exhausted.providers[0].effective[1];
+  fable.effectivePercentRemaining = 0;
+  fable.limitingWindowIds = ["model:fable"];
+  fable.runway = {
+    status: "exhausted_now",
+    limitingWindowId: "model:fable",
+    projectionConfidence: "established",
+  };
+  assert.match(render(exhausted), /^! Claude Fable · spent · resets 33h/m);
 });
 
 test("color emphasizes risk while text keeps the meaning", async () => {

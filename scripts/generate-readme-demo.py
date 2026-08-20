@@ -26,15 +26,10 @@ def require(command: str) -> None:
         raise SystemExit(f"{command} is required to generate {OUTPUT.relative_to(ROOT)}")
 
 
-def ease_out_cubic(value: float) -> float:
-    return 1 - (1 - value) ** 3
-
-
 def panel_x(frame: int) -> float:
-    if frame >= 15:
-        return PANEL_X
-    progress = ease_out_cubic(frame / 14)
-    return WIDTH + 24 + (PANEL_X - WIDTH - 24) * progress
+    # The real product is visible in frame zero for README/social previews.
+    # Motion belongs to the attention glow, not a delayed product reveal.
+    return PANEL_X
 
 
 def glow_opacity(frame: int) -> float:
@@ -82,13 +77,13 @@ def frame_svg(frame: int, dashboard: str) -> str:
   <rect width="100%" height="100%" rx="24" fill="url(#wash)"/>
   <rect x="60" y="58" width="80" height="3" rx="1.5" fill="url(#accent)"/>
   <text x="60" y="100" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="700" letter-spacing="2.2">HERDR PLUGIN</text>
-  <text x="60" y="167" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="46" font-weight="700" letter-spacing="-1.2">Your AI quota,</text>
-  <text x="60" y="218" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="46" font-weight="700" letter-spacing="-1.2">at a glance.</text>
-  <text x="60" y="266" fill="#b1bac4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18">Four providers. Every tier. One slim pane.</text>
+  <text x="60" y="167" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="46" font-weight="700" letter-spacing="-1.2">See the next limit</text>
+  <text x="60" y="218" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="46" font-weight="700" letter-spacing="-1.2">before it blocks work.</text>
+  <text x="60" y="266" fill="#b1bac4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18">One answer. Every tier. One slim pane.</text>
   <text x="60" y="308" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15">Claude  ·  Codex  ·  Cursor  ·  Kimi</text>
   <rect x="60" y="346" width="152" height="42" rx="10" fill="#161b22" stroke="#30363d"/>
   <text x="82" y="372" fill="#e6edf3" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">prefix + u</text>
-  <text x="60" y="440" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13">Remaining allowance · resets · pace</text>
+  <text x="60" y="440" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13">Limiting capacity · resets · pace</text>
   <text x="60" y="469" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13">Read-only through quota-axi</text>
   <rect x="{x - 8:.2f}" y="{PANEL_Y - 8}" width="356" height="478" rx="22" fill="#58a6ff" opacity="{glow:.3f}" filter="url(#glow)"/>
   <g transform="translate({x:.2f} {PANEL_Y})" filter="url(#shadow)">

@@ -1,4 +1,5 @@
 import { pad, stripAnsi, truncate, visibleLength } from "./ansi.js";
+import { selectAttention, type Attention } from "./attention.js";
 import { BAR_TRACK, remainingBar } from "./bar.js";
 import {
   ageText,
@@ -113,6 +114,115 @@ function conclusionCandidates(
 
 function fittingText(candidates: string[], width: number): string {
   return candidates.find((text) => text.length <= width) ?? "";
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function attentionDetail(
+  attention: Extract<Attention, { kind: "constraint" }>,
+  now: Date,
+): string[] {
+  if (attention.constraint === "exhausted") {
+    if (attention.resetsAt) {
+      const seconds = (Date.parse(attention.resetsAt) - now.getTime()) / 1000;
+      if (Number.isFinite(seconds) && seconds > 0) {
+        const reset = compactCountdown(seconds);
+        return [`spent · resets ${reset}`, `reset ${reset}`, "spent"];
+      }
+    }
+    return ["spent"];
+  }
+  if (attention.constraint === "projected") {
+    if (
+      attention.projectionConfidence === "established" &&
+      attention.projectedExhaustedAt
+    ) {
+      const seconds =
+        (Date.parse(attention.projectedExhaustedAt) - now.getTime()) / 1000;
+      if (Number.isFinite(seconds) && seconds > 0)
+        return [`out ${compactCountdown(seconds)}`];
+    }
+    return ["ahead"];
+  }
+  return attention.percentRemaining === undefined
+    ? ["low"]
+    : [
+        `${Math.round(attention.percentRemaining)}% left`,
+        `${Math.round(attention.percentRemaining)}%`,
+      ];
+}
+
+function attentionText(attention: Attention, width: number, now: Date): string {
+  if (attention.kind === "healthy") {
+    return fittingText(
+      [
+        "= All known limits on pace",
+        "= Known limits on pace",
+        "= Limits on pace",
+      ],
+      width,
+    );
+  }
+  if (attention.kind === "data_health") {
+    if (attention.reason === "pace_unknown") {
+      return fittingText(
+        [
+          `? Pace unavailable · ${attention.tracked} tracked`,
+          "? Pace unavailable",
+          "? Pace unknown",
+        ],
+        width,
+      );
+    }
+    const noun = attention.unreadable === 1 ? "provider" : "providers";
+    return fittingText(
+      [
+        `? ${attention.unreadable} ${noun} unreadable · ${attention.tracked} tracked`,
+        `? ${attention.unreadable} unreadable · ${attention.tracked} ok`,
+        `? ${attention.unreadable} unreadable`,
+      ],
+      width,
+    );
+  }
+
+  const labels = unique([
+    ...(attention.compactTier
+      ? [`${attention.provider} ${attention.compactTier}`]
+      : []),
+    ...(attention.tier ? [`${attention.provider} ${attention.tier}`] : []),
+    attention.provider,
+  ]);
+  const details = attentionDetail(attention, now);
+  const candidates = labels.flatMap((label) =>
+    details.flatMap((detail) => [
+      `! ${label} · ${detail}`,
+      `! ${label} ${detail}`,
+    ]),
+  );
+  return (
+    fittingText(candidates, width) || truncate(`! ${attention.provider}`, width)
+  );
+}
+
+function attentionTone(attention: Attention): Tone {
+  if (attention.kind === "healthy") return "cyan";
+  if (attention.kind === "data_health") return "yellow";
+  return attention.severity === "critical" ? "red" : "yellow";
+}
+
+function attentionLine(
+  state: DashboardState,
+  layout: Layout,
+): string | undefined {
+  if (!state.report?.providers.length) return undefined;
+  const attention = selectAttention(state.report);
+  return colorize(
+    attentionText(attention, layout.width, layout.now),
+    attentionTone(attention),
+    layout.color,
+  );
 }
 
 function resetCell(row: TierRow, now: Date): string | undefined {
@@ -309,18 +419,38 @@ function contentLines(
     ),
     layout.width,
   );
-  const lines = sections.flatMap((section, index) => [
-    ...(index > 0 ? [""] : []),
-    ...sectionLines(section.provider, section.presentation, columns, layout),
-  ]);
-  if (lines.length < height) lines.unshift("");
-  if (lines.length <= height) return lines;
-  const shown = lines.slice(0, height - 1);
-  while (shown.length && stripAnsi(shown.at(-1) ?? "").trim() === "")
-    shown.pop();
-  const hidden = lines.length - shown.length;
-  shown.push(colorize(`+${hidden} more rows`, "dim", layout.color));
-  return shown;
+  const detailSections = sections.map((section) =>
+    sectionLines(section.provider, section.presentation, columns, layout),
+  );
+  const detail = detailSections.flat();
+  const attention = attentionLine(state, layout);
+  const fixed = attention ? [attention] : [];
+
+  // Decorative provider gaps are admitted only after every real row fits.
+  // When space is tight they disappear from the bottom upward and never
+  // inflate the hidden-row count.
+  if (fixed.length + detail.length <= height) {
+    const separatorCount = Math.min(
+      Math.max(0, detailSections.length - 1),
+      height - fixed.length - detail.length,
+    );
+    const withSeparators = detailSections.flatMap((lines, index) => [
+      ...(index > 0 && index <= separatorCount ? [""] : []),
+      ...lines,
+    ]);
+    return [...fixed, ...withSeparators];
+  }
+
+  const detailCapacity = Math.max(0, height - fixed.length - 1);
+  const shown = detail.slice(0, detailCapacity);
+  const hidden = detail.length - shown.length;
+  return [
+    ...fixed,
+    ...shown,
+    ...(hidden > 0
+      ? [colorize(`+${hidden} more rows`, "dim", layout.color)]
+      : []),
+  ].slice(0, height);
 }
 
 function titleLine(state: DashboardState, layout: Layout): string {

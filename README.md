@@ -1,18 +1,18 @@
 # AI Quota for Herdr
 
-**See Claude, OpenAI Codex, Cursor, and Kimi subscription quota at a glance without leaving Herdr.**
+**See the next Claude, OpenAI Codex, Cursor, or Kimi limit before it stops your work—without leaving Herdr.**
 
 ```bash
 herdr plugin install kvkenyon/herdr-quota --yes
 ```
 
-![AI Quota sliding into Herdr with provider-specific tiers, remaining-allowance gauges, reset countdowns, and pace](docs/readme-demo.gif)
+![AI Quota open in Herdr from the first frame, leading with the limiting provider and exhaustion time above provider tiers](docs/readme-demo.gif)
 
 [![CI](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml/badge.svg)](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kvkenyon/herdr-quota)](https://github.com/kvkenyon/herdr-quota/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A slim, full-height sidebar shows every trustworthy provider tier with the allowance still remaining, reset countdown, and pace conclusion. It keeps the current tab and split arrangement intact, adds one narrow column on the right, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
+A slim, full-height sidebar leads with the known provider tier most likely to block work first, then shows every trustworthy tier with the allowance still remaining, reset countdown, and pace conclusion. It refreshes while it is open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
 
 ## Bind `prefix+u`
 
@@ -56,13 +56,27 @@ Remove the `[[keys.command]]` block from `config.toml` and reload configuration 
 
 ## Use
 
-| Control      | Action                                         |
-| ------------ | ---------------------------------------------- |
-| `prefix+u`   | Toggle the quota sidebar                       |
-| `r`          | Refresh while keeping the last reading visible |
-| `q` / Escape | Close and restore the prior layout             |
+| Control      | Action                                     |
+| ------------ | ------------------------------------------ |
+| `prefix+u`   | Toggle the quota sidebar                   |
+| `r`          | Refresh now and reset automatic scheduling |
+| `q` / Escape | Close and restore the prior layout         |
 
-The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height without scrolling; a shorter pane cuts whole rows and says how many are hidden. Restrained color marks at-risk tiers, but the words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
+The sidebar refreshes immediately, then five minutes after each completed attempt without overlapping collectors. A whole-collector failure keeps the last good reading visible and retries after 10, 20, then at most 30 minutes. Pressing `r` preempts the current attempt, refreshes immediately, and resets that backoff.
+
+The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height without scrolling. When height is tight, decorative provider gaps disappear before whole data rows; any hidden-row count excludes those gaps. Restrained color marks at-risk tiers, but the marker and words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
+
+### Reading the attention line
+
+The first content line is a decision summary built only from `quota-axi`'s schema-v5 effective availability, pace, and runway—not a locally inferred cap:
+
+| Marker | Meaning                                                                |
+| ------ | ---------------------------------------------------------------------- |
+| `!`    | The earliest established exhaustion, or a tier already spent.          |
+| `=`    | Every current limit with known pace is expected to last through reset. |
+| `?`    | Some provider or pace data is not current enough for a safe answer.    |
+
+An established projection shows when capacity runs out; an early projection remains `ahead` on its tier row without pretending its time is precise. A spent tier shows its reset when known. Signed-out, stale, unavailable, and error providers never contribute a precise forecast. When a stronger current constraint exists it remains the summary, while unreadable providers retain their own explicit status below. Unknown limiting IDs fall back to the provider name and are never exposed.
 
 ### Reading the gauges
 
@@ -107,6 +121,7 @@ The plugin delegates provider access to its plugin-local `quota-axi@~0.1.29` exe
 - Credentials remain in stores owned by official provider tools.
 - Provider requests go directly from `quota-axi` to first-party endpoints.
 - The normalized response remains in sidebar memory and is not persisted.
+- Automatic refresh exists only while the pane process is alive: five minutes after success, with bounded 10/20/30-minute whole-collector failure backoff.
 - Raw responses, account identifiers, credentials, and credential paths are never logged.
 - Refreshes have a 12-second process deadline and 2 MiB output limit.
 - Child-process and provider errors are bounded and sanitized; one failed provider does not hide the others.
@@ -131,7 +146,7 @@ The Keychain grant only lets `quota-axi` read a credential that already works. E
 
 **A provider shows `signed out`.** Run the recovery command the sidebar shows for that provider (see the table above). On macOS, Claude or Cursor may also need the one-time Keychain approval above - but only a real sign-in fixes expired credentials.
 
-**A reading is stale or unknown.** The sidebar preserves truthful state when a provider cannot be reached. Press `r` after connectivity or authentication recovers.
+**A reading is stale or unknown.** The sidebar preserves truthful state when a provider cannot be reached and keeps retrying while open. Press `r` to retry immediately after connectivity or authentication recovers.
 
 **Refresh times out.** The sidebar terminates `quota-axi` after 12 seconds so an unavailable vendor cannot strand the pane. Independent provider results remain visible when available.
 
@@ -145,8 +160,8 @@ npm run check
 npm run preview
 ```
 
-`npm run check` formats, lints, type-checks, tests, and regenerates the sanitized preview. The runtime provider boundary lives in `src/schema.ts` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
+`npm run check` formats, lints, type-checks, runs the selector/refresh/layout suite, and regenerates the sanitized no-color preview. Responsive fixtures cover 20/24/36 columns and 12/23/30 rows, including current Codex model session/week labels. The runtime provider boundary lives in `src/schema.ts` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
 
 ## License and references
 
-MIT licensed. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the open-source Herdr plugins reviewed during design.
+MIT licensed. See [CHANGELOG.md](CHANGELOG.md) for release notes and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the open-source Herdr plugins reviewed during design.
