@@ -236,8 +236,7 @@ export function providerAnnotation(
   provider: ProviderQuota,
 ): ProviderAnnotation | undefined {
   if (provider.state.reason === "keychain_access_required") return undefined;
-  if (providerNeedsSignIn(provider))
-    return { text: "signed out", tone: "bad" };
+  if (providerNeedsSignIn(provider)) return { text: "signed out", tone: "bad" };
   if (provider.state.stale || provider.state.status === "stale")
     return { text: "stale", tone: "warn" };
   if (provider.state.status === "rate_limited")

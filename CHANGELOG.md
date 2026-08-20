@@ -4,7 +4,7 @@
 
 ### Added
 
-- A color-independent attention line selects the earliest trustworthy effective constraint across Claude, Codex, Cursor, and Kimi, including established exhaustion timing, spent-tier resets, low remaining capacity, all-known-on-pace, and incomplete-data states.
+- A color-independent attention line selects the earliest trustworthy effective constraint across Claude, Codex, Cursor, and Kimi, including established exhaustion timing, spent-tier resets, all-known-on-pace, and incomplete-data states.
 - Automatic completion-relative refresh every five minutes, with no collector overlap and bounded 10/20/30-minute backoff after whole-collector failures.
 - Deterministic selector, scheduler, current-schema Codex model-window, and no-color responsive coverage at 20/24/36 columns and 12/23/30 rows.
 

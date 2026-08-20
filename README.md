@@ -72,11 +72,11 @@ The first content line is a decision summary built only from `quota-axi`'s schem
 
 | Marker | Meaning                                                                |
 | ------ | ---------------------------------------------------------------------- |
-| `!`    | The earliest known exhaustion or lowest known effective allowance.     |
+| `!`    | The earliest established exhaustion, or a tier already spent.          |
 | `=`    | Every current limit with known pace is expected to last through reset. |
 | `?`    | Some provider or pace data is not current enough for a safe answer.    |
 
-An established projection shows when capacity runs out; an early projection says `ahead` without pretending its time is precise. A spent tier shows its reset when known. Signed-out, stale, unavailable, and error providers never contribute a precise forecast. When a stronger current constraint exists it remains the summary, while unreadable providers retain their own explicit status below. Unknown limiting IDs fall back to the provider name and are never exposed.
+An established projection shows when capacity runs out; an early projection remains `ahead` on its tier row without pretending its time is precise. A spent tier shows its reset when known. Signed-out, stale, unavailable, and error providers never contribute a precise forecast. When a stronger current constraint exists it remains the summary, while unreadable providers retain their own explicit status below. Unknown limiting IDs fall back to the provider name and are never exposed.
 
 ### Reading the gauges
 
