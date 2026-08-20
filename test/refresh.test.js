@@ -123,6 +123,7 @@ test("whole-collector failures back off 10, 20, then 30 minutes", async () => {
   let lastGood = "previous";
   let failures = 0;
   let cancellations = 0;
+  const scheduled = [];
   const scheduler = new RefreshScheduler({
     collect() {
       attempt++;
@@ -136,6 +137,9 @@ test("whole-collector failures back off 10, 20, then 30 minutes", async () => {
     },
     onFailure() {
       failures++;
+    },
+    onScheduled(delayMs, afterFailure) {
+      scheduled.push([delayMs, afterFailure]);
     },
     onSettled() {},
     cancelActive() {
@@ -159,11 +163,45 @@ test("whole-collector failures back off 10, 20, then 30 minutes", async () => {
     assert.equal(lastGood, "previous");
   }
   assert.equal(failures, 4);
+  assert.deepEqual(scheduled.slice(0, 4), [
+    [FAILURE_BACKOFF_MS[0], true],
+    [FAILURE_BACKOFF_MS[1], true],
+    [FAILURE_BACKOFF_MS[2], true],
+    [FAILURE_BACKOFF_MS[2], true],
+  ]);
 
   await scheduler.manual();
   assert.equal(lastGood, "fresh");
   assert.equal(timers.current().delayMs, NORMAL_REFRESH_MS);
+  assert.deepEqual(scheduled.at(-1), [NORMAL_REFRESH_MS, false]);
   assert.equal(cancellations, 1);
+  scheduler.close();
+});
+
+test("manual retry resets failure backoff before scheduling its result", async () => {
+  const timers = fakeTimers();
+  const scheduled = [];
+  const scheduler = new RefreshScheduler({
+    collect: () => Promise.reject(new Error("failed")),
+    onStart() {},
+    onSuccess() {},
+    onFailure() {},
+    onScheduled(delayMs, afterFailure) {
+      scheduled.push([delayMs, afterFailure]);
+    },
+    onSettled() {},
+    cancelActive() {},
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+
+  await scheduler.start();
+  timers.current().callback();
+  await flush();
+  assert.deepEqual(scheduled.slice(-1)[0], [FAILURE_BACKOFF_MS[1], true]);
+
+  await scheduler.manual();
+  assert.deepEqual(scheduled.at(-1), [FAILURE_BACKOFF_MS[0], true]);
   scheduler.close();
 });
 

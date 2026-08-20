@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { stripAnsi } from "../dist/ansi.js";
-import { renderDashboard, renderPlain } from "../dist/render.js";
+import {
+  applyDashboardScroll,
+  clampDashboardScroll,
+  dashboardScrollMetrics,
+  renderDashboard,
+  renderPlain,
+} from "../dist/render.js";
 import { adaptQuotaResponse } from "../dist/schema.js";
 
 const NOW = new Date("2026-08-18T18:00:00.000Z");
@@ -48,8 +54,9 @@ test("36-cell sidebar shows every provider tier without scrolling", async () => 
     " Week        ████ 100%  2d · on pace",
     " Session     ████ 100% 57m · on pace",
   ]);
-  assert.match(output, /^r refresh · q\/esc close$/m);
+  assert.match(output, /^j\/k scroll · PgUp\/PgDn · r · q\/esc$/m);
   assert.doesNotMatch(output, /more rows/);
+  assert.doesNotMatch(output, /Rows \d/);
   for (const line of output.split("\n")) assert.ok(line.length <= 36, line);
 });
 
@@ -134,6 +141,7 @@ test("an unavailable reading is distinct from zero quota", async () => {
   assert.match(output, /Kimi {2,}no reading/);
   assert.match(output, /Network unavailable/);
   assert.doesNotMatch(output, /0%/);
+  assert.doesNotMatch(output, /retry/);
 });
 
 test("stale readings stay visible without pretending pace is known", async () => {
@@ -191,12 +199,156 @@ test("a pane too narrow for both keeps the pace and drops the gauge", async () =
   assert.doesNotMatch(at(22), /█/);
 });
 
-test("short panes cut whole rows and say how much is hidden", async () => {
+test("short panes cut whole rows and report the visible position", async () => {
   const output = render(await report("complete"), { height: 12 });
   assert.equal(output.split("\n").length, 12);
   assert.match(output, /^! Claude Fable · out 13h/m);
-  assert.match(output, /^\+8 more rows/m);
+  assert.match(output, /^Rows 1–8 of 16/m);
+  assert.match(output, /^j\/k scroll · PgUp\/PgDn · r · q\/esc$/m);
+  assert.doesNotMatch(output, /more rows/);
   assert.doesNotMatch(output, /^\s*$/m);
+});
+
+test("every provider/detail row is reachable with pinned context at exact pane sizes", async () => {
+  const value = await report("complete");
+  for (const width of [20, 24, 36]) {
+    const reference = render(value, { width, height: 40 })
+      .split("\n")
+      .slice(2, -1)
+      .map((line) => line.trimEnd())
+      .filter(Boolean);
+    assert.equal(reference.length, 16, `${width}-column detail count`);
+
+    for (const height of [6, 8, 12, 23]) {
+      const state = { report: value, loading: false, scroll: 0 };
+      const reached = Array(reference.length).fill(false);
+      let pinned;
+
+      while (true) {
+        const metrics = dashboardScrollMetrics(state, height);
+        const lines = renderPlain(state, { width, height, now: NOW })
+          .split("\n")
+          .map((line) => line.trimEnd());
+        assert.equal(lines.length, height);
+        for (const line of lines)
+          assert.ok(line.length <= width, `${width}x${height}: ${line}`);
+
+        const currentPinned = [lines[0], lines[1], lines.at(-1)];
+        pinned ??= currentPinned;
+        assert.deepEqual(currentPinned, pinned, `${width}x${height} pinned`);
+
+        const detailEnd = metrics.overflowing ? -2 : -1;
+        const visible = lines.slice(2, detailEnd).filter(Boolean);
+        assert.deepEqual(
+          visible,
+          reference.slice(
+            metrics.scroll,
+            metrics.scroll + metrics.viewportRows,
+          ),
+          `${width}x${height} at ${metrics.scroll}`,
+        );
+        for (
+          let index = metrics.scroll;
+          index < metrics.scroll + metrics.viewportRows;
+          index++
+        )
+          reached[index] = true;
+
+        if (metrics.overflowing) {
+          assert.equal(
+            lines.at(-2),
+            `Rows ${metrics.scroll + 1}–${metrics.scroll + metrics.viewportRows} of ${metrics.rowCount}`,
+          );
+        }
+        if (metrics.scroll === metrics.maxScroll) break;
+        applyDashboardScroll(state, "scroll_down", height);
+      }
+      assert.ok(reached.every(Boolean), `${width}x${height} reachable`);
+    }
+  }
+});
+
+test("line and page navigation clamp after data, auth, and height changes", async () => {
+  const value = await report("complete");
+  const state = { report: value, loading: false, scroll: 0 };
+
+  assert.equal(applyDashboardScroll(state, "page_down", 8), 4);
+  assert.equal(applyDashboardScroll(state, "scroll_down", 8), 5);
+  assert.equal(applyDashboardScroll(state, "page_up", 8), 1);
+  assert.equal(applyDashboardScroll(state, "scroll_up", 8), 0);
+  assert.equal(applyDashboardScroll(state, "scroll_up", 8), 0);
+
+  state.scroll = 999;
+  assert.equal(clampDashboardScroll(state, 8), 12);
+  state.scroll = clampDashboardScroll(state, 8);
+  state.report.providers = state.report.providers.slice(0, 2);
+  assert.equal(clampDashboardScroll(state, 8), 5);
+
+  state.scroll = clampDashboardScroll(state, 8);
+  state.report.providers[0].state.status = "auth_required";
+  assert.equal(clampDashboardScroll(state, 8), 2);
+
+  state.scroll = clampDashboardScroll(state, 8);
+  assert.equal(clampDashboardScroll(state, 23), 0);
+});
+
+test("safe top-level failures retain last-good detail and show automatic retry timing", async () => {
+  const value = await report("complete");
+  const expectedAt20 = new Map([
+    ["timeout", "Timeout · retry 10m"],
+    ["missing_executable", "Missing · retry 10m"],
+    ["incompatible_output", "Schema · retry 10m"],
+    ["network_process", "Failed · retry 10m"],
+  ]);
+
+  for (const [kind, expected] of expectedAt20) {
+    const state = {
+      report: value,
+      loading: false,
+      scroll: 999,
+      failure: {
+        kind,
+        retryAt: new Date(NOW.getTime() + 10 * 60_000),
+        raw: "\u001b[2JBearer secret /home/alice/.codex/auth.json",
+      },
+    };
+    const output = renderPlain(state, { width: 20, height: 8, now: NOW });
+    const lines = output.split("\n").map((line) => line.trimEnd());
+    assert.ok(lines.includes(expected));
+    assert.ok(lines.includes("! Claude · out 13h"));
+    assert.ok(lines.includes("Rows 14–16 of 16"));
+    assert.ok(lines.includes("Kimi"));
+    assert.ok(lines.includes(" Session    100% 57m"));
+    assert.doesNotMatch(output, /secret|alice|auth\.json|Bearer/i);
+    assert.equal(output.includes("\u001b"), false);
+    for (const line of output.split("\n")) assert.ok(line.length <= 20, line);
+  }
+});
+
+test("failure copy expands safely and first-load failures remain actionable", () => {
+  const cases = new Map([
+    ["timeout", "Quota check timed out · retry 10m"],
+    ["missing_executable", "quota-axi missing · retry 10m"],
+    ["incompatible_output", "Incompatible output · retry 10m"],
+    ["network_process", "Network/process failed · retry 10m"],
+  ]);
+  for (const [kind, expected] of cases) {
+    const output = renderPlain(
+      {
+        loading: false,
+        scroll: 0,
+        failure: {
+          kind,
+          retryAt: new Date(NOW.getTime() + 10 * 60_000),
+        },
+      },
+      { width: 36, height: 6, now: NOW },
+    );
+    const lines = output.split("\n").map((line) => line.trimEnd());
+    assert.ok(lines.includes(expected));
+    assert.ok(lines.includes("No quota readings"));
+    assert.ok(lines.includes("Press r to retry now"));
+  }
 });
 
 test("24x30 and 20x12 no-color views are stable snapshots", async () => {
@@ -234,7 +386,7 @@ test("24x30 and 20x12 no-color views are stable snapshots", async () => {
     "",
     "",
     "",
-    "r refresh · q/esc close",
+    "j/k PgUp/PgDn r/q",
   ]);
 
   const at20 = render(value, { width: 20, height: 12 })
@@ -251,8 +403,8 @@ test("24x30 and 20x12 no-color views are stable snapshots", async () => {
     "OpenAI Codex",
     " Week        79% 23h",
     " Spark week 100%  7d",
-    "+8 more rows",
-    "r refresh · q close",
+    "Rows 1–8 of 16",
+    "j/k PgUp/PgDn r/q",
   ]);
 });
 

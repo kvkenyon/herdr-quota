@@ -1,6 +1,23 @@
 # Changelog
 
-## 0.1.1 — unreleased
+## 0.1.2 — unreleased
+
+### Added
+
+- Whole-row `j`/`k`, arrow, Page Down, and Page Up navigation makes every provider and tier reachable in short panes while keeping the title/freshness, limiting-capacity attention, position, and footer pinned.
+- A truthful `Rows n–m of total` indicator replaces the hidden-row dead end and clamps after refresh, resize, provider disappearance, and authentication-state changes.
+- Top-level timeout, missing-executable, incompatible-output, and generic network/process failures now use finite safe copy with the scheduled automatic retry countdown.
+
+### Changed
+
+- Whole-collector failures retain last-good detail without retaining or displaying arbitrary child stderr; manual `r` still retries immediately and restarts backoff at 10 minutes.
+- Responsive coverage now exercises 20/24/36 columns at 6/8/12/23 rows, navigation/fragmented input, dynamic scroll clamping, pinned content, hostile failure output, retry timing, and line-width invariants.
+
+### Security and privacy
+
+- The credential boundary is unchanged. Collector output can no longer become top-level display copy: payloads, paths, credentials, accounts, terminal controls, and arbitrary process output are discarded behind an allow-list.
+
+## 0.1.1 — 2026-08-20
 
 ### Added
 
