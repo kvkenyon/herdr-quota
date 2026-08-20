@@ -84,8 +84,41 @@ export interface CollectorFailure {
   retryAt?: Date;
 }
 
+export type HistoryAvailability =
+  | "ready"
+  | "first_run"
+  | "recovered"
+  | "incompatible"
+  | "unavailable"
+  | "clock_skew"
+  | "no_usable_data";
+
+export type HistoryEvidenceKind =
+  | "reset"
+  | "remaining_drop"
+  | "pace_worse"
+  | "pace_better"
+  | "projection_earlier"
+  | "projection_later"
+  | "series";
+
+export interface HistoryEvidence {
+  kind: HistoryEvidenceKind;
+  provider: string;
+  scope: string;
+  limit?: string;
+  amount?: number;
+  remainingSeries?: number[];
+}
+
+export interface HistoryView {
+  availability: HistoryAvailability;
+  evidence?: HistoryEvidence;
+}
+
 export interface DashboardState {
   report?: QuotaReport;
+  history?: HistoryView;
   loading: boolean;
   failure?: CollectorFailure;
   lastAttemptAt?: Date;

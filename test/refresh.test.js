@@ -233,3 +233,82 @@ test("close clears the timer, cancels children, and ignores late results", async
   scheduler.close();
   assert.equal(cancellations, 1);
 });
+
+test("successful async post-collection work completes before scheduling", async () => {
+  const timers = fakeTimers();
+  const persisted = deferred();
+  const events = [];
+  const scheduler = new RefreshScheduler({
+    collect: async () => "fresh",
+    async onSuccess() {
+      events.push("history-start");
+      await persisted.promise;
+      events.push("history-done");
+    },
+    onStart() {},
+    onFailure() {},
+    onSettled() {
+      events.push("settled");
+    },
+    cancelActive() {},
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+
+  const running = scheduler.start();
+  await flush();
+  assert.deepEqual(events, ["history-start"]);
+  assert.equal(timers.current(), undefined);
+  persisted.resolve();
+  await running;
+  assert.deepEqual(events, ["history-start", "history-done", "settled"]);
+  assert.equal(timers.current().delayMs, NORMAL_REFRESH_MS);
+  scheduler.close();
+});
+
+test("manual refresh publishes live data while serializing history commits", async () => {
+  const timers = fakeTimers();
+  const firstHistory = deferred();
+  const attempts = [];
+  const livePublished = [];
+  const persisted = [];
+  const historyPublished = [];
+  const scheduler = new RefreshScheduler({
+    collect() {
+      const attempt = deferred();
+      attempts.push(attempt);
+      return attempt.promise;
+    },
+    onStart() {},
+    async onSuccess(value, isCurrent, serialize) {
+      livePublished.push(value);
+      const history = await serialize(async () => {
+        if (value === "older") await firstHistory.promise;
+        persisted.push(value);
+        return value;
+      });
+      if (isCurrent()) historyPublished.push(history);
+    },
+    onFailure() {},
+    onSettled() {},
+    cancelActive() {},
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+
+  const older = scheduler.start();
+  attempts[0].resolve("older");
+  await flush();
+  const newer = scheduler.manual();
+  attempts[1].resolve("newer");
+  await flush();
+
+  assert.deepEqual(livePublished, ["older", "newer"]);
+  assert.deepEqual(persisted, []);
+  assert.deepEqual(historyPublished, []);
+  firstHistory.resolve();
+  await Promise.all([older, newer]);
+  assert.deepEqual(persisted, ["older", "newer"]);
+  assert.deepEqual(historyPublished, ["newer"]);
+  scheduler.close();
+});

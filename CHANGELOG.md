@@ -1,6 +1,24 @@
 # Changelog
 
-## 0.1.2 — unreleased
+## 0.2.0 — unreleased
+
+### Added
+
+- A bounded schema-v1 local history document records only normalized display-safe quota facts after usable successful collections, with 512-snapshot/30-day retention, 15-minute equivalent-sample cadence, and atomic private-file replacement.
+- A compact color-independent change line distinguishes meaningful remaining-capacity drops, authoritative pace deterioration/improvement, reset replenishment, materially earlier/later established exhaustion projections, and neutral same-cycle sparklines.
+- Deterministic storage and timeline fixtures cover retention, cadence, privacy allow-listing, atomic interruption, corruption/schema/clock/permission recovery, reset segmentation, first-run insufficiency, provider/auth gaps, and exact 20/24/36-column by 6/8/12/23-row rendering.
+
+### Changed
+
+- Reset-time changes start a new comparison segment, so replenishment is never presented as improved consumption and post-reset sparklines never connect to the prior cycle.
+- History steps aside in 6- and 8-row panes; live limiting capacity, current rows, navigation position, and every v0.1.2 input/refresh/layout contract remain dominant and reachable.
+
+### Security and privacy
+
+- History excludes credentials, environment values, account identifiers, paths, raw output, arbitrary errors, tokens, source/plan content, and response bodies. Stale, signed-out, unavailable, error, and unknown-semantics providers contribute no quota facts; entirely unusable reports produce no write.
+- Corrupt/truncated data restarts locally, while schema mismatch, permission failure, clock rollback, and interrupted writes degrade to finite safe notes without disturbing live or last-good quota.
+
+## 0.1.2 — 2026-08-20
 
 ### Added
 

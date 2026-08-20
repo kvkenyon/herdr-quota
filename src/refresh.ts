@@ -2,11 +2,16 @@ export const NORMAL_REFRESH_MS = 5 * 60_000;
 export const FAILURE_BACKOFF_MS = [10 * 60_000, 20 * 60_000, 30 * 60_000];
 
 type Timer = ReturnType<typeof setTimeout>;
+type SerializeOperation = <R>(operation: () => Promise<R>) => Promise<R>;
 
 export interface RefreshSchedulerOptions<T> {
   collect: () => Promise<T>;
   onStart: () => void;
-  onSuccess: (value: T) => void;
+  onSuccess: (
+    value: T,
+    isCurrent: () => boolean,
+    serialize: SerializeOperation,
+  ) => void | Promise<void>;
   onFailure: (error: unknown) => void;
   onScheduled?: (delayMs: number, afterFailure: boolean) => void;
   onSettled: () => void;
@@ -28,6 +33,7 @@ export class RefreshScheduler<T> {
   private sequence = 0;
   private failures = 0;
   private closed = false;
+  private operationTail: Promise<void> = Promise.resolve();
 
   constructor(options: RefreshSchedulerOptions<T>) {
     this.options = options;
@@ -67,6 +73,15 @@ export class RefreshScheduler<T> {
     (this.timer as Timer & { unref?: () => void }).unref?.();
   }
 
+  private readonly serializeOperation: SerializeOperation = (operation) => {
+    const result = this.operationTail.then(operation);
+    this.operationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+
   private async refresh(preempt: boolean): Promise<void> {
     if (this.closed) return;
     this.clearPending();
@@ -77,7 +92,11 @@ export class RefreshScheduler<T> {
     try {
       const value = await this.options.collect();
       if (this.closed || sequence !== this.sequence) return;
-      this.options.onSuccess(value);
+      await this.options.onSuccess(
+        value,
+        () => !this.closed && sequence === this.sequence,
+        this.serializeOperation,
+      );
       this.failures = 0;
       succeeded = true;
     } catch (error) {
