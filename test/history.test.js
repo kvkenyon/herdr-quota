@@ -251,9 +251,10 @@ test("timeline fixtures produce only established conservative signals", () => {
   const expected = new Map([
     ["paceWorsening", ["pace_worse", undefined]],
     ["paceImproving", ["pace_better", undefined]],
-    ["ordinary", ["series", undefined]],
+    ["ordinary", [undefined, undefined]],
     ["meaningfulDrop", ["remaining_drop", 17]],
-    ["reset", ["series", undefined]],
+    ["meaningfulGain", ["remaining_gain", 17]],
+    ["reset", [undefined, undefined]],
     ["projectionEarlier", ["projection_earlier", 18_000]],
     ["projectionLater", ["projection_later", 18_000]],
   ]);
@@ -268,10 +269,6 @@ test("timeline fixtures produce only established conservative signals", () => {
     snapshots: timeline("reset").snapshots.slice(0, 2),
   };
   assert.equal(historyView(resetAtBoundary).evidence?.kind, "reset");
-  assert.deepEqual(
-    historyView(timeline("ordinary")).evidence?.remainingSeries,
-    [62, 60, 58],
-  );
 });
 
 test("provider disappearance, auth gaps, and first run never signal", () => {
@@ -282,11 +279,21 @@ test("provider disappearance, auth gaps, and first run never signal", () => {
   assert.equal(historyView(timeline("firstRun")).availability, "first_run");
 });
 
-test("reset changes segment the sparkline even without a replenishment signal", () => {
-  const value = timeline("reset");
-  const view = historyView(value);
-  assert.equal(view.evidence?.kind, "series");
-  assert.deepEqual(view.evidence.remainingSeries, [100, 98]);
+test("unchanged, equal-rounded, and ordinary same-cycle samples reserve the line", () => {
+  const exact = {
+    schemaVersion: HISTORY_SCHEMA_VERSION,
+    snapshots: [
+      snapshot("2026-08-20T12:00:00.000Z", 89),
+      snapshot("2026-08-20T12:15:00.000Z", 89),
+    ],
+  };
+  assert.equal(historyView(exact).evidence, undefined);
+
+  exact.snapshots[0].providers[0].facts[0].remaining = 89.1;
+  exact.snapshots[1].providers[0].facts[0].remaining = 89.4;
+  assert.equal(historyView(exact).evidence, undefined);
+  assert.equal(historyView(timeline("ordinary")).evidence, undefined);
+  assert.equal(historyView(timeline("reset")).evidence, undefined);
 });
 
 test("schema mismatch is preserved and corrupt history recovers safely", async () => {

@@ -14,25 +14,34 @@ import {
   type TierConclusion,
   type TierRow,
 } from "./tiers.js";
+import { preferenceFocusOrder, settingsEqual } from "./preferences.js";
+import {
+  defaultSettings,
+  isSupportedProvider,
+  type DashboardSettings,
+  type MeterMode,
+  type SupportedProvider,
+} from "./settings.js";
 import type {
   CollectorFailureKind,
   DashboardState,
   HistoryEvidence,
+  PreferencesState,
   ProviderQuota,
 } from "./types.js";
 
 const RESET = "\x1b[0m";
 const COLORS = {
-  cyan: "\x1b[38;5;81m",
-  yellow: "\x1b[38;5;220m",
-  red: "\x1b[38;5;203m",
-  white: "\x1b[38;5;255m",
-  dim: "\x1b[38;5;244m",
-  // A healthy gauge is a large solid shape, so it is drawn quieter than the
-  // text at the same level of risk and leaves the colour to the tiers that
-  // need attention.
-  steel: "\x1b[38;5;251m",
-  track: "\x1b[38;5;238m",
+  // Essential evidence inherits the terminal foreground so it remains
+  // readable in both Herdr themes. Warnings use weight; critical evidence may
+  // add the terminal's semantic red, but its words and markers keep meaning.
+  cyan: "",
+  yellow: "\x1b[1m",
+  red: "\x1b[1;31m",
+  white: "",
+  dim: "",
+  steel: "",
+  track: "",
   bold: "\x1b[1m",
 };
 type Tone = keyof typeof COLORS;
@@ -48,6 +57,7 @@ interface Layout {
   width: number;
   color: boolean;
   now: Date;
+  settings: DashboardSettings;
 }
 
 const INDENT = 1;
@@ -64,7 +74,8 @@ const PREFERRED_LABEL_WIDTH = 11;
 const ROW_OVERHEAD = INDENT + 1 + PERCENT_WIDTH + 1 + RESET_WIDTH;
 
 function colorize(value: string, tone: Tone, enabled: boolean): string {
-  return enabled ? `${COLORS[tone]}${value}${RESET}` : value;
+  const style = COLORS[tone];
+  return enabled && style ? `${style}${value}${RESET}` : value;
 }
 
 function annotationTone(tone: "bad" | "warn" | "muted"): Tone {
@@ -76,6 +87,16 @@ function percentTone(percent?: number): Tone {
   if (percent <= 10) return "red";
   if (percent <= 25) return "yellow";
   return "white";
+}
+
+export function meterPercent(
+  percentRemaining: number | undefined,
+  mode: MeterMode,
+): number | undefined {
+  if (percentRemaining === undefined || !Number.isFinite(percentRemaining))
+    return undefined;
+  const remaining = Math.max(0, Math.min(100, percentRemaining));
+  return mode === "used" ? 100 - remaining : remaining;
 }
 
 function conclusionCandidates(
@@ -217,12 +238,58 @@ function attentionTone(attention: Attention): Tone {
   return attention.severity === "critical" ? "red" : "yellow";
 }
 
+function providerId(provider: ProviderQuota): SupportedProvider | undefined {
+  const id = provider.provider.toLowerCase();
+  return isSupportedProvider(id) ? id : undefined;
+}
+
+function visibleProvidersInSourceOrder(
+  state: DashboardState,
+  settings: DashboardSettings,
+): ProviderQuota[] {
+  return (state.report?.providers ?? []).filter((provider) => {
+    const id = providerId(provider);
+    return id !== undefined && !settings.hiddenProviders.includes(id);
+  });
+}
+
+function orderedVisibleProviders(
+  state: DashboardState,
+  settings: DashboardSettings,
+): ProviderQuota[] {
+  const rank = new Map(
+    settings.providerOrder.map((provider, index) => [provider, index]),
+  );
+  return visibleProvidersInSourceOrder(state, settings).toSorted(
+    (left, right) =>
+      (rank.get(providerId(left)!) ?? Number.MAX_SAFE_INTEGER) -
+      (rank.get(providerId(right)!) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
+function historyProviderId(value: string): SupportedProvider | undefined {
+  const normalized = value.toLowerCase();
+  if (normalized === "openai codex") return "codex";
+  return isSupportedProvider(normalized) ? normalized : undefined;
+}
+
+function historyVisible(
+  state: DashboardState,
+  settings: DashboardSettings,
+): boolean {
+  const evidence = state.history?.evidence;
+  if (!evidence) return true;
+  const id = historyProviderId(evidence.provider);
+  return id !== undefined && !settings.hiddenProviders.includes(id);
+}
+
 function attentionLine(
   state: DashboardState,
   layout: Layout,
 ): string | undefined {
-  if (!state.report?.providers.length) return undefined;
-  const attention = selectAttention(state.report);
+  const providers = visibleProvidersInSourceOrder(state, layout.settings);
+  if (!state.report || !providers.length) return undefined;
+  const attention = selectAttention({ ...state.report, providers });
   return colorize(
     attentionText(attention, layout.width, layout.now),
     attentionTone(attention),
@@ -237,27 +304,6 @@ function historySubject(evidence: HistoryEvidence): string {
       ? undefined
       : evidence.scope);
   return detail ? `${evidence.provider} ${detail}` : evidence.provider;
-}
-
-function historySparkline(values: number[]): string {
-  const cells = "▁▂▃▄▅▆▇█";
-  const minimum = Math.min(...values);
-  const maximum = Math.max(...values);
-  if (minimum === maximum) return values.map(() => "▄").join("");
-  return values
-    .map(
-      (value) =>
-        cells[
-          Math.min(
-            7,
-            Math.max(
-              0,
-              Math.round(((value - minimum) / (maximum - minimum)) * 7),
-            ),
-          )
-        ],
-    )
-    .join("");
 }
 
 function historyEvidenceCandidates(evidence: HistoryEvidence): string[] {
@@ -276,6 +322,14 @@ function historyEvidenceCandidates(evidence: HistoryEvidence): string[] {
         `↓ ${subject} · ${amount} drop`,
         `↓ ${subject} ${amount}`,
         `↓ ${provider} ${amount}`,
+      ];
+    }
+    case "remaining_gain": {
+      const amount = `${Math.round(evidence.amount ?? 0)}pp`;
+      return [
+        `↑ ${subject} · ${amount} gain`,
+        `↑ ${subject} ${amount}`,
+        `↑ ${provider} ${amount}`,
       ];
     }
     case "pace_worse":
@@ -310,29 +364,16 @@ function historyEvidenceCandidates(evidence: HistoryEvidence): string[] {
         `↗ ${provider} ${movement}`,
       ];
     }
-    case "series": {
-      const values = evidence.remainingSeries ?? [];
-      const spark = historySparkline(values);
-      const first = values[0];
-      const current = values.at(-1);
-      const movement = `${first ?? "--"}→${current ?? "--"}%`;
-      return [
-        `~ ${subject} ${spark} · ${movement}`,
-        `~ ${subject} ${movement}`,
-        `~ ${provider} ${movement}`,
-      ];
-    }
   }
 }
 
 function historyTone(evidence: HistoryEvidence): Tone {
   return evidence.kind === "pace_better" ||
+    evidence.kind === "remaining_gain" ||
     evidence.kind === "projection_later" ||
     evidence.kind === "reset"
     ? "cyan"
-    : evidence.kind === "series"
-      ? "dim"
-      : "yellow";
+    : "yellow";
 }
 
 function historyLine(
@@ -340,24 +381,29 @@ function historyLine(
   layout: Layout,
 ): string | undefined {
   const history = state.history;
-  if (!history || history.availability === "no_usable_data") return undefined;
+  if (
+    !history ||
+    history.availability === "no_usable_data" ||
+    !historyVisible(state, layout.settings)
+  )
+    return undefined;
   if (history.evidence) {
     const text =
       fittingText(historyEvidenceCandidates(history.evidence), layout.width) ||
       truncate(`~ ${history.evidence.provider} history`, layout.width);
     return colorize(text, historyTone(history.evidence), layout.color);
   }
+  if (history.availability === "first_run" || history.availability === "ready")
+    return undefined;
   const candidates =
-    history.availability === "first_run"
-      ? ["~ History starts with this sample", "~ History starts now"]
-      : history.availability === "recovered"
-        ? ["~ History restarted safely", "~ History restarted"]
-        : history.availability === "clock_skew"
-          ? ["~ History restarted after clock change", "~ History restarted"]
-          : history.availability === "incompatible" ||
-              history.availability === "unavailable"
-            ? ["~ Local history unavailable", "~ History unavailable"]
-            : ["~ History needs another sample", "~ History needs sample"];
+    history.availability === "recovered"
+      ? ["~ History restarted safely", "~ History restarted"]
+      : history.availability === "clock_skew"
+        ? ["~ History restarted after clock change", "~ History restarted"]
+        : history.availability === "incompatible" ||
+            history.availability === "unavailable"
+          ? ["~ Local history unavailable", "~ History unavailable"]
+          : ["~ History unavailable"];
   const text =
     fittingText(candidates, layout.width) ||
     truncate("~ History unavailable", layout.width);
@@ -369,12 +415,20 @@ function historyLine(
   return colorize(text, tone, layout.color);
 }
 
-function showsHistory(state: DashboardState, available: number): boolean {
+function showsHistory(
+  state: DashboardState,
+  available: number,
+  settings: DashboardSettings,
+): boolean {
   return (
     available >= 8 &&
     !!state.history &&
     !state.failure &&
-    state.history.availability !== "no_usable_data"
+    historyVisible(state, settings) &&
+    state.history.availability !== "no_usable_data" &&
+    (state.history.evidence !== undefined ||
+      (state.history.availability !== "ready" &&
+        state.history.availability !== "first_run"))
   );
 }
 
@@ -447,7 +501,11 @@ function tierColumns(rows: TierRow[], width: number): TierColumns {
  */
 function barCell(row: TierRow, columns: TierColumns, layout: Layout): string {
   if (columns.barWidth <= 0) return "";
-  const bar = remainingBar(row.percentRemaining, columns.barWidth);
+  const displayed = meterPercent(
+    row.percentRemaining,
+    layout.settings.meterMode,
+  );
+  const bar = remainingBar(displayed, columns.barWidth);
   if (!layout.color || row.percentRemaining === undefined) return `${bar} `;
 
   const risk = percentTone(row.percentRemaining);
@@ -476,7 +534,9 @@ function tierLine(row: TierRow, columns: TierColumns, layout: Layout): string {
   const styledLabel =
     layout.color && row.limiting ? colorize(label, "bold", true) : label;
 
-  const percent = formatPercent(row.percentRemaining).padStart(PERCENT_WIDTH);
+  const percent = formatPercent(
+    meterPercent(row.percentRemaining, layout.settings.meterMode),
+  ).padStart(PERCENT_WIDTH);
   const styledPercent = colorize(
     percent,
     percentTone(row.percentRemaining),
@@ -554,8 +614,11 @@ export interface DashboardScrollMetrics {
   overflowing: boolean;
 }
 
-function detailRowCount(state: DashboardState): number {
-  return (state.report?.providers ?? []).reduce((count, provider) => {
+function detailRowCount(
+  state: DashboardState,
+  settings: DashboardSettings,
+): number {
+  return orderedVisibleProviders(state, settings).reduce((count, provider) => {
     const presentation = presentProvider(provider);
     return (
       count + 1 + (presentation.kind === "tiers" ? presentation.rows.length : 1)
@@ -566,12 +629,15 @@ function detailRowCount(state: DashboardState): number {
 function scrollMetricsForAvailable(
   state: DashboardState,
   available: number,
+  settings: DashboardSettings,
 ): DashboardScrollMetrics {
-  const rowCount = detailRowCount(state);
+  const rowCount = detailRowCount(state, settings);
+  const hidden = settings.hiddenProviders.length;
   const fixedRows =
     (rowCount > 0 ? 1 : 0) +
+    (rowCount > 0 && hidden > 0 ? 1 : 0) +
     (state.failure ? 1 : 0) +
-    (showsHistory(state, available) ? 1 : 0);
+    (showsHistory(state, available, settings) ? 1 : 0);
   const overflowing = fixedRows + rowCount > available;
   const viewportRows = overflowing
     ? Math.max(0, available - fixedRows - 1)
@@ -594,7 +660,11 @@ export function dashboardScrollMetrics(
   height: number,
 ): DashboardScrollMetrics {
   const safeHeight = Math.max(6, Math.floor(height));
-  return scrollMetricsForAvailable(state, Math.max(1, safeHeight - 2));
+  return scrollMetricsForAvailable(
+    state,
+    Math.max(1, safeHeight - 2),
+    state.settings ?? defaultSettings(),
+  );
 }
 
 export function clampDashboardScroll(
@@ -678,12 +748,40 @@ function positionLine(metrics: DashboardScrollMetrics, layout: Layout): string {
   return colorize(text, "dim", layout.color);
 }
 
+function hiddenLine(settings: DashboardSettings, layout: Layout): string {
+  const count = settings.hiddenProviders.length;
+  const noun = count === 1 ? "provider" : "providers";
+  const text = fittingText(
+    [
+      `${count} hidden ${noun} · p Preferences`,
+      `${count} hidden · p prefs`,
+      `${count} hidden · p`,
+    ],
+    layout.width,
+  );
+  return colorize(text || `${count} hidden`, "yellow", layout.color);
+}
+
 function contentLines(
   state: DashboardState,
   layout: Layout,
   height: number,
 ): string[] {
-  const providers = state.report?.providers ?? [];
+  const hidden = layout.settings.hiddenProviders.length;
+  if (hidden === layout.settings.providerOrder.length) {
+    const failure = failureLine(state, layout);
+    return [
+      ...(failure ? [failure] : []),
+      colorize("No providers shown", "yellow", layout.color),
+      fittingText(
+        ["Press p for Preferences", "Press p for prefs"],
+        layout.width,
+      ),
+      hiddenLine(layout.settings, layout),
+    ].slice(0, height);
+  }
+
+  const providers = orderedVisibleProviders(state, layout.settings);
   if (!providers.length) {
     const failure = failureLine(state, layout);
     const message = state.loading ? "Refreshing quota…" : "No quota readings";
@@ -696,6 +794,7 @@ function contentLines(
       ...(failure ? [failure] : [""]),
       colorize(message, state.failure ? "red" : "cyan", layout.color),
       hint,
+      ...(hidden > 0 ? [hiddenLine(layout.settings, layout)] : []),
     ].slice(0, height);
   }
 
@@ -717,13 +816,15 @@ function contentLines(
   const detail = detailSections.flat();
   const attention = attentionLine(state, layout);
   const failure = failureLine(state, layout);
-  const history = showsHistory(state, height)
+  const history = showsHistory(state, height, layout.settings)
     ? historyLine(state, layout)
     : undefined;
-  const fixed = [attention, failure, history].filter(
+  const hiddenDisclosure =
+    hidden > 0 ? hiddenLine(layout.settings, layout) : undefined;
+  const fixed = [attention, hiddenDisclosure, failure, history].filter(
     (line): line is string => line !== undefined,
   );
-  const metrics = scrollMetricsForAvailable(state, height);
+  const metrics = scrollMetricsForAvailable(state, height, layout.settings);
 
   // Decorative provider gaps are admitted only after every real row fits.
   // When space is tight they disappear from the bottom upward and never
@@ -751,12 +852,143 @@ function contentLines(
   ].slice(0, height);
 }
 
-function titleLine(state: DashboardState, layout: Layout): string {
-  const title = colorize(
-    layout.width >= 28 ? "AI Quota" : "Quota",
-    "bold",
-    layout.color,
+const PREFERENCE_PROVIDER_NAMES: Record<SupportedProvider, string> = {
+  claude: "Claude",
+  codex: "OpenAI Codex",
+  cursor: "Cursor",
+  kimi: "Kimi",
+};
+
+function preferenceTitle(
+  state: DashboardState,
+  preferences: PreferencesState,
+  layout: Layout,
+): string {
+  const focusOrder = preferenceFocusOrder(preferences.draft);
+  const focus = Math.max(0, focusOrder.indexOf(preferences.focus)) + 1;
+  const dirty = settingsEqual(
+    state.settings ?? defaultSettings(),
+    preferences.draft,
+  )
+    ? ""
+    : "*";
+  const title = layout.width >= 24 ? `Preferences${dirty}` : `Prefs${dirty}`;
+  const activity = preferences.saving
+    ? "saving"
+    : `${focus}/${focusOrder.length}`;
+  return truncate(
+    `${colorize(title, "bold", layout.color)}${" ".repeat(
+      Math.max(1, layout.width - title.length - activity.length),
+    )}${activity}`,
+    layout.width,
   );
+}
+
+function preferenceRows(
+  preferences: PreferencesState,
+  layout: Layout,
+): { focus: PreferencesState["focus"]; line: string }[] {
+  const visible = preferences.draft.providerOrder.filter(
+    (provider) => !preferences.draft.hiddenProviders.includes(provider),
+  );
+  const providers = preferences.draft.providerOrder.map((provider) => {
+    const selected = preferences.focus === provider;
+    const shown = !preferences.draft.hiddenProviders.includes(provider);
+    const rank = shown ? String(visible.indexOf(provider) + 1) : "-";
+    const text = `${selected ? ">" : " "} ${rank} [${shown ? "x" : " "}] ${PREFERENCE_PROVIDER_NAMES[provider]}`;
+    return {
+      focus: provider,
+      line: colorize(
+        truncate(text, layout.width),
+        selected ? "bold" : "white",
+        layout.color,
+      ),
+    };
+  });
+  const action = (
+    focus: "meter" | "save" | "cancel" | "reset",
+    label: string,
+  ) => {
+    const selected = preferences.focus === focus;
+    const text = `${selected ? ">" : " "} ${label}`;
+    return {
+      focus,
+      line: colorize(
+        truncate(text, layout.width),
+        selected ? "bold" : "white",
+        layout.color,
+      ),
+    };
+  };
+  return [
+    ...providers,
+    action("meter", `Meter: ${preferences.draft.meterMode}`),
+    action("save", "Save"),
+    action("cancel", "Cancel"),
+    action("reset", "Reset defaults"),
+  ];
+}
+
+function preferenceContentLines(
+  preferences: PreferencesState,
+  layout: Layout,
+  available: number,
+): string[] {
+  if (preferences.confirmReset) {
+    return [
+      colorize("Reset draft?", "yellow", layout.color),
+      "Show all providers",
+      "Meter: remaining",
+      "Save still required",
+    ].slice(0, available);
+  }
+
+  const rows = preferenceRows(preferences, layout);
+  const focus = Math.max(
+    0,
+    rows.findIndex((row) => row.focus === preferences.focus),
+  );
+  const start = Math.min(
+    Math.max(0, focus - available + 1),
+    Math.max(0, rows.length - available),
+  );
+  return rows.slice(start, start + available).map((row) => row.line);
+}
+
+function preferenceFooter(
+  preferences: PreferencesState,
+  layout: Layout,
+): string {
+  if (preferences.notice === "save_failed")
+    return truncate("Save failed · s retry · esc", layout.width);
+  if (preferences.saving) return "Saving…";
+  if (preferences.confirmReset)
+    return truncate("y reset · n/esc back", layout.width);
+  if (isSupportedProvider(preferences.focus)) {
+    const hidden = preferences.draft.hiddenProviders.includes(
+      preferences.focus,
+    );
+    return truncate(
+      fittingText(
+        hidden
+          ? ["j/k select · space show", "j/k · space show"]
+          : ["j/k · space toggle · u/d reorder", "space · u/d reorder"],
+        layout.width,
+      ),
+      layout.width,
+    );
+  }
+  if (preferences.focus === "meter")
+    return truncate("j/k · ←/→ or space", layout.width);
+  return truncate("j/k · enter · esc cancel", layout.width);
+}
+
+function titleLine(state: DashboardState, layout: Layout): string {
+  if (state.preferences)
+    return preferenceTitle(state, state.preferences, layout);
+  const base = layout.width >= 28 ? "AI Quota" : "Quota";
+  const meter = layout.settings.meterMode === "used" ? " · used" : "";
+  const title = colorize(`${base}${meter}`, "bold", layout.color);
   const activity = state.loading
     ? colorize("refreshing", "cyan", layout.color)
     : state.report
@@ -768,12 +1000,19 @@ function titleLine(state: DashboardState, layout: Layout): string {
   );
 }
 
-function footerLine(_state: DashboardState, layout: Layout): string {
-  const text =
-    layout.width >= 34
-      ? "j/k scroll · PgUp/PgDn · r · q/esc"
-      : "j/k PgUp/PgDn r/q";
-  return truncate(text, layout.width);
+function footerLine(state: DashboardState, layout: Layout): string {
+  if (state.preferences) return preferenceFooter(state.preferences, layout);
+  return truncate(
+    fittingText(
+      [
+        "j/k · PgUp/PgDn · p prefs · r · q/esc",
+        "j/k Pg · p prefs · r · q/esc",
+        "j/k · p prefs · r/q",
+      ],
+      layout.width,
+    ),
+    layout.width,
+  );
 }
 
 export function renderDashboard(
@@ -784,10 +1023,15 @@ export function renderDashboard(
     width: Math.max(16, Math.floor(options.width)),
     color: options.color ?? !process.env.NO_COLOR,
     now: options.now ?? new Date(),
+    settings: state.settings ?? defaultSettings(),
   };
   const height = Math.max(6, Math.floor(options.height));
   const available = Math.max(1, height - 2);
-  const content = contentLines(state, layout, available).slice(0, available);
+  const content = (
+    state.preferences
+      ? preferenceContentLines(state.preferences, layout, available)
+      : contentLines(state, layout, available)
+  ).slice(0, available);
   while (content.length < available) content.push("");
   return [
     titleLine(state, layout),

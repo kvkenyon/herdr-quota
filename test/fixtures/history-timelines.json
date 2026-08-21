@@ -75,6 +75,20 @@
         "runway": "through_reset"
       }
     ],
+    "meaningfulGain": [
+      {
+        "at": "2026-08-20T12:00:00.000Z",
+        "remaining": 44,
+        "pace": "on_pace",
+        "runway": "through_reset"
+      },
+      {
+        "at": "2026-08-20T12:05:00.000Z",
+        "remaining": 61,
+        "pace": "on_pace",
+        "runway": "through_reset"
+      }
+    ],
     "reset": [
       {
         "at": "2026-08-20T12:00:00.000Z",

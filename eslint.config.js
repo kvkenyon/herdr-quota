@@ -31,6 +31,7 @@ export default tseslint.config(
         console: "readonly",
         process: "readonly",
         setTimeout: "readonly",
+        structuredClone: "readonly",
         URL: "readonly",
       },
     },

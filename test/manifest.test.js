@@ -22,9 +22,9 @@ test("manifest exposes a split-pane action without promising an unsupported bind
   assert.doesNotMatch(manifest, /\[\[(events|startup)\]\]/);
 });
 
-test("package and manifest advertise the same v0.2.0 implementation", () => {
-  assert.equal(packageJson.version, "0.2.0");
-  assert.match(manifest, /^version = "0\.2\.0"$/m);
+test("package and manifest advertise the same v0.2.1 implementation", () => {
+  assert.equal(packageJson.version, "0.2.1");
+  assert.match(manifest, /^version = "0\.2\.1"$/m);
   assert.match(readme, /five minutes after each completed attempt/);
   assert.match(readme, /10, 20, then at most 30 minutes/);
 });
@@ -40,8 +40,11 @@ test("first-use docs provide the supported binding and reload path", () => {
   assert.match(readme, /plugin manifests cannot install them/);
 });
 
-test("user docs name the exact navigation and safe failure states", () => {
-  assert.match(readme, /j\/k scroll · PgUp\/PgDn · r · q\/esc/);
+test("user docs name Preferences, exact navigation, and safe failure states", () => {
+  assert.match(readme, /j\/k · PgUp\/PgDn · p prefs · r · q\/esc/);
+  assert.match(readme, /settings\.json/);
+  assert.match(readme, /remaining.*used/s);
+  assert.match(readme, /0o600|0600/);
   assert.match(readme, /Rows 5–8 of 16/);
   for (const label of [
     "Quota check timed out",

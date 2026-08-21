@@ -1,3 +1,9 @@
+import type {
+  DashboardSettings,
+  SettingsAvailability,
+  SupportedProvider,
+} from "./settings.js";
+
 export type PaceStatus = "ahead" | "on_pace" | "behind" | "mixed" | "unknown";
 export type RunwayStatus =
   "exhausted_now" | "projected_exhaustion" | "through_reset" | "unknown";
@@ -96,11 +102,11 @@ export type HistoryAvailability =
 export type HistoryEvidenceKind =
   | "reset"
   | "remaining_drop"
+  | "remaining_gain"
   | "pace_worse"
   | "pace_better"
   | "projection_earlier"
-  | "projection_later"
-  | "series";
+  | "projection_later";
 
 export interface HistoryEvidence {
   kind: HistoryEvidenceKind;
@@ -108,12 +114,22 @@ export interface HistoryEvidence {
   scope: string;
   limit?: string;
   amount?: number;
-  remainingSeries?: number[];
 }
 
 export interface HistoryView {
   availability: HistoryAvailability;
   evidence?: HistoryEvidence;
+}
+
+export type PreferenceFocus =
+  SupportedProvider | "meter" | "save" | "cancel" | "reset";
+
+export interface PreferencesState {
+  draft: DashboardSettings;
+  focus: PreferenceFocus;
+  confirmReset: boolean;
+  saving: boolean;
+  notice?: "save_failed";
 }
 
 export interface DashboardState {
@@ -123,4 +139,7 @@ export interface DashboardState {
   failure?: CollectorFailure;
   lastAttemptAt?: Date;
   scroll: number;
+  settings?: DashboardSettings;
+  settingsAvailability?: SettingsAvailability;
+  preferences?: PreferencesState;
 }

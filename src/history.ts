@@ -546,7 +546,6 @@ function evidence(
   provider: HistoryProviderSnapshot,
   fact: HistoryFact,
   amount?: number,
-  remainingSeries?: number[],
 ): HistoryEvidence {
   return {
     kind,
@@ -554,7 +553,6 @@ function evidence(
     scope: fact.scope,
     ...(fact.limit ? { limit: fact.limit } : {}),
     ...(amount === undefined ? {} : { amount: Math.round(amount) }),
-    ...(remainingSeries ? { remainingSeries } : {}),
   };
 }
 
@@ -670,11 +668,18 @@ function evidenceForFact(
       evidence: evidence("remaining_drop", provider, current, drop),
     };
 
+  const gain = current.remaining - previous.remaining;
+  if (gain >= MEANINGFUL_REMAINING_DROP)
+    return {
+      rank: 4,
+      evidence: evidence("remaining_gain", provider, current, gain),
+    };
+
   if (pace === "better")
-    return { rank: 4, evidence: evidence("pace_better", provider, current) };
+    return { rank: 5, evidence: evidence("pace_better", provider, current) };
   if (projection?.direction === "later")
     return {
-      rank: 5,
+      rank: 6,
       evidence: evidence(
         "projection_later",
         provider,
@@ -683,21 +688,6 @@ function evidenceForFact(
       ),
     };
 
-  const series: number[] = [];
-  for (
-    let index = snapshots.length - 1;
-    index >= 0 && series.length < 6;
-    index--
-  ) {
-    const point = factIn(snapshots[index]!, provider.provider, current.scope);
-    if (!point || point.resetAt !== current.resetAt) break;
-    series.unshift(Math.round(point.remaining));
-  }
-  if (series.length >= 2)
-    return {
-      rank: 6,
-      evidence: evidence("series", provider, current, undefined, series),
-    };
   return undefined;
 }
 

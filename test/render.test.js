@@ -54,7 +54,7 @@ test("36-cell sidebar shows every provider tier without scrolling", async () => 
     " Week        ████ 100%  2d · on pace",
     " Session     ████ 100% 57m · on pace",
   ]);
-  assert.match(output, /^j\/k scroll · PgUp\/PgDn · r · q\/esc$/m);
+  assert.match(output, /^j\/k Pg · p prefs · r · q\/esc$/m);
   assert.doesNotMatch(output, /more rows/);
   assert.doesNotMatch(output, /Rows \d/);
   for (const line of output.split("\n")) assert.ok(line.length <= 36, line);
@@ -204,7 +204,7 @@ test("short panes cut whole rows and report the visible position", async () => {
   assert.equal(output.split("\n").length, 12);
   assert.match(output, /^! Claude Fable · out 13h/m);
   assert.match(output, /^Rows 1–8 of 16/m);
-  assert.match(output, /^j\/k scroll · PgUp\/PgDn · r · q\/esc$/m);
+  assert.match(output, /^j\/k Pg · p prefs · r · q\/esc$/m);
   assert.doesNotMatch(output, /more rows/);
   assert.doesNotMatch(output, /^\s*$/m);
 });
@@ -386,7 +386,7 @@ test("24x30 and 20x12 no-color views are stable snapshots", async () => {
     "",
     "",
     "",
-    "j/k PgUp/PgDn r/q",
+    "j/k · p prefs · r/q",
   ]);
 
   const at20 = render(value, { width: 20, height: 12 })
@@ -404,7 +404,7 @@ test("24x30 and 20x12 no-color views are stable snapshots", async () => {
     " Week        79% 23h",
     " Spark week 100%  7d",
     "Rows 1–8 of 16",
-    "j/k PgUp/PgDn r/q",
+    "j/k · p prefs · r/q",
   ]);
 });
 
@@ -484,22 +484,39 @@ test("exhausted attention explains the constraint without color", async () => {
   assert.match(render(exhausted), /^! Claude Fable · spent · resets 33h/m);
 });
 
-test("color emphasizes risk while text keeps the meaning", async () => {
+test("ANSI stays legible in light and dark themes without carrying meaning", async () => {
   const output = renderDashboard(
     { report: await report("complete"), loading: false, scroll: 0 },
     { width: 36, height: 23, now: NOW, color: true },
   );
-  assert.ok(output.includes("\x1b[38;5;203m  9%\x1b[0m"));
-  assert.ok(output.includes("\x1b[38;5;203mout 13h\x1b[0m"));
-  assert.ok(output.includes("\x1b[38;5;220mout 9d\x1b[0m"));
+  assert.ok(output.includes("\x1b[1;31m  9%\x1b[0m"));
+  assert.ok(output.includes("\x1b[1;31mout 13h\x1b[0m"));
+  assert.ok(output.includes("\x1b[1mout 9d\x1b[0m"));
   assert.ok(output.includes("\x1b[1mClaude\x1b[0m"));
-  // An at-risk gauge takes the tone of its own percentage, a healthy one is
-  // drawn quieter than that percentage, and the track recedes behind both.
-  assert.ok(output.includes("\x1b[38;5;203m▎\x1b[0m\x1b[38;5;238m───\x1b[0m"));
-  assert.ok(output.includes("\x1b[38;5;251m██▎\x1b[0m\x1b[38;5;238m─\x1b[0m"));
-  for (const glyph of "█▏▎▍▌▋▊▉")
-    assert.ok(!output.includes(`\x1b[38;5;255m${glyph}`), glyph);
+  assert.ok(output.includes("\x1b[1;31m▎\x1b[0m───"));
+  const ansiCodes = output
+    .split("\x1b[")
+    .slice(1)
+    .map((sequence) => sequence.split("m")[0]);
+  assert.ok(ansiCodes.every((code) => !code.split(";").includes("2")));
+  assert.ok(
+    ansiCodes.every(
+      (code) =>
+        !["38;5;220", "38;5;238", "38;5;244", "38;5;251", "38;5;255"].includes(
+          code,
+        ),
+    ),
+  );
+  assert.match(output, /100% {2}7d · on pace/);
+  assert.match(output, /59% \$207 of \$500/);
   assert.match(stripAnsi(output), /Fable week {2}▎─── {3}9% 33h · out 13h/);
+  assert.equal(
+    stripAnsi(output),
+    renderPlain(
+      { report: await report("complete"), loading: false, scroll: 0 },
+      { width: 36, height: 23, now: NOW },
+    ),
+  );
 });
 
 test("expired exhaustion projections fall back to ahead", async () => {
@@ -556,7 +573,7 @@ test("history evidence has exact responsive hierarchy at product pane sizes", as
     "Kimi",
     " Week        ████ 100%  2d · on pace",
     " Session     ████ 100% 57m · on pace",
-    "j/k scroll · PgUp/PgDn · r · q/esc",
+    "j/k Pg · p prefs · r · q/esc",
   ]);
   assert.deepEqual(at(24, 12), [
     "Quota             1m ago",
@@ -570,7 +587,7 @@ test("history evidence has exact responsive hierarchy at product pane sizes", as
     "OpenAI Codex",
     " Week         79% 23h",
     "Rows 1–7 of 16",
-    "j/k PgUp/PgDn r/q",
+    "j/k · p prefs · r/q",
   ]);
   assert.deepEqual(at(20, 8), [
     "Quota         1m ago",
@@ -580,8 +597,28 @@ test("history evidence has exact responsive hierarchy at product pane sizes", as
     " Week        53% 33h",
     " Fable week   9% 33h",
     "Rows 1–4 of 16",
-    "j/k PgUp/PgDn r/q",
+    "j/k · p prefs · r/q",
   ]);
+
+  const gain = renderPlain(
+    {
+      report: value,
+      history: {
+        availability: "ready",
+        evidence: {
+          kind: "remaining_gain",
+          provider: "Claude",
+          scope: "Fable",
+          limit: "Fable",
+          amount: 17,
+        },
+      },
+      loading: false,
+      scroll: 0,
+    },
+    { width: 36, height: 23, now: NOW },
+  );
+  assert.match(gain, /^↑ Claude Fable · 17pp gain\s*$/m);
 });
 
 test("history keeps every live row reachable at all required widths and heights", async () => {
@@ -649,7 +686,6 @@ test("history keeps every live row reachable at all required widths and heights"
 test("history availability notes are finite and collector failures suppress old signals", async () => {
   const value = await report("complete");
   for (const availability of [
-    "first_run",
     "recovered",
     "clock_skew",
     "incompatible",
@@ -670,6 +706,17 @@ test("history availability notes are finite and collector failures suppress old 
     assert.match(output, /^~ History/m);
     assert.doesNotMatch(output, /Bearer|secret|alice|auth\.json/i);
   }
+
+  const firstRun = renderPlain(
+    {
+      report: value,
+      history: { availability: "first_run" },
+      loading: false,
+      scroll: 0,
+    },
+    { width: 24, height: 12, now: NOW },
+  );
+  assert.doesNotMatch(firstRun, /^~ History/m);
 
   const failed = renderPlain(
     {
