@@ -71,6 +71,8 @@ def main() -> int:
     count_path = sys.argv[4]
     steps = json.loads(sys.argv[5])
     root = sys.argv[6]
+    history_path = sys.argv[7]
+    transition_path = sys.argv[8]
 
     pid, master = pty.fork()
     if pid == 0:
@@ -81,6 +83,8 @@ def main() -> int:
                 "NO_COLOR": "1",
                 "TEST_SETTINGS_PATH": settings_path,
                 "TEST_COLLECT_COUNT_PATH": count_path,
+                "TEST_HISTORY_PATH": history_path,
+                "TEST_TRANSITION_PATH": transition_path,
             }
         )
         os.chdir(root)

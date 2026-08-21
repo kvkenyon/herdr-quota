@@ -21,9 +21,12 @@ test("defaults open as an isolated draft in the supported provider order", () =>
     "cursor",
     "kimi",
     "meter",
+    "threshold",
+    "forecast",
     "save",
     "cancel",
     "reset",
+    "clear_transitions",
   ]);
   assert.notEqual(preferences.draft, settings);
   preferences.draft.hiddenProviders.push("claude");
@@ -63,13 +66,22 @@ test("u/d reorder visible providers deterministically without moving hidden rows
   );
 });
 
-test("meter, save, and cancel controls do not mutate active settings", () => {
+test("meter, policy, save, and cancel controls do not mutate active settings", () => {
   const active = defaultSettings();
   let preferences = atFocus(openPreferences(active), "meter");
   preferences = applyPreferenceAction(preferences, "next").state;
   assert.equal(preferences.draft.meterMode, "used");
   assert.equal(active.meterMode, "remaining");
   assert.equal(settingsEqual(active, preferences.draft), false);
+  preferences = atFocus(preferences, "threshold");
+  preferences = applyPreferenceAction(preferences, "next").state;
+  assert.equal(preferences.draft.remainingThreshold, 25);
+  preferences = applyPreferenceAction(preferences, "previous").state;
+  assert.equal(preferences.draft.remainingThreshold, "off");
+  preferences = atFocus(preferences, "forecast");
+  preferences = applyPreferenceAction(preferences, "toggle").state;
+  assert.equal(preferences.draft.forecastBeforeReset, true);
+  assert.equal(active.forecastBeforeReset, false);
   assert.equal(applyPreferenceAction(preferences, "save").command, "save");
   assert.equal(applyPreferenceAction(preferences, "cancel").command, "cancel");
   assert.deepEqual(active, defaultSettings());
@@ -102,9 +114,24 @@ test("j/k, arrows, and page movement clamp focus at short-pane boundaries", () =
   preferences = applyPreferenceAction(preferences, "page_down", 4).state;
   assert.equal(preferences.focus, "meter");
   preferences = applyPreferenceAction(preferences, "page_down", 4).state;
-  assert.equal(preferences.focus, "reset");
+  assert.equal(preferences.focus, "cancel");
   preferences = applyPreferenceAction(preferences, "focus_down").state;
   assert.equal(preferences.focus, "reset");
   preferences = applyPreferenceAction(preferences, "page_up", 4).state;
-  assert.equal(preferences.focus, "kimi");
+  assert.equal(preferences.focus, "threshold");
+});
+
+test("clear transition history requires its own explicit confirmation", () => {
+  let preferences = atFocus(
+    openPreferences(defaultSettings()),
+    "clear_transitions",
+  );
+  preferences = applyPreferenceAction(preferences, "activate").state;
+  assert.equal(preferences.confirmTransitionClear, true);
+  preferences = applyPreferenceAction(preferences, "decline").state;
+  assert.equal(preferences.confirmTransitionClear, false);
+  preferences = applyPreferenceAction(preferences, "activate").state;
+  const confirmed = applyPreferenceAction(preferences, "confirm");
+  assert.equal(confirmed.command, "clear_transitions");
+  assert.equal(confirmed.state.confirmTransitionClear, false);
 });

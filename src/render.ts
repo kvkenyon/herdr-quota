@@ -28,6 +28,7 @@ import type {
   HistoryEvidence,
   PreferencesState,
   ProviderQuota,
+  TransitionDisplayEvent,
 } from "./types.js";
 
 const RESET = "\x1b[0m";
@@ -906,7 +907,14 @@ function preferenceRows(
     };
   });
   const action = (
-    focus: "meter" | "save" | "cancel" | "reset",
+    focus:
+      | "meter"
+      | "threshold"
+      | "forecast"
+      | "save"
+      | "cancel"
+      | "reset"
+      | "clear_transitions",
     label: string,
   ) => {
     const selected = preferences.focus === focus;
@@ -923,9 +931,22 @@ function preferenceRows(
   return [
     ...providers,
     action("meter", `Meter: ${preferences.draft.meterMode}`),
+    action(
+      "threshold",
+      `Capacity cue: ${
+        preferences.draft.remainingThreshold === "off"
+          ? "off"
+          : `${preferences.draft.remainingThreshold}%`
+      }`,
+    ),
+    action(
+      "forecast",
+      `Forecast cue: ${preferences.draft.forecastBeforeReset ? "on" : "off"}`,
+    ),
     action("save", "Save"),
     action("cancel", "Cancel"),
     action("reset", "Reset defaults"),
+    action("clear_transitions", "Clear transition history"),
   ];
 }
 
@@ -934,11 +955,18 @@ function preferenceContentLines(
   layout: Layout,
   available: number,
 ): string[] {
+  if (preferences.confirmTransitionClear) {
+    return [
+      colorize("Clear transition history?", "yellow", layout.color),
+      "Quota history stays",
+      "Provider settings stay",
+    ].slice(0, available);
+  }
   if (preferences.confirmReset) {
     return [
       colorize("Reset draft?", "yellow", layout.color),
       "Show all providers",
-      "Meter: remaining",
+      "Remaining meter · cues off",
       "Save still required",
     ].slice(0, available);
   }
@@ -961,7 +989,13 @@ function preferenceFooter(
 ): string {
   if (preferences.notice === "save_failed")
     return truncate("Save failed · s retry · esc", layout.width);
+  if (preferences.notice === "transition_clear_failed")
+    return truncate("Clear failed · esc", layout.width);
+  if (preferences.notice === "transition_history_cleared")
+    return truncate("Transition history cleared", layout.width);
   if (preferences.saving) return "Saving…";
+  if (preferences.confirmTransitionClear)
+    return truncate("y clear · n/esc back", layout.width);
   if (preferences.confirmReset)
     return truncate("y reset · n/esc back", layout.width);
   if (isSupportedProvider(preferences.focus)) {
@@ -980,15 +1014,94 @@ function preferenceFooter(
   }
   if (preferences.focus === "meter")
     return truncate("j/k · ←/→ or space", layout.width);
+  if (preferences.focus === "threshold" || preferences.focus === "forecast")
+    return truncate("j/k · ←/→ or space", layout.width);
   return truncate("j/k · enter · esc cancel", layout.width);
+}
+
+function transitionSubject(event: TransitionDisplayEvent): string {
+  const provider = event.provider === "OpenAI Codex" ? "Codex" : event.provider;
+  const detail =
+    event.limit ??
+    (event.scope === "All models" || event.scope === "All products"
+      ? undefined
+      : event.scope);
+  return detail ? `${provider} ${detail}` : provider;
+}
+
+function transitionText(event: TransitionDisplayEvent): string {
+  const subject = transitionSubject(event);
+  switch (event.kind) {
+    case "threshold_enter":
+      return `${subject} crossed ${event.threshold}%${
+        event.remaining === undefined
+          ? ""
+          : ` · ${Math.round(event.remaining)}% left`
+      }`;
+    case "threshold_recovery":
+      return `${subject} recovered above ${event.threshold}%`;
+    case "forecast_enter":
+      return `${subject} now exhausts before reset`;
+    case "forecast_recovery":
+      return `${subject} now lasts through reset`;
+  }
+}
+
+function wrapText(value: string, width: number): string[] {
+  const lines: string[] = [];
+  let current = "";
+  for (const word of value.split(" ")) {
+    if (!current) {
+      current = word;
+    } else if (current.length + word.length + 1 <= width) {
+      current += ` ${word}`;
+    } else {
+      lines.push(truncate(current, width));
+      current = word;
+    }
+  }
+  if (current) lines.push(truncate(current, width));
+  return lines;
+}
+
+function transitionReviewLines(
+  state: DashboardState,
+  layout: Layout,
+  available: number,
+): string[] {
+  const events = state.transitions?.events ?? [];
+  if (!events.length) return ["No new transition events"];
+  const lines: string[] = [];
+  for (const event of events) {
+    if (lines.length && lines.length < available) lines.push("");
+    lines.push(...wrapText(transitionText(event), layout.width));
+    if (lines.length >= available) break;
+  }
+  if (lines.length > available && available > 0)
+    lines[available - 1] = truncate(
+      `+${Math.max(1, events.length - 1)} more`,
+      layout.width,
+    );
+  return lines.slice(0, available);
 }
 
 function titleLine(state: DashboardState, layout: Layout): string {
   if (state.preferences)
     return preferenceTitle(state, state.preferences, layout);
+  if (state.transitionReview) {
+    const count = state.transitions?.events.length ?? 0;
+    const title = layout.width >= 24 ? "Quota transition" : "Transition";
+    return truncate(
+      `${colorize(title, "bold", layout.color)}${" ".repeat(
+        Math.max(1, layout.width - title.length - String(count).length),
+      )}${count}`,
+      layout.width,
+    );
+  }
   const base = layout.width >= 28 ? "AI Quota" : "Quota";
   const meter = layout.settings.meterMode === "used" ? " · used" : "";
-  const title = colorize(`${base}${meter}`, "bold", layout.color);
+  const marker = (state.transitions?.events.length ?? 0) > 0 ? " !" : "";
+  const title = colorize(`${base}${meter}${marker}`, "bold", layout.color);
   const activity = state.loading
     ? colorize("refreshing", "cyan", layout.color)
     : state.report
@@ -1002,6 +1115,30 @@ function titleLine(state: DashboardState, layout: Layout): string {
 
 function footerLine(state: DashboardState, layout: Layout): string {
   if (state.preferences) return preferenceFooter(state.preferences, layout);
+  if (state.transitionReview) {
+    if (state.transitions?.availability === "unavailable")
+      return truncate("Ack failed · esc", layout.width);
+    return truncate(
+      fittingText(
+        ["a/enter acknowledge · esc", "a/enter ack · esc", "a ack · esc"],
+        layout.width,
+      ),
+      layout.width,
+    );
+  }
+  if ((state.transitions?.events.length ?? 0) > 0) {
+    return truncate(
+      fittingText(
+        [
+          "j/k · Pg · a alert · p prefs · r/q",
+          "j/k · a alert · p/r/q",
+          "j/k · a alert · r/q",
+        ],
+        layout.width,
+      ),
+      layout.width,
+    );
+  }
   return truncate(
     fittingText(
       [
@@ -1028,9 +1165,11 @@ export function renderDashboard(
   const height = Math.max(6, Math.floor(options.height));
   const available = Math.max(1, height - 2);
   const content = (
-    state.preferences
-      ? preferenceContentLines(state.preferences, layout, available)
-      : contentLines(state, layout, available)
+    state.transitionReview
+      ? transitionReviewLines(state, layout, available)
+      : state.preferences
+        ? preferenceContentLines(state.preferences, layout, available)
+        : contentLines(state, layout, available)
   ).slice(0, available);
   while (content.length < available) content.push("");
   return [

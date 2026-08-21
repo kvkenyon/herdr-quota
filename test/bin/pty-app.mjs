@@ -1,7 +1,9 @@
 import { appendFile, readFile } from "node:fs/promises";
 import { DashboardApp } from "../../dist/app.js";
+import { LocalHistory } from "../../dist/history.js";
 import { adaptQuotaResponse } from "../../dist/schema.js";
 import { SettingsStore } from "../../dist/settings.js";
+import { LocalTransitions } from "../../dist/transitions.js";
 
 const fixture = adaptQuotaResponse(
   JSON.parse(
@@ -13,19 +15,19 @@ const fixture = adaptQuotaResponse(
 );
 const countPath = process.env.TEST_COLLECT_COUNT_PATH;
 const settingsPath = process.env.TEST_SETTINGS_PATH;
-if (!countPath || !settingsPath) throw new Error("PTY test paths are required");
+const historyPath = process.env.TEST_HISTORY_PATH;
+const transitionPath = process.env.TEST_TRANSITION_PATH;
+if (!countPath || !settingsPath || !historyPath || !transitionPath)
+  throw new Error("PTY test paths are required");
 
 const app = new DashboardApp({
   async collect() {
     await appendFile(countPath, "collect\n");
     return structuredClone(fixture);
   },
-  history: {
-    async record() {
-      return { availability: "no_usable_data" };
-    },
-  },
+  history: new LocalHistory(historyPath),
   settings: new SettingsStore(settingsPath),
+  transitions: new LocalTransitions(transitionPath),
 });
 
 try {

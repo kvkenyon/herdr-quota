@@ -22,9 +22,9 @@ test("manifest exposes a split-pane action without promising an unsupported bind
   assert.doesNotMatch(manifest, /\[\[(events|startup)\]\]/);
 });
 
-test("package and manifest advertise the same v0.2.1 implementation", () => {
-  assert.equal(packageJson.version, "0.2.1");
-  assert.match(manifest, /^version = "0\.2\.1"$/m);
+test("package and manifest advertise the same v0.3.0 implementation", () => {
+  assert.equal(packageJson.version, "0.3.0");
+  assert.match(manifest, /^version = "0\.3\.0"$/m);
   assert.match(readme, /five minutes after each completed attempt/);
   assert.match(readme, /10, 20, then at most 30 minutes/);
 });
@@ -56,4 +56,8 @@ test("user docs name Preferences, exact navigation, and safe failure states", ()
   assert.match(readme, /512 snapshots or 30 days/);
   assert.match(readme, /15 minutes/);
   assert.match(readme, /history-v1\.json/);
+  assert.match(readme, /transitions-v1\.json/);
+  assert.match(readme, /25%.*10%.*5%/s);
+  assert.match(readme, /forecast before reset/i);
+  assert.match(readme, /a alert/);
 });

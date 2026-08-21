@@ -25,7 +25,7 @@ async function temporaryDirectory() {
   return await mkdtemp(join(tmpdir(), "herdr-quota-settings-"));
 }
 
-test("first run uses v1 defaults at the XDG config path", async () => {
+test("first run uses v2 defaults at the XDG config path", async () => {
   const directory = await temporaryDirectory();
   try {
     const path = settingsPath({ XDG_CONFIG_HOME: directory }, "/unused");
@@ -56,10 +56,12 @@ test("atomic replacement writes only the finite schema with private permissions"
     });
     const text = await readFile(path, "utf8");
     assert.deepEqual(JSON.parse(text), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       providerOrder: ["cursor", "claude", "kimi", "codex"],
       hiddenProviders: ["kimi"],
       meterMode: "used",
+      remainingThreshold: "off",
+      forecastBeforeReset: false,
     });
     assert.doesNotMatch(
       text,
@@ -75,6 +77,58 @@ test("atomic replacement writes only the finite schema with private permissions"
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("v0.2.1 schema-v1 settings migrate in memory without rewriting", async () => {
+  const directory = await temporaryDirectory();
+  const path = join(directory, "herdr-quota", "settings.json");
+  const legacy =
+    '{"schemaVersion":1,"providerOrder":["cursor","claude","codex","kimi"],"hiddenProviders":["kimi"],"meterMode":"used"}\n';
+  try {
+    await mkdir(join(directory, "herdr-quota"), { recursive: true });
+    await writeFile(path, legacy, { mode: 0o600 });
+    const loaded = await new SettingsStore(path).load();
+    assert.deepEqual(loaded, {
+      availability: "ready",
+      settings: {
+        ...defaultSettings(),
+        providerOrder: ["cursor", "claude", "codex", "kimi"],
+        hiddenProviders: ["kimi"],
+        meterMode: "used",
+      },
+    });
+    assert.equal(await readFile(path, "utf8"), legacy);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("schema-v2 transition policy accepts only the finite product controls", () => {
+  for (const remainingThreshold of ["off", 25, 10, 5]) {
+    assert.equal(
+      parseSettingsDocument({
+        ...defaultSettings(),
+        remainingThreshold,
+      }).remainingThreshold,
+      remainingThreshold,
+    );
+  }
+  assert.throws(
+    () =>
+      parseSettingsDocument({
+        ...defaultSettings(),
+        remainingThreshold: 13,
+      }),
+    /settings_corrupt/,
+  );
+  assert.throws(
+    () =>
+      parseSettingsDocument({
+        ...defaultSettings(),
+        forecastBeforeReset: "yes",
+      }),
+    /settings_corrupt/,
+  );
 });
 
 test("malformed JSON is quarantined and recovered without replacing its bytes", async () => {

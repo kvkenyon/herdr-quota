@@ -1,11 +1,27 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { defaultSettings } from "../dist/settings.js";
+import { adaptQuotaResponse } from "../dist/schema.js";
+import {
+  HISTORY_SCHEMA_VERSION,
+  normalizeHistorySnapshot,
+} from "../dist/history.js";
+import {
+  TRANSITION_SCHEMA_VERSION,
+  evaluateTransitions,
+} from "../dist/transitions.js";
 
 const execFileAsync = promisify(execFile);
 const ROOT = resolve(new URL("..", import.meta.url).pathname);
@@ -14,14 +30,31 @@ async function drive(width, height, steps, setup) {
   const directory = await mkdtemp(join(tmpdir(), "herdr-quota-pty-"));
   const settingsPath = join(directory, "config", "settings.json");
   const countPath = join(directory, "collect-count.txt");
+  const historyPath = join(directory, "state", "history-v1.json");
+  const transitionPath = join(directory, "state", "transitions-v1.json");
   await writeFile(countPath, "");
   if (setup?.settings) {
     await mkdir(join(directory, "config"), { recursive: true });
     await writeFile(settingsPath, `${JSON.stringify(setup.settings)}\n`, {
       mode: 0o600,
     });
+  } else if (setup?.settingsText) {
+    await mkdir(join(directory, "config"), { recursive: true });
+    await writeFile(settingsPath, setup.settingsText, { mode: 0o400 });
   } else if (setup?.unsafeTarget) {
     await mkdir(settingsPath, { recursive: true });
+  }
+  if (setup?.history) {
+    await mkdir(join(directory, "state"), { recursive: true });
+    await writeFile(historyPath, `${JSON.stringify(setup.history)}\n`, {
+      mode: 0o600,
+    });
+  }
+  if (setup?.transitions) {
+    await mkdir(join(directory, "state"), { recursive: true });
+    await writeFile(transitionPath, `${JSON.stringify(setup.transitions)}\n`, {
+      mode: 0o600,
+    });
   }
   const { stdout } = await execFileAsync(
     "python3",
@@ -33,16 +66,53 @@ async function drive(width, height, steps, setup) {
       countPath,
       JSON.stringify(steps),
       ROOT,
+      historyPath,
+      transitionPath,
     ],
     { cwd: ROOT, timeout: 15_000, maxBuffer: 2 * 1024 * 1024 },
   );
   const result = JSON.parse(stdout);
   result.settingsPath = settingsPath;
+  result.historyPath = historyPath;
+  result.transitionPath = transitionPath;
   result.collectCount = (await readFile(countPath, "utf8"))
     .split("\n")
     .filter(Boolean).length;
   result.cleanup = () => rm(directory, { recursive: true, force: true });
   return result;
+}
+
+async function transitionJourneySetup() {
+  const report = adaptQuotaResponse(
+    JSON.parse(
+      await readFile(
+        new URL("fixtures/complete.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+  const previous = normalizeHistorySnapshot(
+    report,
+    new Date(Date.now() - 60_000),
+  );
+  assert.ok(previous);
+  const risky = previous.providers
+    .flatMap((provider) => provider.facts)
+    .find((fact) => fact.remaining <= 25);
+  assert.ok(risky);
+  risky.remaining = 40;
+  risky.runway = { state: "through_reset" };
+  const history = {
+    schemaVersion: HISTORY_SCHEMA_VERSION,
+    snapshots: [previous],
+  };
+  const settings = { ...defaultSettings(), remainingThreshold: 25 };
+  const transitions = evaluateTransitions(
+    { schemaVersion: TRANSITION_SCHEMA_VERSION, events: [] },
+    history,
+    settings,
+  ).document;
+  return { settings, history, transitions };
 }
 
 test("real PTY rendering is exact and bounded at every required size", async (context) => {
@@ -176,6 +246,73 @@ test("settings I/O failure stays finite and leaves the live collector/report int
     assert.match(result.screens[3], /Claude/);
     assert.equal(result.collectCount, 1);
   } finally {
+    await result.cleanup();
+  }
+});
+
+test("real PTY reviews and acknowledges a persisted transition without adding a line", async () => {
+  const setup = await transitionJourneySetup();
+  const result = await drive(
+    24,
+    8,
+    [
+      { text: "", delay: 0.3 },
+      { text: "a" },
+      { text: "a", delay: 0.3 },
+      { text: "q" },
+    ],
+    setup,
+  );
+  try {
+    assert.match(result.screens[1].split("\n")[0], /Quota.*!/);
+    assert.match(result.screens[1], /a alert/);
+    assert.match(result.screens[2], /crossed 25%/);
+    assert.match(result.screens[2], /% left/);
+    assert.match(result.screens[2].split("\n").at(-1), /a\/enter ack/);
+    assert.doesNotMatch(result.screens[3].split("\n")[0], /!/);
+    assert.doesNotMatch(result.screens[3], /a alert/);
+    const stored = JSON.parse(await readFile(result.transitionPath, "utf8"));
+    assert.ok(
+      stored.events.find((event) => event.kind === "threshold_enter")
+        ?.acknowledgedAt,
+    );
+    assert.equal(result.collectCount, 1);
+  } finally {
+    await result.cleanup();
+  }
+});
+
+test("Preferences clear confirmation preserves quota history and read-only future settings", async () => {
+  const setup = await transitionJourneySetup();
+  const futureSettings = '{"schemaVersion":99,"future":"keep"}\n';
+  const result = await drive(
+    24,
+    8,
+    [
+      { text: "", delay: 0.3 },
+      { text: "p" },
+      { text: "jjjjjjjjjj" },
+      { text: "\r" },
+      { text: "y", delay: 0.3 },
+      { text: "q" },
+    ],
+    { ...setup, settings: undefined, settingsText: futureSettings },
+  );
+  try {
+    assert.match(result.screens[3], /Clear transition hist/);
+    assert.match(result.screens[4], /Clear transition/);
+    assert.match(result.screens[4], /Quota history stays/);
+    assert.match(result.screens[4].split("\n").at(-1), /y clear/);
+    assert.match(result.screens[5], /Transition history/);
+    assert.equal(await readFile(result.settingsPath, "utf8"), futureSettings);
+    const quotaHistory = JSON.parse(await readFile(result.historyPath, "utf8"));
+    assert.ok(quotaHistory.snapshots.length >= 1);
+    await assert.rejects(() => readFile(result.transitionPath, "utf8"), {
+      code: "ENOENT",
+    });
+    assert.equal(result.collectCount, 1);
+  } finally {
+    await chmod(result.settingsPath, 0o600).catch(() => undefined);
     await result.cleanup();
   }
 });

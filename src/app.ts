@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { collectQuota } from "./collect.js";
 import { safeCollectorFailure } from "./failure.js";
-import { LocalHistory } from "./history.js";
+import { LocalHistory, type HistoryDocument } from "./history.js";
 import { TerminalInputParser, type DashboardAction } from "./keys.js";
 import {
   applyPreferenceAction,
@@ -22,11 +22,13 @@ import {
   type SettingsLoadResult,
 } from "./settings.js";
 import { releaseSidebarStateSync } from "./sidebar-state.js";
+import { LocalTransitions, transitionPolicyEnabled } from "./transitions.js";
 import type {
   DashboardState,
   HistoryView,
   PreferencesState,
   QuotaReport,
+  TransitionView,
 } from "./types.js";
 
 const ALT_ENTER = "\x1b[?1049h\x1b[?25l";
@@ -58,12 +60,38 @@ export interface DashboardSettingsRepository {
 
 export interface DashboardHistoryRepository {
   record(report: QuotaReport): Promise<HistoryView>;
+  retained?(): Promise<HistoryDocument | undefined>;
+  current?(): HistoryDocument | undefined;
+}
+
+export interface DashboardTransitionRepository {
+  loadView(
+    history: HistoryDocument,
+    settings: DashboardSettings,
+  ): Promise<TransitionView>;
+  evaluate(
+    history: HistoryDocument,
+    settings: DashboardSettings,
+  ): Promise<TransitionView>;
+  baseline(
+    history: HistoryDocument,
+    settings: DashboardSettings,
+    now?: Date,
+    channels?: readonly ("threshold" | "forecast")[],
+  ): Promise<TransitionView>;
+  acknowledge(
+    history: HistoryDocument,
+    settings: DashboardSettings,
+    now?: Date,
+  ): Promise<TransitionView>;
+  clear(): Promise<TransitionView>;
 }
 
 export interface DashboardAppOptions {
   collect?: () => Promise<QuotaReport>;
   history?: DashboardHistoryRepository;
   settings?: DashboardSettingsRepository;
+  transitions?: DashboardTransitionRepository;
 }
 
 export class DashboardApp {
@@ -80,11 +108,14 @@ export class DashboardApp {
   private ageTimer?: NodeJS.Timeout;
   private readonly history: DashboardHistoryRepository;
   private readonly settings: DashboardSettingsRepository;
+  private readonly transitions: DashboardTransitionRepository;
   private readonly refreshScheduler: RefreshScheduler<QuotaReport>;
+  private transitionQueue: Promise<void> = Promise.resolve();
 
   constructor(options: DashboardAppOptions = {}) {
     this.history = options.history ?? new LocalHistory();
     this.settings = options.settings ?? new SettingsStore();
+    this.transitions = options.transitions ?? new LocalTransitions();
     this.refreshScheduler = new RefreshScheduler({
       collect:
         options.collect ??
@@ -104,8 +135,28 @@ export class DashboardApp {
         this.state.report = report;
         this.state.failure = undefined;
         this.render();
-        const history = await serialize(() => this.history.record(report));
-        if (isCurrent()) this.state.history = history;
+        const result = await serialize(async () => {
+          const history = await this.history.record(report);
+          const document = this.history.current?.();
+          const settings = this.state.settings ?? defaultSettings();
+          const transitions =
+            document &&
+            transitionPolicyEnabled(settings) &&
+            history.availability === "clock_skew"
+              ? await this.runTransition(() =>
+                  this.transitions.baseline(document, settings),
+                )
+              : document && transitionPolicyEnabled(settings)
+                ? await this.runTransition(() =>
+                    this.transitions.evaluate(document, settings),
+                  )
+                : { availability: "ready" as const, events: [] };
+          return { history, transitions };
+        });
+        if (isCurrent()) {
+          this.state.history = result.history;
+          this.state.transitions = result.transitions;
+        }
       },
       onFailure: (error) => {
         this.state.failure = safeCollectorFailure(error);
@@ -127,6 +178,7 @@ export class DashboardApp {
       throw new Error("AI Quota needs an interactive terminal");
     }
     await this.loadSettings();
+    await this.loadTransitions();
     process.stdout.write(ALT_ENTER);
     process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -171,6 +223,15 @@ export class DashboardApp {
         this.handlePreferenceAction(action);
         continue;
       }
+      if (this.state.transitionReview) {
+        if (action === "escape") {
+          this.state.transitionReview = false;
+          this.render();
+        } else if (action === "acknowledge" || action === "activate") {
+          void this.acknowledgeTransitions();
+        }
+        continue;
+      }
       if (action === "escape") {
         this.close();
         return;
@@ -178,6 +239,12 @@ export class DashboardApp {
         this.state.preferences = openPreferences(
           this.state.settings ?? defaultSettings(),
         );
+        this.render();
+      } else if (
+        action === "acknowledge" &&
+        (this.state.transitions?.events.length ?? 0) > 0
+      ) {
+        this.state.transitionReview = true;
         this.render();
       } else if (action === "refresh") void this.refreshScheduler.manual();
       else if (this.isScrollAction(action)) {
@@ -203,6 +270,8 @@ export class DashboardApp {
       this.render();
     } else if (update.command === "save") {
       void this.savePreferences(update.state);
+    } else if (update.command === "clear_transitions") {
+      void this.clearTransitionHistory(update.state);
     } else {
       this.render();
     }
@@ -213,7 +282,9 @@ export class DashboardApp {
     preferences: PreferencesState,
   ): PreferenceAction | undefined {
     if (action === "escape")
-      return preferences.confirmReset ? "decline" : "cancel";
+      return preferences.confirmReset || preferences.confirmTransitionClear
+        ? "decline"
+        : "cancel";
     if (action === "scroll_down") return "focus_down";
     if (action === "scroll_up") return "focus_up";
     if (action === "page_down") return "page_down";
@@ -234,6 +305,7 @@ export class DashboardApp {
 
   private async savePreferences(preferences: PreferencesState) {
     const draft = cloneSettings(preferences.draft);
+    const previous = this.state.settings ?? defaultSettings();
     this.state.preferences = {
       ...preferences,
       saving: true,
@@ -245,7 +317,21 @@ export class DashboardApp {
       if (this.closed) return;
       this.state.settings = draft;
       this.state.settingsAvailability = "ready";
+      const document = this.history.current?.();
+      const channels = this.baselineChannels(previous, draft);
+      if (!transitionPolicyEnabled(draft)) {
+        this.state.transitions = { availability: "ready", events: [] };
+      } else if (document && channels.length) {
+        this.state.transitions = await this.runTransition(() =>
+          this.transitions.baseline(document, draft, new Date(), channels),
+        );
+      } else if (document) {
+        this.state.transitions = await this.runTransition(() =>
+          this.transitions.loadView(document, draft),
+        );
+      }
       this.state.preferences = undefined;
+      this.state.transitionReview = false;
       this.state.scroll = clampDashboardScroll(
         this.state,
         process.stdout.rows || 24,
@@ -270,6 +356,97 @@ export class DashboardApp {
       this.state.settings = defaultSettings();
       this.state.settingsAvailability = "unavailable";
     }
+  }
+
+  private async loadTransitions() {
+    const settings = this.state.settings ?? defaultSettings();
+    if (!transitionPolicyEnabled(settings) || !this.history.retained) {
+      this.state.transitions = { availability: "first_run", events: [] };
+      return;
+    }
+    const document = await this.history.retained();
+    if (!document) {
+      this.state.transitions = { availability: "unavailable", events: [] };
+      return;
+    }
+    this.state.transitions = await this.runTransition(() =>
+      this.transitions.loadView(document, settings),
+    );
+  }
+
+  private baselineChannels(
+    previous: DashboardSettings,
+    next: DashboardSettings,
+  ): ("threshold" | "forecast")[] {
+    const visibilityChanged =
+      previous.hiddenProviders.join("\0") !== next.hiddenProviders.join("\0");
+    return [
+      ...(visibilityChanged ||
+      previous.remainingThreshold !== next.remainingThreshold
+        ? (["threshold"] as const)
+        : []),
+      ...(visibilityChanged ||
+      previous.forecastBeforeReset !== next.forecastBeforeReset
+        ? (["forecast"] as const)
+        : []),
+    ];
+  }
+
+  private async acknowledgeTransitions() {
+    const document = this.history.current?.();
+    const settings = this.state.settings ?? defaultSettings();
+    if (!document) return;
+    const view = await this.runTransition(() =>
+      this.transitions.acknowledge(document, settings),
+    );
+    if (this.closed) return;
+    this.state.transitions = view;
+    if (view.events.length === 0) this.state.transitionReview = false;
+    this.render();
+  }
+
+  private async clearTransitionHistory(preferences: PreferencesState) {
+    this.state.preferences = {
+      ...preferences,
+      saving: true,
+      notice: undefined,
+    };
+    this.render();
+    let view = await this.runTransition(() => this.transitions.clear());
+    const document = this.history.current?.();
+    const settings = this.state.settings ?? defaultSettings();
+    if (
+      view.availability !== "unavailable" &&
+      view.availability !== "incompatible" &&
+      document &&
+      transitionPolicyEnabled(settings)
+    ) {
+      view = await this.runTransition(() =>
+        this.transitions.baseline(document, settings),
+      );
+    }
+    if (this.closed) return;
+    const failed =
+      view.availability === "unavailable" ||
+      view.availability === "incompatible";
+    this.state.transitions = view;
+    this.state.transitionReview = false;
+    this.state.preferences = {
+      ...preferences,
+      confirmTransitionClear: false,
+      saving: false,
+      notice: failed ? "transition_clear_failed" : "transition_history_cleared",
+    };
+    this.render();
+  }
+
+  private runTransition<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.transitionQueue.then(operation, operation);
+    this.transitionQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private isScrollAction(

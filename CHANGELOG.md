@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0 — 2026-08-20
+
+### Added
+
+- Quiet opt-in transition cues add only two finite Preferences controls: a remaining-capacity threshold (`off`, `25%`, `10%`, or `5%`) and an independent established forecast-before-reset toggle. Defaults and migrated v0.2.1 settings remain cues-off.
+- Fresh visible authoritative limits now produce one deduped downward threshold or forecast-enter event and one later same-cycle recovery. A transient title marker and `a alert` footer open a text-first in-pane review; acknowledgement removes the cue while retaining bounded audit/dedupe state.
+- A separately confirmed Preferences action clears transition history without writing or deleting quota history or provider settings. Exact state-machine, gap, persistence, no-color render, input-fragmentation, responsive PTY, acknowledgement, and clear-history regressions cover the complete policy lifecycle.
+
+### Changed
+
+- Settings schema v2 adds only the finite transition policy fields. Schema-v1 documents migrate in memory and are not rewritten until an explicit save. Enabling or changing a policy and hiding/showing a provider establish a baseline, so the current sample, policy changes, and presentation changes cannot synthesize an event.
+- The existing serialized pane refresh evaluates transitions while open. Next-open catch-up compares retained trustworthy samples without claiming continuous monitoring; reset identities segment state, and dedupe survives pane reopen and Herdr restart.
+- Herdr's general notification command is intentionally not used because delivery can leave the pane and is not plugin-scoped. There is no daemon, watcher, OS notification, sound, badge, toast, telemetry, account, sync, or cloud service.
+
+### Security and privacy
+
+- `${XDG_STATE_HOME:-~/.local/state}/herdr-quota/transitions-v1.json` is a private atomic schema-v1 allow-list bounded to 256 events or 30 days. It stores only marketed provider/scope/limit identity, finite policy, reset-cycle identity, transition/baseline kind, event timestamp, and optional acknowledgement timestamp—never percentages, raw payloads/errors, accounts, credentials, paths, tokens, or arbitrary provider fields.
+- Stale, signed-out, auth-required, unavailable, rate-limited, error, unknown-semantics, early-projection, hidden-provider, missing-percentage, and whole-check failure states create no threshold, forecast, or recovery event. Unsupported, malformed, read-only, foreign-owned, symlink, interrupted, and clock-rollback persistence cases fail closed without fabricating or repeating alerts.
+
 ## 0.2.1 — 2026-08-20
 
 ### Added

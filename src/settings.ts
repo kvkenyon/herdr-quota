@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const SETTINGS_SCHEMA_VERSION = 1;
+export const SETTINGS_SCHEMA_VERSION = 2;
 export const SUPPORTED_PROVIDERS = [
   "claude",
   "codex",
@@ -14,12 +14,15 @@ export const SUPPORTED_PROVIDERS = [
 
 export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
 export type MeterMode = "remaining" | "used";
+export type RemainingThreshold = "off" | 25 | 10 | 5;
 
 export interface DashboardSettings {
-  schemaVersion: 1;
+  schemaVersion: 2;
   providerOrder: SupportedProvider[];
   hiddenProviders: SupportedProvider[];
   meterMode: MeterMode;
+  remainingThreshold: RemainingThreshold;
+  forecastBeforeReset: boolean;
 }
 
 export type SettingsAvailability =
@@ -117,6 +120,8 @@ export function defaultSettings(): DashboardSettings {
     providerOrder: [...SUPPORTED_PROVIDERS],
     hiddenProviders: [],
     meterMode: "remaining",
+    remainingThreshold: "off",
+    forecastBeforeReset: false,
   };
 }
 
@@ -126,6 +131,8 @@ export function cloneSettings(settings: DashboardSettings): DashboardSettings {
     providerOrder: [...settings.providerOrder],
     hiddenProviders: [...settings.hiddenProviders],
     meterMode: settings.meterMode,
+    remainingThreshold: settings.remainingThreshold,
+    forecastBeforeReset: settings.forecastBeforeReset,
   };
 }
 
@@ -135,6 +142,13 @@ export function normalizeSettings(value: DashboardSettings): DashboardSettings {
     providerOrder: providerList(value.providerOrder, true),
     hiddenProviders: providerList(value.hiddenProviders, false),
     meterMode: value.meterMode === "used" ? "used" : "remaining",
+    remainingThreshold:
+      value.remainingThreshold === 25 ||
+      value.remainingThreshold === 10 ||
+      value.remainingThreshold === 5
+        ? value.remainingThreshold
+        : "off",
+    forecastBeforeReset: value.forecastBeforeReset === true,
   };
 }
 
@@ -145,12 +159,28 @@ export function normalizeSettings(value: DashboardSettings): DashboardSettings {
  */
 export function parseSettingsDocument(value: unknown): DashboardSettings {
   if (!isObject(value)) throw new SettingsDocumentError("corrupt");
-  if (value.schemaVersion !== SETTINGS_SCHEMA_VERSION) {
+  if (
+    value.schemaVersion !== 1 &&
+    value.schemaVersion !== SETTINGS_SCHEMA_VERSION
+  ) {
     if (typeof value.schemaVersion === "number")
       throw new SettingsDocumentError("incompatible");
     throw new SettingsDocumentError("corrupt");
   }
   if (value.meterMode !== "remaining" && value.meterMode !== "used")
+    throw new SettingsDocumentError("corrupt");
+  if (
+    value.schemaVersion === SETTINGS_SCHEMA_VERSION &&
+    value.remainingThreshold !== "off" &&
+    value.remainingThreshold !== 25 &&
+    value.remainingThreshold !== 10 &&
+    value.remainingThreshold !== 5
+  )
+    throw new SettingsDocumentError("corrupt");
+  if (
+    value.schemaVersion === SETTINGS_SCHEMA_VERSION &&
+    typeof value.forecastBeforeReset !== "boolean"
+  )
     throw new SettingsDocumentError("corrupt");
 
   return {
@@ -158,6 +188,14 @@ export function parseSettingsDocument(value: unknown): DashboardSettings {
     providerOrder: providerList(value.providerOrder, true),
     hiddenProviders: providerList(value.hiddenProviders, false),
     meterMode: value.meterMode,
+    remainingThreshold:
+      value.schemaVersion === 1
+        ? "off"
+        : (value.remainingThreshold as RemainingThreshold),
+    forecastBeforeReset:
+      value.schemaVersion === SETTINGS_SCHEMA_VERSION
+        ? value.forecastBeforeReset === true
+        : false,
   };
 }
 
@@ -237,6 +275,8 @@ function serializedSettings(settings: DashboardSettings): string {
     providerOrder: normalized.providerOrder,
     hiddenProviders: normalized.hiddenProviders,
     meterMode: normalized.meterMode,
+    remainingThreshold: normalized.remainingThreshold,
+    forecastBeforeReset: normalized.forecastBeforeReset,
   })}\n`;
 }
 
