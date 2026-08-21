@@ -131,6 +131,29 @@ test("reset cycles baseline independently and never fabricate replenishment reco
   assert.deepEqual(kinds(update), ["threshold_enter"]);
 });
 
+test("sub-minute reset timestamp jitter stays in one authoritative cycle", () => {
+  const firstReset = "2026-08-27T12:00:00.145Z";
+  const jitteredReset = "2026-08-27T12:00:00.147Z";
+  let document = evaluateTransitions(
+    emptyTransitions(),
+    history(point(0, 40, { resetAt: firstReset })),
+    settings(),
+  ).document;
+  const crossed = evaluateTransitions(
+    document,
+    history(
+      point(0, 40, { resetAt: firstReset }),
+      point(5, 20, { resetAt: jitteredReset }),
+    ),
+    settings(),
+  );
+  assert.deepEqual(kinds(crossed), ["threshold_enter"]);
+  assert.equal(
+    crossed.document.events.at(-1).cycle,
+    "2026-08-27T12:00:00.000Z",
+  );
+});
+
 test("forecast enters and exits only on established authoritative runway", () => {
   const configured = settings({
     remainingThreshold: "off",

@@ -259,6 +259,12 @@ interface CurrentFact {
   capturedAt: string;
 }
 
+function cycleIdentity(resetAt: string | undefined): string {
+  if (!resetAt) return "unbounded";
+  const parsed = Date.parse(resetAt);
+  return new Date(Math.round(parsed / 60_000) * 60_000).toISOString();
+}
+
 function identityFor(
   provider: HistoryProviderSnapshot,
   fact: HistoryFact,
@@ -267,7 +273,7 @@ function identityFor(
     provider: provider.provider,
     scope: fact.scope,
     ...(fact.limit ? { limit: fact.limit } : {}),
-    cycle: fact.resetAt ?? "unbounded",
+    cycle: cycleIdentity(fact.resetAt),
   };
 }
 
@@ -389,7 +395,7 @@ function factIn(
     (fact) =>
       fact.scope === identity.scope &&
       fact.limit === identity.limit &&
-      (fact.resetAt ?? "unbounded") === identity.cycle,
+      cycleIdentity(fact.resetAt) === identity.cycle,
   );
 }
 
