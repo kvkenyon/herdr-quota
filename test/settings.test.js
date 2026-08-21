@@ -116,6 +116,25 @@ test("unsupported schemas remain intact and unknown fields are ignored", async (
     assert.equal(incompatible.availability, "incompatible");
     assert.deepEqual(incompatible.settings, defaultSettings());
     assert.equal(await readFile(path, "utf8"), future);
+    await assert.rejects(
+      () => new SettingsStore(path).save(defaultSettings()),
+      /settings_incompatible/,
+    );
+    await assert.rejects(
+      () =>
+        new SettingsStore(path).save({
+          ...defaultSettings(),
+          meterMode: "used",
+        }),
+      /settings_incompatible/,
+    );
+    assert.equal(await readFile(path, "utf8"), future);
+    assert.deepEqual(
+      (await readdir(join(directory, "herdr-quota"))).filter((name) =>
+        name.endsWith(".tmp"),
+      ),
+      [],
+    );
 
     assert.deepEqual(
       parseSettingsDocument({
@@ -179,6 +198,40 @@ test("unwritable operations and interrupted replacement preserve the last valid 
   }
 });
 
+test("read-only and foreign-owned settings targets are refused before replacement", async () => {
+  const directory = await temporaryDirectory();
+  const path = join(directory, "settings.json");
+  const previous = `${JSON.stringify(defaultSettings())}\n`;
+  try {
+    await writeFile(path, previous, { mode: 0o400 });
+    await assert.rejects(
+      () => new SettingsStore(path).save(defaultSettings()),
+      /settings_unsafe/,
+    );
+    assert.equal(await readFile(path, "utf8"), previous);
+    assert.deepEqual(
+      (await readdir(directory)).filter((name) => name.endsWith(".tmp")),
+      [],
+    );
+
+    const operations = memoryOperations(previous, undefined, {
+      uid: (process.getuid?.() ?? 0) + 1,
+    });
+    await assert.rejects(
+      () =>
+        new SettingsStore("/config/settings.json", operations).save(
+          defaultSettings(),
+        ),
+      /settings_unsafe/,
+    );
+    assert.equal(operations.target(), previous);
+    assert.deepEqual(operations.files(), ["/config/settings.json"]);
+  } finally {
+    await chmod(path, 0o600).catch(() => undefined);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("a read-only directory failure is contained by the settings store", async (context) => {
   if (process.platform === "win32") {
     context.skip("POSIX permissions are required");
@@ -204,9 +257,15 @@ test("a read-only directory failure is contained by the settings store", async (
   }
 });
 
-function memoryOperations(initial, failAt) {
+function memoryOperations(initial, failAt, statOverrides = {}) {
   const files = new Map([["/config/settings.json", initial]]);
-  const regular = () => ({ isFile: () => true, isSymbolicLink: () => false });
+  const regular = () => ({
+    isFile: () => true,
+    isSymbolicLink: () => false,
+    mode: 0o100600,
+    uid: process.getuid?.() ?? 0,
+    ...statOverrides,
+  });
   return {
     async lstat(path) {
       if (!files.has(path)) {

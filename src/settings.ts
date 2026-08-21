@@ -33,6 +33,8 @@ export interface SettingsLoadResult {
 interface FileStat {
   isFile(): boolean;
   isSymbolicLink(): boolean;
+  mode: number;
+  uid: number;
 }
 
 export interface SettingsFileHandle {
@@ -182,6 +184,39 @@ async function regularTarget(
   }
 }
 
+async function replaceableTarget(
+  path: string,
+  operations: SettingsFileOperations,
+): Promise<boolean> {
+  let stat: FileStat;
+  try {
+    stat = await operations.lstat(path);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return false;
+    throw error;
+  }
+  if (stat.isSymbolicLink() || !stat.isFile())
+    throw new SettingsDocumentError("unsafe");
+  const currentUid = process.getuid?.();
+  if (
+    (currentUid !== undefined && stat.uid !== currentUid) ||
+    (stat.mode & 0o200) === 0
+  )
+    throw new SettingsDocumentError("unsafe");
+
+  const text = await readRegularFile(path, operations);
+  try {
+    parseSettingsDocument(JSON.parse(text as string) as unknown);
+  } catch (error) {
+    if (
+      error instanceof SettingsDocumentError &&
+      error.kind === "incompatible"
+    )
+      throw error;
+  }
+  return true;
+}
+
 async function readRegularFile(
   path: string,
   operations: SettingsFileOperations,
@@ -247,7 +282,7 @@ export class SettingsStore {
       recursive: true,
       mode: 0o700,
     });
-    await regularTarget(this.path, this.operations);
+    await replaceableTarget(this.path, this.operations);
 
     const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     const noFollow = constants.O_NOFOLLOW ?? 0;
@@ -267,7 +302,7 @@ export class SettingsStore {
       handle = undefined;
 
       // Refuse an unsafe target even if it appeared after the initial check.
-      await regularTarget(this.path, this.operations);
+      await replaceableTarget(this.path, this.operations);
       await this.operations.rename(temporary, this.path);
       renamed = true;
     } finally {
