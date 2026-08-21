@@ -1,11 +1,12 @@
 import type { ProviderQuota, QuotaWindow } from "./types.js";
 import { friendlyProviderError } from "./sanitize.js";
+import { SUPPORTED_PROVIDERS } from "./settings.js";
 
 /**
  * The marketed provider set. Anything else quota-axi can report (Grok,
  * GitHub Copilot, future providers) is neither queried nor rendered.
  */
-export const ALLOWED_PROVIDERS = ["claude", "codex", "cursor", "kimi"] as const;
+export const ALLOWED_PROVIDERS = SUPPORTED_PROVIDERS;
 
 export function isAllowedProvider(provider: string): boolean {
   return (ALLOWED_PROVIDERS as readonly string[]).includes(

@@ -3,14 +3,31 @@ import { collectQuota } from "./collect.js";
 import { safeCollectorFailure } from "./failure.js";
 import { LocalHistory } from "./history.js";
 import { TerminalInputParser, type DashboardAction } from "./keys.js";
+import {
+  applyPreferenceAction,
+  openPreferences,
+  type PreferenceAction,
+} from "./preferences.js";
 import { RefreshScheduler } from "./refresh.js";
 import {
   applyDashboardScroll,
   clampDashboardScroll,
   renderDashboard,
 } from "./render.js";
+import {
+  cloneSettings,
+  defaultSettings,
+  SettingsStore,
+  type DashboardSettings,
+  type SettingsLoadResult,
+} from "./settings.js";
 import { releaseSidebarStateSync } from "./sidebar-state.js";
-import type { DashboardState, QuotaReport } from "./types.js";
+import type {
+  DashboardState,
+  HistoryView,
+  PreferencesState,
+  QuotaReport,
+} from "./types.js";
 
 const ALT_ENTER = "\x1b[?1049h\x1b[?25l";
 const ALT_EXIT = "\x1b[?25h\x1b[?1049l\x1b[0m";
@@ -34,24 +51,49 @@ export class ChildProcessTracker {
   }
 }
 
+export interface DashboardSettingsRepository {
+  load(): Promise<SettingsLoadResult>;
+  save(settings: DashboardSettings): Promise<void>;
+}
+
+export interface DashboardHistoryRepository {
+  record(report: QuotaReport): Promise<HistoryView>;
+}
+
+export interface DashboardAppOptions {
+  collect?: () => Promise<QuotaReport>;
+  history?: DashboardHistoryRepository;
+  settings?: DashboardSettingsRepository;
+}
+
 export class DashboardApp {
-  private state: DashboardState = { loading: true, scroll: 0 };
+  private state: DashboardState = {
+    loading: true,
+    scroll: 0,
+    settings: defaultSettings(),
+    settingsAvailability: "first_run",
+  };
   private readonly children = new ChildProcessTracker();
   private readonly inputParser = new TerminalInputParser();
   private inputTimer?: NodeJS.Timeout;
   private closed = false;
   private ageTimer?: NodeJS.Timeout;
-  private readonly history = new LocalHistory();
+  private readonly history: DashboardHistoryRepository;
+  private readonly settings: DashboardSettingsRepository;
   private readonly refreshScheduler: RefreshScheduler<QuotaReport>;
 
-  constructor() {
+  constructor(options: DashboardAppOptions = {}) {
+    this.history = options.history ?? new LocalHistory();
+    this.settings = options.settings ?? new SettingsStore();
     this.refreshScheduler = new RefreshScheduler({
-      collect: () =>
-        collectQuota({
-          onChild: (child, active) => {
-            this.children.update(child, active);
-          },
-        }),
+      collect:
+        options.collect ??
+        (() =>
+          collectQuota({
+            onChild: (child, active) => {
+              this.children.update(child, active);
+            },
+          })),
       onStart: () => {
         this.state.loading = true;
         this.state.failure = undefined;
@@ -84,6 +126,7 @@ export class DashboardApp {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       throw new Error("AI Quota needs an interactive terminal");
     }
+    await this.loadSettings();
     process.stdout.write(ALT_ENTER);
     process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -115,7 +158,7 @@ export class DashboardApp {
     this.inputTimer = setTimeout(() => {
       this.inputTimer = undefined;
       this.handleActions(this.inputParser.flush());
-    }, 30);
+    }, 100);
   };
 
   private handleActions(actions: ReturnType<TerminalInputParser["push"]>) {
@@ -123,11 +166,109 @@ export class DashboardApp {
       if (action === "quit") {
         this.close();
         return;
+      }
+      if (this.state.preferences) {
+        this.handlePreferenceAction(action);
+        continue;
+      }
+      if (action === "escape") {
+        this.close();
+        return;
+      } else if (action === "preferences") {
+        this.state.preferences = openPreferences(
+          this.state.settings ?? defaultSettings(),
+        );
+        this.render();
       } else if (action === "refresh") void this.refreshScheduler.manual();
       else if (this.isScrollAction(action)) {
         applyDashboardScroll(this.state, action, process.stdout.rows || 24);
         this.render();
       }
+    }
+  }
+
+  private handlePreferenceAction(action: DashboardAction) {
+    const preferences = this.state.preferences;
+    if (!preferences) return;
+    const mapped = this.preferenceAction(action, preferences);
+    if (!mapped) return;
+    const update = applyPreferenceAction(
+      preferences,
+      mapped,
+      Math.max(1, (process.stdout.rows || 24) - 2),
+    );
+    this.state.preferences = update.state;
+    if (update.command === "cancel") {
+      this.state.preferences = undefined;
+      this.render();
+    } else if (update.command === "save") {
+      void this.savePreferences(update.state);
+    } else {
+      this.render();
+    }
+  }
+
+  private preferenceAction(
+    action: DashboardAction,
+    preferences: PreferencesState,
+  ): PreferenceAction | undefined {
+    if (action === "escape")
+      return preferences.confirmReset ? "decline" : "cancel";
+    if (action === "scroll_down") return "focus_down";
+    if (action === "scroll_up") return "focus_up";
+    if (action === "page_down") return "page_down";
+    if (action === "page_up") return "page_up";
+    if (action === "previous") return "previous";
+    if (action === "next") return "next";
+    if (action === "toggle") return "toggle";
+    if (action === "activate") return "activate";
+    if (action === "move_up") return "move_up";
+    if (action === "move_down") return "move_down";
+    if (action === "save") return "save";
+    if (action === "cancel") return "cancel";
+    if (action === "reset") return "reset";
+    if (action === "confirm") return "confirm";
+    if (action === "decline") return "decline";
+    return undefined;
+  }
+
+  private async savePreferences(preferences: PreferencesState) {
+    const draft = cloneSettings(preferences.draft);
+    this.state.preferences = {
+      ...preferences,
+      saving: true,
+      notice: undefined,
+    };
+    this.render();
+    try {
+      await this.settings.save(draft);
+      if (this.closed) return;
+      this.state.settings = draft;
+      this.state.settingsAvailability = "ready";
+      this.state.preferences = undefined;
+      this.state.scroll = clampDashboardScroll(
+        this.state,
+        process.stdout.rows || 24,
+      );
+    } catch {
+      if (this.closed) return;
+      this.state.preferences = {
+        ...preferences,
+        saving: false,
+        notice: "save_failed",
+      };
+    }
+    this.render();
+  }
+
+  private async loadSettings() {
+    try {
+      const loaded = await this.settings.load();
+      this.state.settings = loaded.settings;
+      this.state.settingsAvailability = loaded.availability;
+    } catch {
+      this.state.settings = defaultSettings();
+      this.state.settingsAvailability = "unavailable";
     }
   }
 

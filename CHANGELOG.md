@@ -1,6 +1,24 @@
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.1 — 2026-08-20
+
+### Added
+
+- An in-pane, keyboard-only Preferences surface (`p`) can hide supported providers, order visible provider sections, and select remaining or used meters without hand-editing a file. Save, cancel, and confirmed reset remain usable at 20/24/36 columns and 6/8/12/23 rows.
+- A small schema-v1 settings document persists only provider order, hidden providers, and meter mode under the XDG config directory. Private atomic writes, malformed-file quarantine, incompatible-schema preservation, non-regular-target refusal, and failure containment protect both settings and live refresh.
+- PTY, render, settings, and input regressions cover defaults, each hidden provider, all-hidden recovery, order-independent constraint selection, bounded meter complements, immediate rerender without collector overlap, fragmented Escape sequences, pane restoration, and ANSI/NO_COLOR accessibility.
+
+### Changed
+
+- Default behavior remains v0.2.0-compatible: all four providers appear in the established order, meters mean remaining, the most-restrictive visible limit still wins, and no setup prompt interrupts first run.
+- Essential labels, percentages, resets, history, and state text now use the terminal foreground instead of faint or fixed bright 256-color values. Weight, markers, and text carry hierarchy and severity in Herdr light mode, dark mode, and without color.
+- The top history line is reserved for actionable change. Exact unchanged samples and underlying differences that round to the same displayed integer no longer render neutral `N→N%` evidence; material drop/gain, reset, pace, projection, gap, privacy, and same-cycle boundaries are unchanged.
+
+### Security and privacy
+
+- Settings never contain account IDs, quota payloads, credentials, authentication facts, raw errors, history samples, or paths from provider output. Unknown fields are ignored, unsafe targets are refused, and a failed replacement preserves the last valid document.
+
+## 0.2.0 — 2026-08-20
 
 ### Added
 

@@ -1,6 +1,6 @@
 {
   "name": "herdr-quota",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Slim Herdr sidebar for local AI subscription quota",
   "type": "module",
@@ -14,7 +14,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint src scripts test",
     "preview": "npm run build --silent && node dist/preview.js",
-    "preview:svg": "npm run build --silent && node scripts/capture-preview.mjs",
+    "preview:svg": "npm run build --silent && node scripts/capture-preview.mjs && node scripts/capture-theme-previews.mjs",
     "test": "npm run build --silent && node --test test/*.test.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run preview:svg"

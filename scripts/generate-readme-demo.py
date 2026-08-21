@@ -79,12 +79,12 @@ def frame_svg(frame: int, dashboard: str) -> str:
   <text x="60" y="100" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13" font-weight="700" letter-spacing="2.2">HERDR PLUGIN</text>
   <text x="60" y="167" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="46" font-weight="700" letter-spacing="-1.2">See the next limit</text>
   <text x="60" y="218" fill="#f0f6fc" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="46" font-weight="700" letter-spacing="-1.2">before it blocks work.</text>
-  <text x="60" y="266" fill="#b1bac4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18">Live limit. Local change. One slim pane.</text>
+  <text x="60" y="266" fill="#b1bac4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18">Your providers. Your order. One slim pane.</text>
   <text x="60" y="308" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="15">Claude  ·  Codex  ·  Cursor  ·  Kimi</text>
   <rect x="60" y="346" width="152" height="42" rx="10" fill="#161b22" stroke="#30363d"/>
   <text x="82" y="372" fill="#e6edf3" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">prefix + u</text>
-  <text x="60" y="440" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13">Limiting capacity · resets · pace trend</text>
-  <text x="60" y="469" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13">Sanitized local history · no telemetry</text>
+  <text x="60" y="440" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13">p preferences · remaining or used · keyboard only</text>
+  <text x="60" y="469" fill="#8b949e" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="13">Private local settings · no telemetry</text>
   <rect x="{x - 8:.2f}" y="{PANEL_Y - 8}" width="356" height="478" rx="22" fill="#58a6ff" opacity="{glow:.3f}" filter="url(#glow)"/>
   <g transform="translate({x:.2f} {PANEL_Y})" filter="url(#shadow)">
     <svg width="340" height="462" viewBox="0 0 340 462">{dashboard}</svg>

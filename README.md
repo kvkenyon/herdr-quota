@@ -6,13 +6,13 @@
 herdr plugin install kvkenyon/herdr-quota --yes
 ```
 
-![AI Quota open in Herdr from the first frame, leading with the limiting provider and exhaustion time, then an established local pace change above reachable provider tiers and keyboard navigation](docs/readme-demo.gif)
+![AI Quota open in Herdr from the first frame, leading with the limiting provider and exhaustion time above readable provider tiers, with Preferences discoverable from the keyboard footer](docs/readme-demo.gif)
 
 [![CI](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml/badge.svg)](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kvkenyon/herdr-quota)](https://github.com/kvkenyon/herdr-quota/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A slim, full-height sidebar leads with the known provider tier most likely to block work first, then explains established local change before making every trustworthy tier reachable with the allowance still remaining, reset countdown, and pace conclusion. It refreshes while it is open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
+A slim, full-height sidebar leads with the known provider tier most likely to block work first, then explains actionable established change before making every trustworthy tier reachable with the allowance still remaining, reset countdown, and pace conclusion. Press `p` to keep only the providers you care about, put their sections in your order, or show used instead of remaining percentage. It refreshes while it is open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
 
 ## Bind `prefix+u`
 
@@ -61,12 +61,23 @@ Remove the `[[keys.command]]` block from `config.toml` and reload configuration 
 | `prefix+u`             | Toggle the quota sidebar                      |
 | `j` / `k` or Down / Up | Move the provider/detail window one whole row |
 | Page Down / Page Up    | Move one visible page                         |
+| `p`                    | Open in-pane Preferences                      |
 | `r`                    | Refresh now and reset automatic scheduling    |
 | `q` / Escape           | Close and restore the prior layout            |
 
 The sidebar refreshes immediately, then five minutes after each completed attempt without overlapping collectors. A whole-collector failure keeps the last good reading visible and retries after 10, 20, then at most 30 minutes. Pressing `r` preempts the current attempt, refreshes immediately, and resets that backoff.
 
-The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, limiting-capacity attention line, position (`Rows 5–8 of 16`), and keyboard footer stay pinned. Established history gets one compact change line when the pane is at least 10 rows tall; at 6 or 8 rows it steps aside entirely for live data. Decorative provider gaps disappear before scrolling is needed and never inflate that row count. The full footer reads `j/k scroll · PgUp/PgDn · r · q/esc`; narrow panes use `j/k PgUp/PgDn r/q`. Restrained color marks at-risk tiers, but the marker and words carry the meaning without color. Unknown readings stay `--` rather than becoming a misleading zero.
+The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, limiting-capacity attention line, position (`Rows 5–8 of 16`), and keyboard footer stay pinned. Actionable history gets one compact change line when the pane is at least 10 rows tall; at 6 or 8 rows it steps aside entirely for live data. Decorative provider gaps disappear before scrolling is needed and never inflate that row count. The full footer reads `j/k · PgUp/PgDn · p prefs · r · q/esc`; narrow panes retain `p prefs` alongside navigation, refresh, and close.
+
+Essential labels, percentages, resets, history, and state text use the terminal's default foreground so they remain legible in Herdr's light and dark themes. Bold weight is reserved for titles, provider headers, the limiting tier, focus, and severity—not every row. `!`, `=`, `?`, arrows, checkboxes, focus markers, and explicit state words carry all meaning without color; optional color only reinforces them. Unknown readings stay `--` rather than becoming a misleading zero.
+
+The committed validation sheets exercise the real ANSI renderer against Herdr's [light](docs/theme-preview-light.svg) and [dark](docs/theme-preview-dark.svg) Rosé Pine terminal palettes at 20/24/36 columns and normal/short heights; the same matrix also runs in a real PTY and with `NO_COLOR` during `npm run check`.
+
+### Preferences
+
+Press `p` inside the pane. Use `j`/`k` or Up/Down to move focus, Space or Enter to show/hide a provider, `u`/`d` to move a visible provider, and Left/Right or Space to choose `remaining` or `used`. Press `s` to save or `c`/Escape to cancel without changing the live dashboard. `x` opens reset confirmation; `y` resets the draft to all providers in the original order with remaining meters, but an explicit save is still required. The focused row and every action remain reachable in 20/24/36-column panes, including short heights.
+
+Provider order changes provider sections only. Attention still selects the most restrictive visible evidence using the established safety semantics. Hidden providers disappear from detail, attention, and the change line, while a compact hidden count always discloses the choice. If all four are hidden, the pane says `No providers shown` and gives the exact recovery instruction `Press p for Preferences` (compact `Press p for prefs` at 20 columns); it never claims that everything is on pace.
 
 ### Reading the attention line
 
@@ -84,28 +95,28 @@ An established projection shows when capacity runs out; an early projection rema
 
 The optional second content line compares only consecutive, trustworthy samples from the same reset cycle. It never joins a post-reset series to the prior cycle and never signals from a single sample, signed-out provider, stale/unavailable/error state, unknown semantics, schema mismatch, or whole-check failure.
 
-| Marker    | Established local evidence                                                               |
-| --------- | ---------------------------------------------------------------------------------------- |
-| `↻`       | The reset time changed and remaining capacity materially replenished.                    |
-| `↓` / `↑` | Remaining capacity dropped meaningfully, or authoritative pace got worse/better.         |
-| `↘` / `↗` | An established exhaustion projection moved materially earlier/later.                     |
-| `~`       | A same-cycle remaining-capacity sparkline, first-sample note, or safe availability note. |
+| Marker    | Established local evidence                                                              |
+| --------- | --------------------------------------------------------------------------------------- |
+| `↻`       | The reset time changed and remaining capacity materially replenished.                   |
+| `↓` / `↑` | Remaining capacity dropped/gained meaningfully, or authoritative pace got worse/better. |
+| `↘` / `↗` | An established exhaustion projection moved materially earlier/later.                    |
+| `~`       | A finite local-history recovery or availability note.                                   |
 
-Small ordinary changes become a neutral sparkline after two same-cycle samples instead of an alert. Meaningful capacity drops require at least 10 percentage points; pace reserve changes require at least 10 points; exhaustion projections must move by at least two hours. These thresholds avoid fabricating precision from routine refresh noise.
+Exact unchanged samples, ordinary same-cycle drift, and values that differ underneath but round to the same displayed integer leave this prime line empty. The pane never shows a confusing `N→N%`. Meaningful capacity drops or gains require at least 10 percentage points; pace reserve changes require at least 10 points; exhaustion projections must move by at least two hours. Material same-cycle gain, replenishment after a reset, authoritative pace improvement, and materially later exhaustion remain positive evidence. These thresholds avoid fabricating precision from routine refresh noise while preserving actionable drop, gain, reset, pace, forecast, and gap semantics.
 
 ### Reading the gauges
 
-Each tier draws a small gauge of what is **still left**, so the bar and the percentage next to it always agree - a long bar means a full tank, never a spent one.
+By default each tier draws a small gauge of what is **still remaining**, exactly as v0.2.0 did. In Preferences, `used` changes only this presentation: for a known bounded percentage it shows `100 - remaining`, clamped to 0–100. The title adds `· used` so a screenshot and no-color output cannot be misread. Unknown, unavailable, stale, signed-out, error, and non-percentage evidence never turn into zero or 100, and reset, pace, runway, history, and attention calculations continue using the original upstream data.
 
-| Gauge  | Meaning                                                      |
-| ------ | ------------------------------------------------------------ |
-| `████` | Exactly full. Nothing of this tier has been spent.           |
-| `██──` | Part spent. The blocks show the allowance still left.        |
-| `▏───` | Nearly gone. Any remaining allowance keeps a visible sliver. |
-| `────` | Exactly empty. This tier is spent.                           |
-| blank  | No reading. Nothing is drawn, so empty is never implied.     |
+| Gauge  | Meaning                                                  |
+| ------ | -------------------------------------------------------- |
+| `████` | Exactly 100% in the selected meter mode.                 |
+| `██──` | Half of the selected remaining/used measure.             |
+| `▏───` | Near zero; any positive selected measure keeps a sliver. |
+| `────` | Exactly 0% in the selected meter mode.                   |
+| blank  | No reading. Nothing is drawn, so empty is never implied. |
 
-Gauges are drawn to an eighth of a cell, so tiers a few points apart stay apart on screen. The filled part takes the same colour as its percentage, and the tier that limits the provider is shown in bold.
+Gauges are drawn to an eighth of a cell, so tiers a few points apart stay apart on screen. The filled part and percentage use the same presentation mode, and the tier that limits the provider is shown in bold.
 
 Tier rows follow each provider's own quota model:
 
@@ -154,6 +165,10 @@ The plugin delegates provider access to its plugin-local `quota-axi@~0.1.29` exe
 - Retention is bounded to 512 snapshots or 30 days, whichever removes data first. Equivalent samples are stored at most once every 15 minutes; real normalized changes may be recorded sooner.
 - Only a usable successful collection can write history. Ineligible providers keep finite health/auth gap markers but no quota facts, and an entirely stale, signed-out, unavailable, error, or unknown-semantics report produces no write.
 - Corrupt/truncated history restarts safely; schema mismatch, permission failure, clock rollback, and interrupted writes preserve the live dashboard and collapse to a finite local-history note. No local error or file content becomes display copy.
+- Preferences persist separately at `${XDG_CONFIG_HOME:-~/.config}/herdr-quota/settings.json`. Its complete schema-v1 content is the schema version, supported-provider order, hidden-provider IDs, and `remaining`/`used` meter mode—nothing else.
+- Settings never store account IDs, quota payloads, credentials, authentication facts, raw errors, history samples, provider-output paths, or arbitrary future fields. The writer serializes only its finite schema, uses a private `0700` directory and `0600` file, syncs a private sibling temporary file, then atomically replaces the target.
+- A malformed current settings file is quarantined with private permissions before defaults recover; an unsupported future schema is preserved in place. Unknown fields and provider IDs are ignored. Symlink/non-regular targets, read-only or unwritable paths, and interrupted replacement fail closed without crashing refresh or replacing the last valid file.
+- Saving Preferences rerenders the existing last-good report immediately. It does not launch another collector, reset retry backoff, erase history, alter credentials, or require a Herdr server restart.
 - Automatic refresh exists only while the pane process is alive: five minutes after success, with bounded 10/20/30-minute whole-collector failure backoff.
 - Raw responses, account identifiers, credentials, and credential paths are never logged.
 - Refreshes have a 12-second process deadline and 2 MiB output limit.
@@ -182,9 +197,11 @@ The Keychain grant only lets `quota-axi` read a credential that already works. E
 
 **A reading is stale or unknown.** The sidebar preserves truthful state when a provider cannot be reached and keeps retrying while open. Press `r` to retry immediately after connectivity or authentication recovers.
 
-**History says it needs another sample.** Keep the pane open through another trustworthy refresh or press `r` later. A provider that disappeared, signed out, went stale, or crossed a reset starts a new comparison segment instead of connecting unrelated points.
-
 **History restarted or is unavailable.** `History restarted` means a corrupt/truncated file or clock rollback was isolated and a new safe segment began. `History unavailable` means the local schema is newer/incompatible or the file could not be read or atomically replaced. Live quota and refresh continue normally; check permissions on `${XDG_STATE_HOME:-~/.local/state}/herdr-quota` or update the plugin for a newer schema.
+
+**Preferences reset or cannot save.** A recovered malformed file starts with safe defaults; an unsupported future schema remains untouched. `Save failed` means the settings target could not be replaced safely—check that `${XDG_CONFIG_HOME:-~/.config}/herdr-quota/settings.json` is an ordinary file owned by you and its directory is writable. The live quota pane keeps refreshing, and cancel still leaves the active settings unchanged. Never replace the target with a symlink.
+
+**Every provider is hidden.** Press the `p` key named by the empty state, show at least one provider with Space, and press `s`. You can also choose `Reset defaults`, confirm with `y`, then save.
 
 **The position says more rows exist.** Use `j`/`k`, Down/Up, or Page Down/Page Up. The position counts provider headers and tier/recovery rows, not decorative blank lines.
 
@@ -202,7 +219,7 @@ npm run check
 npm run preview
 ```
 
-`npm run check` formats, lints, type-checks, runs the selector/refresh/layout/history suite, and regenerates the sanitized no-color preview. Exact responsive input/render fixtures cover 20/24/36 columns and 6/8/12/23 rows, every reachable row, pinned context, dynamic scroll clamping, safe whole-check failures, retry timing, current Codex model session/week labels, bounded/atomic history, privacy allow-listing, reset segmentation, auth/data gaps, and deterministic change timelines. The runtime provider boundary lives in `src/schema.ts` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
+`npm run check` formats, lints, type-checks, runs the selector/refresh/layout/history/settings suite, drives the real app through a POSIX PTY, and regenerates the sanitized no-color preview. Exact responsive input/render fixtures cover 20/24/36 columns and 6/8/12/23 rows, every reachable row, pinned context, fragmented Escape sequences, Preferences save/cancel/reset/order/visibility/meter controls, immediate rerender without collector overlap, light/dark ANSI safety, all-hidden recovery, settings failure containment, dynamic scroll clamping, safe whole-check failures, retry timing, current Codex model session/week labels, bounded atomic local files, privacy allow-listing, reset segmentation, auth/data gaps, and deterministic actionable change timelines. The runtime provider boundary lives in `src/schema.ts` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
 
 ## License and references
 

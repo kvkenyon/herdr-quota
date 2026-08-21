@@ -7,17 +7,29 @@ import {
 } from "../dist/keys.js";
 import { ChildProcessTracker } from "../dist/app.js";
 
-test("q and Escape close, r refreshes, and row/page keys navigate", () => {
+test("dashboard, Preferences, and navigation keys have distinct actions", () => {
   assert.equal(actionForInput("q"), "quit");
-  assert.equal(actionForInput("\x1b"), "quit");
+  assert.equal(actionForInput("\x1b"), "escape");
   assert.equal(actionForInput("r"), "refresh");
+  assert.equal(actionForInput("p"), "preferences");
   assert.equal(actionForInput("j"), "scroll_down");
   assert.equal(actionForInput("k"), "scroll_up");
   assert.equal(actionForInput("\x1b[B"), "scroll_down");
   assert.equal(actionForInput("\x1b[A"), "scroll_up");
+  assert.equal(actionForInput("\x1b[D"), "previous");
+  assert.equal(actionForInput("\x1b[C"), "next");
   assert.equal(actionForInput("\x1b[6~"), "page_down");
   assert.equal(actionForInput("\x1b[5~"), "page_up");
-  assert.equal(actionForInput("x"), "none");
+  assert.equal(actionForInput(" "), "toggle");
+  assert.equal(actionForInput("\r"), "activate");
+  assert.equal(actionForInput("u"), "move_up");
+  assert.equal(actionForInput("d"), "move_down");
+  assert.equal(actionForInput("s"), "save");
+  assert.equal(actionForInput("c"), "cancel");
+  assert.equal(actionForInput("x"), "reset");
+  assert.equal(actionForInput("y"), "confirm");
+  assert.equal(actionForInput("n"), "decline");
+  assert.equal(actionForInput("z"), "none");
 });
 
 test("fragmented escape sequences are never mistaken for bare Escape", () => {
@@ -29,11 +41,11 @@ test("fragmented escape sequences are never mistaken for bare Escape", () => {
   assert.deepEqual(parser.push("6"), []);
   assert.deepEqual(parser.push("~"), ["page_down"]);
   assert.deepEqual(parser.push("\x1b"), []);
-  assert.deepEqual(parser.flush(), ["quit"]);
+  assert.deepEqual(parser.flush(), ["escape"]);
 });
 
 test("unknown keys and terminal sequences never trigger collector actions", () => {
-  const actions = actionsForInput("jxk\x1b[2~\x1b[6~");
+  const actions = actionsForInput("jzk\x1b[2~\x1b[6~");
   assert.deepEqual(actions, ["scroll_down", "scroll_up", "page_down"]);
   assert.doesNotMatch(actions.join(" "), /refresh|quit/);
 });
