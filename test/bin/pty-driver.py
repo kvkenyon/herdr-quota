@@ -115,7 +115,13 @@ def main() -> int:
 
     status = child_status(pid)
     if status is None:
-        os.write(master, b"q")
+        try:
+            os.write(master, b"q")
+        except OSError as error:
+            # macOS reports EIO when the slave closes before waitpid observes
+            # the child exit. The scripted steps may already have sent "q".
+            if error.errno != errno.EIO:
+                raise
         raw.extend(read_available(master, 2.0))
         deadline = time.monotonic() + 2.0
         while status is None and time.monotonic() < deadline:
