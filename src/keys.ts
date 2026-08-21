@@ -3,6 +3,7 @@ export type DashboardAction =
   | "escape"
   | "refresh"
   | "preferences"
+  | "acknowledge"
   | "scroll_down"
   | "scroll_up"
   | "page_down"
@@ -58,6 +59,7 @@ function parseInput(value: string, holdIncomplete: boolean) {
     if (key === "q" || key === "Q" || key === "\x03") actions.push("quit");
     else if (key === "r" || key === "R") actions.push("refresh");
     else if (key === "p" || key === "P") actions.push("preferences");
+    else if (key === "a" || key === "A") actions.push("acknowledge");
     else if (key === "j" || key === "J") actions.push("scroll_down");
     else if (key === "k" || key === "K") actions.push("scroll_up");
     else if (key === "u" || key === "U") actions.push("move_up");

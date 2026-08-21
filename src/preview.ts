@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { adaptQuotaResponse } from "./schema.js";
 import { renderPlain } from "./render.js";
+import { defaultSettings } from "./settings.js";
 
 const fixture = process.argv[2] ?? "test/fixtures/complete.json";
 const width = Number(process.env.COLUMNS ?? 112);
@@ -22,6 +23,21 @@ process.stdout.write(
           scope: "Fable",
           limit: "Fable",
         },
+      },
+      settings: { ...defaultSettings(), remainingThreshold: 25 },
+      transitions: {
+        availability: "ready",
+        events: [
+          {
+            kind: "threshold_enter",
+            provider: "OpenAI Codex",
+            scope: "All models",
+            limit: "Week",
+            threshold: 25,
+            occurredAt: "2026-08-18T17:59:00.000Z",
+            remaining: 23,
+          },
+        ],
       },
       loading: false,
       scroll: 0,

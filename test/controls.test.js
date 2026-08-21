@@ -12,6 +12,7 @@ test("dashboard, Preferences, and navigation keys have distinct actions", () => 
   assert.equal(actionForInput("\x1b"), "escape");
   assert.equal(actionForInput("r"), "refresh");
   assert.equal(actionForInput("p"), "preferences");
+  assert.equal(actionForInput("a"), "acknowledge");
   assert.equal(actionForInput("j"), "scroll_down");
   assert.equal(actionForInput("k"), "scroll_up");
   assert.equal(actionForInput("\x1b[B"), "scroll_down");

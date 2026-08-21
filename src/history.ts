@@ -782,17 +782,39 @@ export async function writeHistoryDocumentAtomic(
 }
 
 export class LocalHistory {
+  private document?: HistoryDocument;
+
   constructor(
     readonly path = historyPathFromEnvironment(),
     private readonly operations: HistoryFileOperations = FILE_OPERATIONS,
   ) {}
 
+  async retained(): Promise<HistoryDocument | undefined> {
+    const loaded = await loadHistory(this.path, this.operations);
+    if (loaded.kind === "incompatible" || loaded.kind === "unavailable") {
+      this.document = undefined;
+      return undefined;
+    }
+    this.document = loaded.document;
+    return loaded.document;
+  }
+
+  current(): HistoryDocument | undefined {
+    return this.document;
+  }
+
   async record(report: QuotaReport, now = new Date()): Promise<HistoryView> {
     const snapshot = normalizeHistorySnapshot(report, now);
     if (!snapshot) return { availability: "no_usable_data" };
     const loaded = await loadHistory(this.path, this.operations);
-    if (loaded.kind === "incompatible") return { availability: "incompatible" };
-    if (loaded.kind === "unavailable") return { availability: "unavailable" };
+    if (loaded.kind === "incompatible") {
+      this.document = undefined;
+      return { availability: "incompatible" };
+    }
+    if (loaded.kind === "unavailable") {
+      this.document = undefined;
+      return { availability: "unavailable" };
+    }
 
     const update = updateHistoryDocument(loaded.document, snapshot);
     if (update.wrote) {
@@ -803,9 +825,11 @@ export class LocalHistory {
           this.operations,
         );
       } catch {
+        this.document = undefined;
         return { availability: "unavailable" };
       }
     }
+    this.document = update.document;
     const availability: HistoryAvailability = update.clockSkew
       ? "clock_skew"
       : loaded.kind === "corrupt"

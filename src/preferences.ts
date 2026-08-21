@@ -23,7 +23,8 @@ export type PreferenceAction =
   | "confirm"
   | "decline";
 
-export type PreferenceCommand = "none" | "save" | "cancel";
+export type PreferenceCommand =
+  "none" | "save" | "cancel" | "clear_transitions";
 
 export interface PreferenceUpdate {
   state: PreferencesState;
@@ -33,7 +34,16 @@ export interface PreferenceUpdate {
 export function preferenceFocusOrder(
   settings: DashboardSettings,
 ): PreferenceFocus[] {
-  return [...settings.providerOrder, "meter", "save", "cancel", "reset"];
+  return [
+    ...settings.providerOrder,
+    "meter",
+    "threshold",
+    "forecast",
+    "save",
+    "cancel",
+    "reset",
+    "clear_transitions",
+  ];
 }
 
 export function openPreferences(settings: DashboardSettings): PreferencesState {
@@ -41,6 +51,7 @@ export function openPreferences(settings: DashboardSettings): PreferencesState {
     draft: cloneSettings(settings),
     focus: settings.providerOrder[0] ?? "meter",
     confirmReset: false,
+    confirmTransitionClear: false,
     saving: false,
   };
 }
@@ -51,6 +62,8 @@ export function settingsEqual(
 ): boolean {
   return (
     left.meterMode === right.meterMode &&
+    left.remainingThreshold === right.remainingThreshold &&
+    left.forecastBeforeReset === right.forecastBeforeReset &&
     left.providerOrder.join("\0") === right.providerOrder.join("\0") &&
     left.hiddenProviders.join("\0") === right.hiddenProviders.join("\0")
   );
@@ -82,7 +95,12 @@ function toggleProvider(
   return { ...settings, hiddenProviders: hidden };
 }
 
-function toggleFocused(state: PreferencesState): PreferencesState {
+const THRESHOLDS = ["off", 25, 10, 5] as const;
+
+function toggleFocused(
+  state: PreferencesState,
+  direction: -1 | 1 = 1,
+): PreferencesState {
   if (isProviderFocus(state.focus)) {
     return {
       ...state,
@@ -96,6 +114,25 @@ function toggleFocused(state: PreferencesState): PreferencesState {
       draft: {
         ...state.draft,
         meterMode: state.draft.meterMode === "remaining" ? "used" : "remaining",
+      },
+      notice: undefined,
+    };
+  }
+  if (state.focus === "threshold") {
+    const current = THRESHOLDS.indexOf(state.draft.remainingThreshold);
+    const next = (current + direction + THRESHOLDS.length) % THRESHOLDS.length;
+    return {
+      ...state,
+      draft: { ...state.draft, remainingThreshold: THRESHOLDS[next]! },
+      notice: undefined,
+    };
+  }
+  if (state.focus === "forecast") {
+    return {
+      ...state,
+      draft: {
+        ...state.draft,
+        forecastBeforeReset: !state.draft.forecastBeforeReset,
       },
       notice: undefined,
     };
@@ -138,6 +175,7 @@ function resetDraft(state: PreferencesState): PreferencesState {
     draft: defaultSettings(),
     focus: "reset",
     confirmReset: false,
+    confirmTransitionClear: false,
     notice: undefined,
   };
 }
@@ -148,6 +186,22 @@ export function applyPreferenceAction(
   pageSize = 4,
 ): PreferenceUpdate {
   if (current.saving) return { state: current, command: "none" };
+
+  if (current.confirmTransitionClear) {
+    if (action === "confirm") {
+      return {
+        state: { ...current, confirmTransitionClear: false },
+        command: "clear_transitions",
+      };
+    }
+    if (action === "decline" || action === "cancel") {
+      return {
+        state: { ...current, confirmTransitionClear: false },
+        command: "none",
+      };
+    }
+    return { state: current, command: "none" };
+  }
 
   if (current.confirmReset) {
     if (action === "confirm")
@@ -177,9 +231,11 @@ export function applyPreferenceAction(
         command: "none",
       };
     case "toggle":
-    case "previous":
-    case "next":
       return { state: toggleFocused(current), command: "none" };
+    case "previous":
+      return { state: toggleFocused(current, -1), command: "none" };
+    case "next":
+      return { state: toggleFocused(current, 1), command: "none" };
     case "move_up":
       return { state: moveVisibleProvider(current, -1), command: "none" };
     case "move_down":
@@ -191,6 +247,12 @@ export function applyPreferenceAction(
       if (current.focus === "reset") {
         return {
           state: { ...current, confirmReset: true },
+          command: "none",
+        };
+      }
+      if (current.focus === "clear_transitions") {
+        return {
+          state: { ...current, confirmTransitionClear: true },
           command: "none",
         };
       }

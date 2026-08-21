@@ -288,3 +288,97 @@ test("NO_COLOR retains every severity, state, and selection marker", () => {
   assert.ok(!surface.includes("\x1b["));
   assert.match(surface, /> 1 \[x\] Claude/);
 });
+
+test("new transition uses only a title marker and preserves the limiting answer", () => {
+  const transitions = {
+    availability: "ready",
+    events: [
+      {
+        kind: "threshold_enter",
+        provider: "OpenAI Codex",
+        scope: "All models",
+        limit: "Week",
+        threshold: 25,
+        occurredAt: "2026-08-18T17:59:00.000Z",
+        remaining: 23,
+      },
+    ],
+  };
+  for (const width of [20, 24, 36]) {
+    for (const height of [6, 8, 12, 23]) {
+      const output = renderPlain(
+        {
+          report: report(),
+          settings: { ...defaultSettings(), remainingThreshold: 25 },
+          transitions,
+          loading: false,
+          scroll: 0,
+        },
+        { width, height, now: NOW },
+      );
+      const lines = output.split("\n");
+      assert.match(lines[0], /Quota.*!/);
+      assert.match(lines[1], /^! /);
+      assert.match(lines.at(-1), /a alert/);
+      assert.equal(lines.length, height);
+      for (const line of lines) assert.ok(line.length <= width);
+    }
+  }
+});
+
+test("transition review is concise, no-color, and acknowledges from one key", () => {
+  const state = {
+    report: report(),
+    settings: { ...defaultSettings(), remainingThreshold: 25 },
+    transitions: {
+      availability: "ready",
+      events: [
+        {
+          kind: "threshold_enter",
+          provider: "OpenAI Codex",
+          scope: "All models",
+          limit: "Week",
+          threshold: 25,
+          occurredAt: "2026-08-18T17:59:00.000Z",
+          remaining: 23,
+        },
+      ],
+    },
+    transitionReview: true,
+    loading: false,
+    scroll: 0,
+  };
+  for (const width of [20, 24, 36]) {
+    for (const height of [6, 8, 12, 23]) {
+      const output = renderPlain(state, { width, height, now: NOW });
+      assert.match(output, /Codex Week crossed/);
+      assert.match(output, /25%/);
+      assert.match(output, /23% left/);
+      assert.match(output.split("\n").at(-1), /a(?:\/enter)? ack/);
+      assert.equal(output.includes("\u001b["), false);
+      assert.equal(output.split("\n").length, height);
+    }
+  }
+});
+
+test("clear-transition confirmation names preserved quota history and settings", () => {
+  const preferences = {
+    ...openPreferences(defaultSettings()),
+    focus: "clear_transitions",
+    confirmTransitionClear: true,
+  };
+  const output = renderPlain(
+    {
+      report: report(),
+      settings: defaultSettings(),
+      preferences,
+      loading: false,
+      scroll: 0,
+    },
+    { width: 24, height: 6, now: NOW },
+  );
+  assert.match(output, /Clear transition/);
+  assert.match(output, /Quota history stays/);
+  assert.match(output, /Provider settings stay/);
+  assert.match(output, /y clear · n\/esc back/);
+});

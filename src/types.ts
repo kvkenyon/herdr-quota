@@ -121,15 +121,53 @@ export interface HistoryView {
   evidence?: HistoryEvidence;
 }
 
+export type TransitionAvailability =
+  | "ready"
+  | "first_run"
+  | "recovered"
+  | "incompatible"
+  | "unavailable"
+  | "clock_skew";
+
+export type TransitionKind =
+  | "threshold_enter"
+  | "threshold_recovery"
+  | "forecast_enter"
+  | "forecast_recovery";
+
+export interface TransitionDisplayEvent {
+  kind: TransitionKind;
+  provider: string;
+  scope: string;
+  limit?: string;
+  threshold: "off" | 25 | 10 | 5;
+  occurredAt: string;
+  remaining?: number;
+}
+
+export interface TransitionView {
+  availability: TransitionAvailability;
+  events: TransitionDisplayEvent[];
+}
+
 export type PreferenceFocus =
-  SupportedProvider | "meter" | "save" | "cancel" | "reset";
+  | SupportedProvider
+  | "meter"
+  | "threshold"
+  | "forecast"
+  | "save"
+  | "cancel"
+  | "reset"
+  | "clear_transitions";
 
 export interface PreferencesState {
   draft: DashboardSettings;
   focus: PreferenceFocus;
   confirmReset: boolean;
+  confirmTransitionClear: boolean;
   saving: boolean;
-  notice?: "save_failed";
+  notice?:
+    "save_failed" | "transition_clear_failed" | "transition_history_cleared";
 }
 
 export interface DashboardState {
@@ -142,4 +180,6 @@ export interface DashboardState {
   settings?: DashboardSettings;
   settingsAvailability?: SettingsAvailability;
   preferences?: PreferencesState;
+  transitions?: TransitionView;
+  transitionReview?: boolean;
 }

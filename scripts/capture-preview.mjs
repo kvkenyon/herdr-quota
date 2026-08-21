@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { adaptQuotaResponse } from "../dist/schema.js";
 import { renderPlain } from "../dist/render.js";
+import { defaultSettings } from "../dist/settings.js";
 
 const fixture = JSON.parse(
   await readFile(
@@ -19,6 +20,21 @@ const text = renderPlain(
         scope: "Fable",
         limit: "Fable",
       },
+    },
+    settings: { ...defaultSettings(), remainingThreshold: 25 },
+    transitions: {
+      availability: "ready",
+      events: [
+        {
+          kind: "threshold_enter",
+          provider: "OpenAI Codex",
+          scope: "All models",
+          limit: "Week",
+          threshold: 25,
+          occurredAt: "2026-08-18T17:59:00.000Z",
+          remaining: 23,
+        },
+      ],
     },
     loading: false,
     scroll: 0,
