@@ -308,8 +308,7 @@ function currentFacts(
     if (
       provider.dataHealth !== "current" ||
       !provider.authEligible ||
-      (!visible(provider.provider, settings) &&
-        !providers?.includes(providerId(provider.provider))) ||
+      !visible(provider.provider, settings) ||
       (providers && !providers.includes(providerId(provider.provider)))
     )
       continue;

@@ -389,13 +389,8 @@ export class DashboardApp {
     channels: ("threshold" | "forecast")[];
     providers?: SupportedProvider[];
   } {
-    const visibilityChanged = previous.hiddenProviders.filter(
+    const becameVisible = previous.hiddenProviders.filter(
       (provider) => !next.hiddenProviders.includes(provider),
-    );
-    visibilityChanged.push(
-      ...next.hiddenProviders.filter(
-        (provider) => !previous.hiddenProviders.includes(provider),
-      ),
     );
     const thresholdChanged =
       previous.remainingThreshold !== next.remainingThreshold;
@@ -403,15 +398,15 @@ export class DashboardApp {
       previous.forecastBeforeReset !== next.forecastBeforeReset;
     return {
       channels: [
-        ...(visibilityChanged.length > 0 || thresholdChanged
+        ...(becameVisible.length > 0 || thresholdChanged
           ? (["threshold"] as const)
           : []),
-        ...(visibilityChanged.length > 0 || forecastChanged
+        ...(becameVisible.length > 0 || forecastChanged
           ? (["forecast"] as const)
           : []),
       ],
-      ...(visibilityChanged.length > 0 && !thresholdChanged && !forecastChanged
-        ? { providers: visibilityChanged }
+      ...(becameVisible.length > 0 && !thresholdChanged && !forecastChanged
+        ? { providers: becameVisible }
         : {}),
     };
   }
