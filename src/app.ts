@@ -20,6 +20,7 @@ import {
   SettingsStore,
   type DashboardSettings,
   type SettingsLoadResult,
+  type SupportedProvider,
 } from "./settings.js";
 import { releaseSidebarStateSync } from "./sidebar-state.js";
 import { LocalTransitions, transitionPolicyEnabled } from "./transitions.js";
@@ -78,6 +79,7 @@ export interface DashboardTransitionRepository {
     settings: DashboardSettings,
     now?: Date,
     channels?: readonly ("threshold" | "forecast")[],
+    providers?: readonly SupportedProvider[],
   ): Promise<TransitionView>;
   acknowledge(
     history: HistoryDocument,
@@ -318,12 +320,18 @@ export class DashboardApp {
       this.state.settings = draft;
       this.state.settingsAvailability = "ready";
       const document = this.history.current?.();
-      const channels = this.baselineChannels(previous, draft);
+      const { channels, providers } = this.baselineScope(previous, draft);
       if (!transitionPolicyEnabled(draft)) {
         this.state.transitions = { availability: "ready", events: [] };
       } else if (document && channels.length) {
         this.state.transitions = await this.runTransition(() =>
-          this.transitions.baseline(document, draft, new Date(), channels),
+          this.transitions.baseline(
+            document,
+            draft,
+            new Date(),
+            channels,
+            providers,
+          ),
         );
       } else if (document) {
         this.state.transitions = await this.runTransition(() =>
@@ -374,22 +382,38 @@ export class DashboardApp {
     );
   }
 
-  private baselineChannels(
+  private baselineScope(
     previous: DashboardSettings,
     next: DashboardSettings,
-  ): ("threshold" | "forecast")[] {
-    const visibilityChanged =
-      previous.hiddenProviders.join("\0") !== next.hiddenProviders.join("\0");
-    return [
-      ...(visibilityChanged ||
-      previous.remainingThreshold !== next.remainingThreshold
-        ? (["threshold"] as const)
-        : []),
-      ...(visibilityChanged ||
-      previous.forecastBeforeReset !== next.forecastBeforeReset
-        ? (["forecast"] as const)
-        : []),
-    ];
+  ): {
+    channels: ("threshold" | "forecast")[];
+    providers?: SupportedProvider[];
+  } {
+    const visibilityChanged = previous.hiddenProviders.filter(
+      (provider) => !next.hiddenProviders.includes(provider),
+    );
+    visibilityChanged.push(
+      ...next.hiddenProviders.filter(
+        (provider) => !previous.hiddenProviders.includes(provider),
+      ),
+    );
+    const thresholdChanged =
+      previous.remainingThreshold !== next.remainingThreshold;
+    const forecastChanged =
+      previous.forecastBeforeReset !== next.forecastBeforeReset;
+    return {
+      channels: [
+        ...(visibilityChanged.length > 0 || thresholdChanged
+          ? (["threshold"] as const)
+          : []),
+        ...(visibilityChanged.length > 0 || forecastChanged
+          ? (["forecast"] as const)
+          : []),
+      ],
+      ...(visibilityChanged.length > 0 && !thresholdChanged && !forecastChanged
+        ? { providers: visibilityChanged }
+        : {}),
+    };
   }
 
   private async acknowledgeTransitions() {

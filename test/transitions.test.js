@@ -265,6 +265,85 @@ test("policy and visibility changes establish baselines without synthetic events
   assert.ok(update.generated.every((event) => event.kind.endsWith("baseline")));
 });
 
+test("baselines retain the current sample across wall-clock skew", () => {
+  const thresholdSettings = settings();
+  const first = history(point(0, 40));
+  let document = baselineTransitions(
+    emptyTransitions(),
+    first,
+    thresholdSettings,
+    new Date(START + 60 * 60_000),
+    ["threshold"],
+  ).document;
+  assert.equal(
+    document.events.at(-1).occurredAt,
+    first.snapshots[0].capturedAt,
+  );
+  let update = evaluateTransitions(
+    document,
+    history(point(0, 40), point(5, 20)),
+    thresholdSettings,
+  );
+  assert.deepEqual(kinds(update), ["threshold_enter"]);
+
+  const forecastSettings = settings({
+    remainingThreshold: "off",
+    forecastBeforeReset: true,
+  });
+  document = baselineTransitions(
+    emptyTransitions(),
+    first,
+    forecastSettings,
+    new Date(START - 60 * 60_000),
+    ["forecast"],
+  ).document;
+  update = evaluateTransitions(
+    document,
+    history(
+      point(0, 40),
+      point(5, 35, {
+        runway: "projected_exhaustion",
+        confidence: "established",
+      }),
+    ),
+    forecastSettings,
+  );
+  assert.deepEqual(kinds(update), ["forecast_enter"]);
+});
+
+test("visibility baselines target only changed providers", () => {
+  const configured = settings();
+  const codex = point(0, 20).providers[0];
+  const claude = {
+    ...structuredClone(codex),
+    provider: "Claude",
+  };
+  const samples = history({
+    capturedAt: new Date(START).toISOString(),
+    providers: [codex, claude],
+  });
+  const existing = evaluateTransitions(
+    emptyTransitions(),
+    samples,
+    configured,
+  ).document;
+  const update = baselineTransitions(
+    existing,
+    samples,
+    settings({ hiddenProviders: ["claude"] }),
+    new Date(START + 10 * 60_000),
+    ["threshold", "forecast"],
+    ["claude"],
+  );
+  assert.ok(update.generated.length > 0);
+  assert.ok(update.generated.every((event) => event.provider === "Claude"));
+  assert.equal(
+    update.document.events.filter((event) => event.provider === "OpenAI Codex")
+      .length,
+    existing.events.filter((event) => event.provider === "OpenAI Codex").length,
+  );
+});
+
 test("pane reopen dedupes and retained-history catch-up emits once", () => {
   const configured = settings();
   const first = history(point(0, 40));

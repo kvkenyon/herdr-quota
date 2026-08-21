@@ -299,6 +299,7 @@ function channelPolicyMatches(
 function currentFacts(
   history: HistoryDocument,
   settings: DashboardSettings,
+  providers?: readonly SupportedProvider[],
 ): CurrentFact[] {
   const current = history.snapshots.at(-1);
   if (!current) return [];
@@ -307,7 +308,9 @@ function currentFacts(
     if (
       provider.dataHealth !== "current" ||
       !provider.authEligible ||
-      !visible(provider.provider, settings)
+      (!visible(provider.provider, settings) &&
+        !providers?.includes(providerId(provider.provider))) ||
+      (providers && !providers.includes(providerId(provider.provider)))
     )
       continue;
     for (const fact of provider.facts) {
@@ -443,20 +446,18 @@ export function baselineTransitions(
   settings: DashboardSettings,
   now = new Date(),
   channels: readonly ("threshold" | "forecast")[] = ["threshold", "forecast"],
+  providers?: readonly SupportedProvider[],
 ): TransitionEvaluation {
-  if (!transitionPolicyEnabled(settings) || !Number.isFinite(now.getTime()))
+  void now;
+  if (!transitionPolicyEnabled(settings))
     return { document, generated: [], clockSkew: false };
   const policy = policyFor(settings);
   const generated: TransitionEvent[] = [];
-  for (const current of currentFacts(history, settings)) {
+  for (const current of currentFacts(history, settings, providers)) {
     if (channels.includes("threshold") && settings.remainingThreshold !== "off")
-      generated.push(
-        eventFor(current, policy, "threshold_baseline", now.toISOString()),
-      );
+      generated.push(eventFor(current, policy, "threshold_baseline"));
     if (channels.includes("forecast") && settings.forecastBeforeReset)
-      generated.push(
-        eventFor(current, policy, "forecast_baseline", now.toISOString()),
-      );
+      generated.push(eventFor(current, policy, "forecast_baseline"));
   }
   return appendTransitionEvents(document, generated);
 }
@@ -593,7 +594,7 @@ function afterLatestBaseline(
     settings,
     eventChannel(event.kind),
   );
-  return baselineAt === undefined || Date.parse(event.occurredAt) >= baselineAt;
+  return baselineAt === undefined || Date.parse(event.occurredAt) > baselineAt;
 }
 
 function displayEvents(
@@ -855,6 +856,7 @@ export class LocalTransitions {
     settings: DashboardSettings,
     now = new Date(),
     channels?: readonly ("threshold" | "forecast")[],
+    providers?: readonly SupportedProvider[],
   ): Promise<TransitionView> {
     const loaded = await loadDocument(this.path, this.operations);
     if (loaded.kind === "incompatible" || loaded.kind === "unavailable")
@@ -865,6 +867,7 @@ export class LocalTransitions {
       settings,
       now,
       channels,
+      providers,
     );
     if (update.generated.length) {
       try {
