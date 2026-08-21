@@ -9,14 +9,14 @@ const EIGHTHS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
 export const BAR_TRACK = "─";
 
 /**
- * A gauge of the allowance still left in a tier, drawn at one eighth of a cell
- * of precision so even a four-cell bar separates 74% from 69%.
+ * A gauge of the selected bounded percentage, drawn at one eighth of a cell of
+ * precision so even a four-cell bar separates 74% from 69%.
  *
- * The filled part always means remaining, never spent, so the bar and the
- * percentage beside it never disagree. Two clamps keep the extremes truthful:
- * a solid bar means exactly full and an empty track means exactly empty, so
- * 99% keeps a visible notch and 1% keeps a visible sliver. An unknown reading
- * draws nothing, which is why it can never be misread as exhausted.
+ * The caller supplies remaining or its used presentation complement, so the
+ * bar and adjacent percentage never disagree. Two clamps keep the extremes
+ * truthful: a solid bar means exactly 100% and an empty track means exactly 0%,
+ * so 99% keeps a visible notch and 1% keeps a visible sliver. An unknown
+ * reading draws nothing, which is why it can never be misread as exhausted.
  */
 export function remainingBar(
   percentRemaining: number | undefined,

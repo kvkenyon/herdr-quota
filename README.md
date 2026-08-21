@@ -108,13 +108,13 @@ Exact unchanged samples, ordinary same-cycle drift, and values that differ under
 
 By default each tier draws a small gauge of what is **still remaining**, exactly as v0.2.0 did. In Preferences, `used` changes only this presentation: for a known bounded percentage it shows `100 - remaining`, clamped to 0–100. The title adds `· used` so a screenshot and no-color output cannot be misread. Unknown, unavailable, stale, signed-out, error, and non-percentage evidence never turn into zero or 100, and reset, pace, runway, history, and attention calculations continue using the original upstream data.
 
-| Gauge  | Meaning                                                      |
-| ------ | ------------------------------------------------------------ |
-| `████` | Exactly full. Nothing of this tier has been spent.           |
-| `██──` | Part spent. The blocks show the allowance still left.        |
-| `▏───` | Nearly gone. Any remaining allowance keeps a visible sliver. |
-| `────` | Exactly empty. This tier is spent.                           |
-| blank  | No reading. Nothing is drawn, so empty is never implied.     |
+| Gauge  | Meaning                                                  |
+| ------ | -------------------------------------------------------- |
+| `████` | Exactly 100% in the selected meter mode.                 |
+| `██──` | Half of the selected remaining/used measure.             |
+| `▏───` | Near zero; any positive selected measure keeps a sliver. |
+| `────` | Exactly 0% in the selected meter mode.                   |
+| blank  | No reading. Nothing is drawn, so empty is never implied. |
 
 Gauges are drawn to an eighth of a cell, so tiers a few points apart stay apart on screen. The filled part and percentage use the same presentation mode, and the tier that limits the provider is shown in bold.
 

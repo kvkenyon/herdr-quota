@@ -208,10 +208,7 @@ async function replaceableTarget(
   try {
     parseSettingsDocument(JSON.parse(text as string) as unknown);
   } catch (error) {
-    if (
-      error instanceof SettingsDocumentError &&
-      error.kind === "incompatible"
-    )
+    if (error instanceof SettingsDocumentError && error.kind === "incompatible")
       throw error;
   }
   return true;

@@ -158,7 +158,7 @@ export class DashboardApp {
     this.inputTimer = setTimeout(() => {
       this.inputTimer = undefined;
       this.handleActions(this.inputParser.flush());
-    }, 30);
+    }, 100);
   };
 
   private handleActions(actions: ReturnType<TerminalInputParser["push"]>) {
