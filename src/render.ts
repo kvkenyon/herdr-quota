@@ -280,6 +280,30 @@ function orderedVisibleProviders(
   );
 }
 
+/**
+ * Count provider records that the dashboard cannot show for reasons outside
+ * the user's Preferences choice. A disabled provider is an intentional local
+ * presentation choice, not a hidden provider. In contrast, unavailable
+ * provider readings and unrecognised report providers remain disclosed as
+ * non-Preferences conditions.
+ */
+function nonDisabledHiddenProviderCount(
+  state: DashboardState,
+  settings: DashboardSettings,
+): number {
+  let hidden = 0;
+  for (const provider of state.report?.providers ?? []) {
+    const id = providerId(provider);
+    if (
+      id === undefined ||
+      (!settings.hiddenProviders.includes(id) &&
+        provider.state.status === "unavailable")
+    )
+      hidden++;
+  }
+  return hidden;
+}
+
 function historyProviderId(value: string): SupportedProvider | undefined {
   const normalized = value.toLowerCase();
   if (normalized === "openai codex") return "codex";
@@ -645,7 +669,7 @@ function scrollMetricsForAvailable(
   settings: DashboardSettings,
 ): DashboardScrollMetrics {
   const rowCount = detailRowCount(state, settings);
-  const hidden = settings.hiddenProviders.length;
+  const hidden = nonDisabledHiddenProviderCount(state, settings);
   const fixedRows =
     (rowCount > 0 ? 1 : 0) +
     (rowCount > 0 && hidden > 0 ? 1 : 0) +
@@ -761,8 +785,7 @@ function positionLine(metrics: DashboardScrollMetrics, layout: Layout): string {
   return colorize(text, "dim", layout.color);
 }
 
-function hiddenLine(settings: DashboardSettings, layout: Layout): string {
-  const count = settings.hiddenProviders.length;
+function hiddenLine(count: number, layout: Layout): string {
   const noun = count === 1 ? "provider" : "providers";
   const text = fittingText(
     [
@@ -780,8 +803,9 @@ function contentLines(
   layout: Layout,
   height: number,
 ): string[] {
-  const hidden = layout.settings.hiddenProviders.length;
-  if (hidden === layout.settings.providerOrder.length) {
+  const disabled = layout.settings.hiddenProviders.length;
+  const hidden = nonDisabledHiddenProviderCount(state, layout.settings);
+  if (disabled === layout.settings.providerOrder.length) {
     const failure = failureLine(state, layout);
     return [
       ...(failure ? [failure] : []),
@@ -790,7 +814,7 @@ function contentLines(
         ["Press p for Preferences", "Press p for prefs"],
         layout.width,
       ),
-      hiddenLine(layout.settings, layout),
+      ...(hidden > 0 ? [hiddenLine(hidden, layout)] : []),
     ].slice(0, height);
   }
 
@@ -807,7 +831,7 @@ function contentLines(
       ...(failure ? [failure] : [""]),
       colorize(message, state.failure ? "red" : "cyan", layout.color),
       hint,
-      ...(hidden > 0 ? [hiddenLine(layout.settings, layout)] : []),
+      ...(hidden > 0 ? [hiddenLine(hidden, layout)] : []),
     ].slice(0, height);
   }
 
@@ -832,8 +856,7 @@ function contentLines(
   const history = showsHistory(state, height, layout.settings)
     ? historyLine(state, layout)
     : undefined;
-  const hiddenDisclosure =
-    hidden > 0 ? hiddenLine(layout.settings, layout) : undefined;
+  const hiddenDisclosure = hidden > 0 ? hiddenLine(hidden, layout) : undefined;
   const fixed = [attention, hiddenDisclosure, failure, history].filter(
     (line): line is string => line !== undefined,
   );
