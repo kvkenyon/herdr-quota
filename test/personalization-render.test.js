@@ -48,6 +48,7 @@ test("every provider can be hidden individually with an explicit hidden count", 
     ["codex", /^OpenAI Codex\s*$/m],
     ["cursor", /^Cursor\s*$/m],
     ["kimi", /^Kimi\s*$/m],
+    ["grok", /^Grok\s*$/m],
     ["copilot", /^GitHub Copilot\s*$/m],
   ]);
   for (const [provider, pattern] of labels) {
@@ -63,14 +64,14 @@ test("every provider can be hidden individually with an explicit hidden count", 
 test("all hidden is an honest p-key recovery state at every product size", () => {
   const settings = {
     ...defaultSettings(),
-    hiddenProviders: ["claude", "codex", "cursor", "kimi", "copilot"],
+    hiddenProviders: ["claude", "codex", "cursor", "kimi", "grok", "copilot"],
   };
   for (const width of [20, 24, 36]) {
     for (const height of [6, 8, 12, 23]) {
       const output = render(settings, { width, height });
       assert.match(output, /No providers shown/);
       assert.match(output, /Press p for (?:Preferences|prefs)/);
-      assert.match(output, /5 hidden/);
+      assert.match(output, /6 hidden/);
       assert.doesNotMatch(output, /All known|Limits on pace|%|█/);
       assert.equal(output.split("\n").length, height);
     }

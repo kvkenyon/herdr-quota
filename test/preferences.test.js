@@ -20,6 +20,7 @@ test("defaults open as an isolated draft in the supported provider order", () =>
     "codex",
     "cursor",
     "kimi",
+    "grok",
     "copilot",
     "meter",
     "threshold",
@@ -35,7 +36,14 @@ test("defaults open as an isolated draft in the supported provider order", () =>
 });
 
 test("every supported provider can be hidden and shown independently", () => {
-  for (const provider of ["claude", "codex", "cursor", "kimi", "copilot"]) {
+  for (const provider of [
+    "claude",
+    "codex",
+    "cursor",
+    "kimi",
+    "grok",
+    "copilot",
+  ]) {
     let preferences = atFocus(openPreferences(defaultSettings()), provider);
     preferences = applyPreferenceAction(preferences, "toggle").state;
     assert.deepEqual(preferences.draft.hiddenProviders, [provider]);
@@ -56,6 +64,7 @@ test("u/d reorder visible providers deterministically without moving hidden rows
     "codex",
     "claude",
     "kimi",
+    "grok",
     "copilot",
   ]);
   assert.equal(preferences.focus, "cursor");
@@ -113,7 +122,7 @@ test("j/k, arrows, and page movement clamp focus at short-pane boundaries", () =
   let preferences = openPreferences(defaultSettings());
   preferences = applyPreferenceAction(preferences, "focus_up").state;
   assert.equal(preferences.focus, "claude");
-  preferences = applyPreferenceAction(preferences, "page_down", 5).state;
+  preferences = applyPreferenceAction(preferences, "page_down", 6).state;
   assert.equal(preferences.focus, "meter");
   preferences = applyPreferenceAction(preferences, "page_down", 4).state;
   assert.equal(preferences.focus, "cancel");

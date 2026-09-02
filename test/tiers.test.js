@@ -22,17 +22,17 @@ function byId(list, provider) {
   return list.find((item) => item.provider === provider);
 }
 
-test("only the five marketed providers are allowed", () => {
+test("only the six marketed providers are allowed", () => {
   assert.deepEqual(
     MARKETED_PROVIDERS.map((provider) => provider.id),
-    ["claude", "codex", "cursor", "kimi", "copilot"],
+    ["claude", "codex", "cursor", "kimi", "grok", "copilot"],
   );
   assert.deepEqual(
     [...ALLOWED_PROVIDERS],
-    ["claude", "codex", "cursor", "kimi", "copilot"],
+    ["claude", "codex", "cursor", "kimi", "grok", "copilot"],
   );
   assert.equal(isAllowedProvider("Claude"), true);
-  assert.equal(isAllowedProvider("grok"), false);
+  assert.equal(isAllowedProvider("grok"), true);
   assert.equal(isAllowedProvider("copilot"), true);
 });
 
@@ -165,6 +165,7 @@ function bareProvider(provider, state) {
 
 test("every provider has its own sign-in remedy", () => {
   const auth = { status: "auth_required", stale: false };
+  assert.equal(presentProvider(bareProvider("grok", auth)).instruction, "grok");
   assert.equal(
     presentProvider(bareProvider("codex", auth)).instruction,
     "codex login",
@@ -177,6 +178,43 @@ test("every provider has its own sign-in remedy", () => {
     presentProvider(bareProvider("copilot", auth)).instruction,
     "github-copilot-cli auth login",
   );
+});
+
+test("Grok labels consumer quota and keeps usable CLI-only access distinct", () => {
+  const quota = bareProvider("grok", {
+    status: "fresh",
+    stale: false,
+    authStatus: "usable",
+  });
+  quota.windows = [{ id: "credits", label: "credits", kind: "weekly" }];
+  assert.deepEqual(
+    providerTiers(quota).map((row) => row.label),
+    ["Consumer quota"],
+  );
+
+  const cliOnly = bareProvider("grok", {
+    status: "fresh",
+    stale: false,
+    authStatus: "usable",
+  });
+  assert.deepEqual(presentProvider(cliOnly), {
+    kind: "message",
+    message: "Consumer quota unavailable",
+  });
+  assert.equal(providerAnnotation(cliOnly).text, "consumer quota unavailable");
+});
+
+test("Grok keeps rate limiting, partial data, and stale data distinct", () => {
+  for (const [state, expected] of [
+    [{ status: "rate_limited", stale: false }, "rate limited"],
+    [{ status: "fresh", stale: false }, "partial data"],
+    [{ status: "stale", stale: true }, "stale"],
+  ]) {
+    const provider = bareProvider("grok", state);
+    provider.windows = [{ id: "credits", label: "credits", kind: "weekly" }];
+    if (expected === "partial data") provider.semanticsStatus = "partial";
+    assert.equal(providerAnnotation(provider).text, expected);
+  }
 });
 
 test("refreshable expiry also asks for the owning CLI login", () => {

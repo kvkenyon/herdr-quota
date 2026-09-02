@@ -144,7 +144,7 @@ test("real PTY rendering is exact and bounded at every required size", async (co
 test("Preferences saves immediately, persists across reopen, and never overlaps collectors", async () => {
   const result = await drive(20, 6, [
     { text: "p" },
-    { text: "jjjjj" },
+    { text: "jjjjjj" },
     { text: " " },
     { text: "s" },
     { text: "q" },
@@ -291,7 +291,7 @@ test("Preferences clear confirmation preserves quota history and read-only futur
     [
       { text: "", delay: 0.3 },
       { text: "p" },
-      { text: "jjjjjjjjjjj" },
+      { text: "jjjjjjjjjjjj" },
       { text: "\r" },
       { text: "y", delay: 0.3 },
       { text: "q" },

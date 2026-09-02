@@ -14,6 +14,7 @@ export const MARKETED_PROVIDERS = [
   { id: "codex", label: "OpenAI Codex", recoveryInstruction: "codex login" },
   { id: "cursor", label: "Cursor", recoveryInstruction: "cursor-agent login" },
   { id: "kimi", label: "Kimi", recoveryInstruction: "kimi login" },
+  { id: "grok", label: "Grok", recoveryInstruction: "grok" },
   {
     id: "copilot",
     label: "GitHub Copilot",

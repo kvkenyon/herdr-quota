@@ -870,6 +870,7 @@ const PREFERENCE_PROVIDER_NAMES: Record<SupportedProvider, string> = {
   codex: "OpenAI Codex",
   cursor: "Cursor",
   kimi: "Kimi",
+  grok: "Grok",
   copilot: "GitHub Copilot",
 };
 

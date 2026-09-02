@@ -1,0 +1,34 @@
+{
+  "generatedAt": "2026-09-02T15:00:00.000Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "grok",
+      "label": "Grok",
+      "windows": [
+        {
+          "id": "credits",
+          "label": "credits",
+          "kind": "weekly",
+          "percentRemaining": 62,
+          "resetsAt": "2026-09-09T15:00:00.000Z",
+          "pace": { "status": "on_pace" }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_products",
+            "status": "known",
+            "effectivePercentRemaining": 62,
+            "boundedBy": ["credits"],
+            "limitingWindowIds": ["credits"],
+            "runway": { "status": "through_reset" }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false, "authStatus": "usable" }
+    }
+  ]
+}

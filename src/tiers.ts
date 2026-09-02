@@ -7,8 +7,8 @@ import {
 import { friendlyProviderError } from "./sanitize.js";
 
 /**
- * The marketed provider set. Anything else quota-axi can report (Grok and
- * future providers) is neither queried nor rendered.
+ * The marketed provider set. Anything else quota-axi can report is neither
+ * queried nor rendered.
  */
 export const ALLOWED_PROVIDERS = MARKETED_PROVIDERS.map(
   (provider) => provider.id,
@@ -123,6 +123,12 @@ function kimiTierLabel(window: QuotaWindow): TierLabel {
   return passthrough(window);
 }
 
+function grokTierLabel(window: QuotaWindow): TierLabel {
+  if (window.id === "credits")
+    return { label: "Consumer quota", compact: "Consumer" };
+  return passthrough(window);
+}
+
 function copilotTierLabel(window: QuotaWindow): TierLabel {
   if (window.id === "chat") return { label: "Chat", compact: "Chat" };
   if (window.id === "completions")
@@ -137,6 +143,7 @@ const TIER_LABELS: Record<string, (window: QuotaWindow) => TierLabel> = {
   codex: codexTierLabel,
   cursor: cursorTierLabel,
   kimi: kimiTierLabel,
+  grok: grokTierLabel,
   copilot: copilotTierLabel,
 };
 
@@ -231,6 +238,13 @@ export function presentProvider(provider: ProviderQuota): ProviderPresentation {
           ?.recoveryInstruction ?? "sign in with the provider CLI",
     };
   }
+  if (
+    provider.provider.toLowerCase() === "grok" &&
+    provider.state.authStatus === "usable" &&
+    !provider.windows.length
+  ) {
+    return { kind: "message", message: "Consumer quota unavailable" };
+  }
   if (!provider.windows.length) {
     return {
       kind: "message",
@@ -247,6 +261,12 @@ export function providerAnnotation(
 ): ProviderAnnotation | undefined {
   if (provider.state.reason === "keychain_access_required") return undefined;
   if (providerNeedsSignIn(provider)) return { text: "signed out", tone: "bad" };
+  if (
+    provider.provider.toLowerCase() === "grok" &&
+    provider.state.authStatus === "usable" &&
+    !provider.windows.length
+  )
+    return { text: "consumer quota unavailable", tone: "muted" };
   if (provider.state.stale || provider.state.status === "stale")
     return { text: "stale", tone: "warn" };
   if (provider.state.status === "rate_limited")
