@@ -276,39 +276,6 @@ function serializedSettings(settings: DashboardSettings): string {
   })}\n`;
 }
 
-const LOCK_ATTEMPTS = 50;
-const LOCK_DELAY_MS = 10;
-
-async function withSettingsLock<T>(
-  path: string,
-  operations: SettingsFileOperations,
-  action: () => Promise<T>,
-): Promise<T> {
-  const lockPath = `${path}.lock`;
-  let handle: SettingsFileHandle | undefined;
-  for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
-    try {
-      handle = await operations.open(
-        lockPath,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
-        0o600,
-      );
-      break;
-    } catch (error) {
-      if (errorCode(error) !== "EEXIST" || attempt === LOCK_ATTEMPTS - 1)
-        throw error;
-      await new Promise((resolve) => setTimeout(resolve, LOCK_DELAY_MS));
-    }
-  }
-  if (!handle) throw new Error("settings_lock_unavailable");
-  try {
-    return await action();
-  } finally {
-    await handle.close().catch(() => undefined);
-    await operations.unlink(lockPath).catch(() => undefined);
-  }
-}
-
 export class SettingsStore {
   constructor(
     readonly path = settingsPath(),
@@ -336,8 +303,7 @@ export class SettingsStore {
         error instanceof SyntaxError ||
         (error instanceof SettingsDocumentError && error.kind === "corrupt")
       ) {
-        if (text !== undefined)
-          await this.quarantine(text).catch(() => undefined);
+        await this.quarantine().catch(() => undefined);
         return { settings: defaultSettings(), availability: "recovered" };
       }
       return { settings: defaultSettings(), availability: "unavailable" };
@@ -349,44 +315,40 @@ export class SettingsStore {
       recursive: true,
       mode: 0o700,
     });
-    await withSettingsLock(this.path, this.operations, async () => {
+    await replaceableTarget(this.path, this.operations);
+
+    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
+    const noFollow = constants.O_NOFOLLOW ?? 0;
+    let handle: SettingsFileHandle | undefined;
+    let renamed = false;
+    try {
+      handle = await this.operations.open(
+        temporary,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow,
+        0o600,
+      );
+      await handle.writeFile(serializedSettings(settings), {
+        encoding: "utf8",
+      });
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+
+      // Refuse an unsafe target even if it appeared after the initial check.
       await replaceableTarget(this.path, this.operations);
-
-      const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
-      const noFollow = constants.O_NOFOLLOW ?? 0;
-      let handle: SettingsFileHandle | undefined;
-      let renamed = false;
-      try {
-        handle = await this.operations.open(
-          temporary,
-          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow,
-          0o600,
-        );
-        await handle.writeFile(serializedSettings(settings), {
-          encoding: "utf8",
-        });
-        await handle.sync();
-        await handle.close();
-        handle = undefined;
-
-        await replaceableTarget(this.path, this.operations);
-        await this.operations.rename(temporary, this.path);
-        renamed = true;
-      } finally {
-        await handle?.close().catch(() => undefined);
-        if (!renamed)
-          await this.operations.unlink(temporary).catch(() => undefined);
-      }
-    });
+      await this.operations.rename(temporary, this.path);
+      renamed = true;
+    } finally {
+      await handle?.close().catch(() => undefined);
+      if (!renamed)
+        await this.operations.unlink(temporary).catch(() => undefined);
+    }
   }
 
-  private async quarantine(expected: string): Promise<void> {
-    await withSettingsLock(this.path, this.operations, async () => {
-      const current = await readRegularFile(this.path, this.operations);
-      if (current === undefined || current !== expected) return;
-      const quarantine = `${this.path}.invalid-${Date.now()}-${randomUUID()}`;
-      await this.operations.rename(this.path, quarantine);
-      await this.operations.chmod(quarantine, 0o600).catch(() => undefined);
-    });
+  private async quarantine(): Promise<void> {
+    if (!(await regularTarget(this.path, this.operations))) return;
+    const quarantine = `${this.path}.invalid-${Date.now()}-${randomUUID()}`;
+    await this.operations.rename(this.path, quarantine);
+    await this.operations.chmod(quarantine, 0o600).catch(() => undefined);
   }
 }

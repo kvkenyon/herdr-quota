@@ -5,10 +5,10 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
-use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 
@@ -111,7 +111,7 @@ pub fn quarantine_if_unchanged(
     path: &Path,
     expected: &[u8],
 ) -> Result<Option<PathBuf>, AtomicError> {
-    let _lock = lock_sibling(path)?;
+    let _lock = lock_parent(path)?;
     let Some(current) = read_replaceable(path)? else {
         return Ok(None);
     };
@@ -143,7 +143,7 @@ where
     H: FnMut(WriteStage) -> io::Result<()>,
 {
     create_private_parent(path).map_err(AtomicError::from)?;
-    let _lock = lock_sibling(path)?;
+    let _lock = lock_parent(path)?;
     let existing = read_replaceable(path)?;
     validate_existing(existing.as_deref()).map_err(ReplaceError::Validation)?;
 
@@ -171,39 +171,31 @@ where
     result
 }
 
-struct SiblingLock(PathBuf);
+#[cfg(unix)]
+struct SiblingLock(File);
 
+#[cfg(unix)]
 impl Drop for SiblingLock {
     fn drop(&mut self) {
-        fs::remove_file(&self.0).ok();
+        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
     }
 }
 
-fn lock_sibling(path: &Path) -> Result<SiblingLock, AtomicError> {
-    let mut name = OsString::from(path.file_name().ok_or(AtomicError::InvalidPath)?);
-    name.push(".lock");
-    let lock_path = parent_directory(path).join(name);
-    for attempt in 0..50 {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-        match options.open(&lock_path) {
-            Ok(file) => {
-                if let Err(error) = set_private_file_permissions(&file) {
-                    drop(file);
-                    fs::remove_file(&lock_path).ok();
-                    return Err(error.into());
-                }
-                return Ok(SiblingLock(lock_path));
-            }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists && attempt < 49 => {
-                thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => return Err(error.into()),
-        }
+#[cfg(unix)]
+fn lock_parent(path: &Path) -> Result<SiblingLock, AtomicError> {
+    let file = File::open(parent_directory(path))?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(io::Error::last_os_error().into());
     }
-    unreachable!()
+    Ok(SiblingLock(file))
+}
+
+#[cfg(not(unix))]
+struct SiblingLock;
+
+#[cfg(not(unix))]
+fn lock_parent(_path: &Path) -> Result<SiblingLock, AtomicError> {
+    Ok(SiblingLock)
 }
 
 fn create_private_parent(path: &Path) -> io::Result<()> {
@@ -454,21 +446,52 @@ mod tests {
         assert_eq!(fs::read(&path).expect("read final settings"), b"future\n");
     }
 
+    #[cfg(unix)]
     #[test]
-    fn a_shared_lock_fails_safely_after_bounded_acquisition() {
+    #[ignore]
+    fn hold_parent_lock_until_terminated() {
+        let path = PathBuf::from(std::env::var_os("HERDR_LOCK_TEST_PATH").expect("test path"));
+        let marker = PathBuf::from(std::env::var_os("HERDR_LOCK_TEST_MARKER").expect("marker"));
+        let _lock = super::lock_parent(&path).expect("lock parent");
+        fs::write(marker, b"locked").expect("write marker");
+        loop {
+            std::thread::park();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_termination_releases_the_storage_lock() {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+
         let directory = TestDirectory::new();
         let path = directory.path().join("settings.json");
-        let lock_path = directory.path().join("settings.json.lock");
+        let marker = directory.path().join("locked");
         fs::write(&path, b"current\n").expect("write current settings");
-        fs::write(&lock_path, b"").expect("hold shared lock");
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--ignored",
+                "--exact",
+                "store::atomic::tests::hold_parent_lock_until_terminated",
+            ])
+            .env("HERDR_LOCK_TEST_PATH", &path)
+            .env("HERDR_LOCK_TEST_MARKER", &marker)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start lock holder");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(marker.exists(), "lock holder did not start");
+        child.kill().expect("terminate lock holder");
+        child.wait().expect("wait for lock holder");
 
-        let result = super::replace_atomically(&path, b"next\n", |_| Ok::<(), Infallible>(()));
-
-        assert!(result.is_err());
-        assert_eq!(
-            fs::read(&path).expect("read current settings"),
-            b"current\n"
-        );
+        super::replace_atomically(&path, b"next\n", |_| Ok::<(), Infallible>(()))
+            .expect("replace after termination");
+        assert_eq!(fs::read(path).expect("read settings"), b"next\n");
     }
 
     #[cfg(unix)]
