@@ -15,7 +15,7 @@ moving.
 
 Rust program PR 3 reserves new closed schema versions before provider work.
 Settings use v3. Quota history and transition state use v2. The field sets and
-the five provider IDs do not change. The TypeScript stores migrate the previous
+the six provider IDs do not change. The TypeScript stores migrate the previous
 versions in memory. They do not write during a load. The next save writes the
 new version.
 
