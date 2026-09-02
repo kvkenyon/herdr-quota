@@ -359,6 +359,7 @@ function safeLimitIdentity(
     "cursor:spend_limit": "Spend",
     "kimi:five_hour": "Session",
     "kimi:weekly": "Week",
+    "grok:credits": "Consumer quota",
     "copilot:chat": "Chat",
     "copilot:completions": "Completions",
     "copilot:premium_interactions": "Premium",

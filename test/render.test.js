@@ -114,13 +114,26 @@ test("no provider art, aggregates-only output, or implementation jargon", async 
   assert.doesNotMatch(output, /all_models|seven_day|five_hour|api_usage/);
 });
 
-test("grok and unknown providers are never rendered", async () => {
+test("Grok renders its own auth recovery and unknown providers stay hidden", async () => {
   const output = render(await report("excluded-providers"));
   assert.match(output, /Claude/);
   assert.match(output, /Kimi/);
   assert.match(output, /GitHub Copilot/);
   assert.match(output, /github-copilot-cli auth login/);
-  assert.doesNotMatch(output, /Grok|Future/i);
+  assert.match(output, /Grok.*signed out/);
+  assert.match(output, /^ grok\s*$/m);
+  assert.doesNotMatch(output, /Future/i);
+});
+
+test("Grok empty-quota headers fit the 20-column dashboard", async () => {
+  const value = await report("grok");
+  value.providers[0].windows = [];
+  value.providers[0].effective = [];
+
+  const output = render(value, { width: 20, height: 12 });
+  assert.match(output, /^… consumer quota un…$/m);
+  assert.match(output, /^ Consumer quota una…$/m);
+  for (const line of output.split("\n")) assert.ok(line.length <= 20, line);
 });
 
 test("Copilot renders reported windows, resets, partial state, and sign-in honestly", async () => {

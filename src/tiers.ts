@@ -7,8 +7,8 @@ import {
 import { friendlyProviderError } from "./sanitize.js";
 
 /**
- * The marketed provider set. Anything else quota-axi can report (Grok and
- * future providers) is neither queried nor rendered.
+ * The marketed provider set. Anything else quota-axi can report is neither
+ * queried nor rendered.
  */
 export const ALLOWED_PROVIDERS = MARKETED_PROVIDERS.map(
   (provider) => provider.id,
@@ -123,6 +123,12 @@ function kimiTierLabel(window: QuotaWindow): TierLabel {
   return passthrough(window);
 }
 
+function grokTierLabel(window: QuotaWindow): TierLabel {
+  if (window.id === "credits")
+    return { label: "Consumer quota", compact: "Consumer" };
+  return passthrough(window);
+}
+
 function copilotTierLabel(window: QuotaWindow): TierLabel {
   if (window.id === "chat") return { label: "Chat", compact: "Chat" };
   if (window.id === "completions")
@@ -137,6 +143,7 @@ const TIER_LABELS: Record<string, (window: QuotaWindow) => TierLabel> = {
   codex: codexTierLabel,
   cursor: cursorTierLabel,
   kimi: kimiTierLabel,
+  grok: grokTierLabel,
   copilot: copilotTierLabel,
 };
 
@@ -214,6 +221,17 @@ export function providerNeedsSignIn(provider: ProviderQuota): boolean {
   );
 }
 
+function grokConsumerQuotaUnavailable(provider: ProviderQuota): boolean {
+  return (
+    provider.provider.toLowerCase() === "grok" &&
+    provider.state.status === "fresh" &&
+    !provider.state.stale &&
+    provider.state.authStatus === "usable" &&
+    provider.semanticsStatus !== "partial" &&
+    !provider.windows.length
+  );
+}
+
 /**
  * Decides what fills a provider section. Signed-out and unreadable providers
  * never show numbers, so an unavailable reading is never mistaken for zero
@@ -230,6 +248,9 @@ export function presentProvider(provider: ProviderQuota): ProviderPresentation {
         marketedProvider(provider.provider.toLowerCase())
           ?.recoveryInstruction ?? "sign in with the provider CLI",
     };
+  }
+  if (grokConsumerQuotaUnavailable(provider)) {
+    return { kind: "message", message: "Consumer quota unavailable" };
   }
   if (!provider.windows.length) {
     return {
@@ -252,9 +273,11 @@ export function providerAnnotation(
   if (provider.state.status === "rate_limited")
     return { text: "rate limited", tone: "warn" };
   if (provider.state.status === "error") return { text: "error", tone: "bad" };
-  if (provider.state.status === "unavailable" || !provider.windows.length)
-    return { text: "no reading", tone: "muted" };
   if (provider.semanticsStatus === "partial")
     return { text: "partial data", tone: "warn" };
+  if (grokConsumerQuotaUnavailable(provider))
+    return { text: "consumer quota unavailable", tone: "muted" };
+  if (provider.state.status === "unavailable" || !provider.windows.length)
+    return { text: "no reading", tone: "muted" };
   return undefined;
 }
