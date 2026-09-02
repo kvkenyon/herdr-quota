@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -104,11 +106,18 @@ where
     replace_atomically_with_hook(path, bytes, validate_existing, |_| Ok(()))
 }
 
-/// Move a regular file to a private, unique quarantine path.
-pub fn quarantine(path: &Path) -> Result<Option<PathBuf>, AtomicError> {
-    let Some(_) = read_regular(path)? else {
+/// Move a regular file only when it still has the inspected contents.
+pub fn quarantine_if_unchanged(
+    path: &Path,
+    expected: &[u8],
+) -> Result<Option<PathBuf>, AtomicError> {
+    let _lock = lock_parent(path)?;
+    let Some(current) = read_replaceable(path)? else {
         return Ok(None);
     };
+    if current != expected {
+        return Ok(None);
+    }
     let quarantine_path = unique_sibling(path, "invalid")?;
     fs::rename(path, &quarantine_path)?;
     set_private_permissions(&quarantine_path).ok();
@@ -134,6 +143,7 @@ where
     H: FnMut(WriteStage) -> io::Result<()>,
 {
     create_private_parent(path).map_err(AtomicError::from)?;
+    let _lock = lock_parent(path)?;
     let existing = read_replaceable(path)?;
     validate_existing(existing.as_deref()).map_err(ReplaceError::Validation)?;
 
@@ -159,6 +169,33 @@ where
         fs::remove_file(&temporary_path).ok();
     }
     result
+}
+
+#[cfg(unix)]
+struct SiblingLock(File);
+
+#[cfg(unix)]
+impl Drop for SiblingLock {
+    fn drop(&mut self) {
+        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+#[cfg(unix)]
+fn lock_parent(path: &Path) -> Result<SiblingLock, AtomicError> {
+    let file = File::open(parent_directory(path))?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    Ok(SiblingLock(file))
+}
+
+#[cfg(not(unix))]
+struct SiblingLock;
+
+#[cfg(not(unix))]
+fn lock_parent(_path: &Path) -> Result<SiblingLock, AtomicError> {
+    Ok(SiblingLock)
 }
 
 fn create_private_parent(path: &Path) -> io::Result<()> {
@@ -288,7 +325,7 @@ fn set_private_permissions(_path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{WriteStage, replace_atomically_with_hook};
+    use super::{WriteStage, quarantine_if_unchanged, replace_atomically_with_hook};
     use std::convert::Infallible;
     use std::fs;
     use std::io;
@@ -357,6 +394,56 @@ mod tests {
                 "{failed_stage:?}"
             );
         }
+    }
+
+    #[test]
+    fn quarantine_preserves_a_replacement_that_differs_from_the_inspected_bytes() {
+        let directory = TestDirectory::new();
+        let path = directory.path().join("settings.json");
+        let malformed = b"{truncated";
+        let replacement = b"{\"schemaVersion\":4,\"future\":true}\n";
+        fs::write(&path, malformed).expect("write malformed settings");
+        fs::write(&path, replacement).expect("install replacement settings");
+
+        let quarantined =
+            quarantine_if_unchanged(&path, malformed).expect("check quarantine target");
+
+        assert!(quarantined.is_none());
+        assert_eq!(fs::read(&path).expect("read replacement"), replacement);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_competing_replacement_waits_between_validation_and_rename() {
+        use super::replace_atomically;
+        use std::sync::mpsc;
+
+        let directory = TestDirectory::new();
+        let path = directory.path().join("settings.json");
+        fs::write(&path, b"current\n").expect("write current settings");
+        let competing_path = path.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let competitor = std::thread::spawn(move || {
+            started_tx.send(()).expect("signal competing save");
+            replace_atomically(&competing_path, b"future\n", |_| Ok::<(), Infallible>(()))
+                .expect("write competing settings");
+        });
+
+        replace_atomically_with_hook(
+            &path,
+            b"next\n",
+            |_| Ok::<(), Infallible>(()),
+            |stage| {
+                if stage == WriteStage::BeforeRename {
+                    started_rx.recv().expect("wait for competing save");
+                }
+                Ok(())
+            },
+        )
+        .expect("write next settings");
+        competitor.join().expect("join competing save");
+
+        assert_eq!(fs::read(&path).expect("read final settings"), b"future\n");
     }
 
     #[cfg(unix)]

@@ -301,7 +301,7 @@ impl SettingsStore {
                 availability: SettingsAvailability::Incompatible,
             },
             Err(SettingsError::Corrupt) => {
-                atomic::quarantine(&self.path).ok();
+                atomic::quarantine_if_unchanged(&self.path, &bytes).ok();
                 SettingsLoadResult {
                     settings: defaults,
                     availability: SettingsAvailability::Recovered,
