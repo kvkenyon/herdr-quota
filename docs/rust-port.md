@@ -53,6 +53,11 @@ item has separate parts. The later PR is the completion owner.
 | PF-03 Transition-audit file                     | **12**                | Transition store                                   |
 | PF-04 Sidebar coordination file                 | **16**                | Versioned sidebar state                            |
 
+At the FI-10/FI-11 Ratatui renderer seam, explicitly disabled providers are
+excluded from both the hidden-provider summary count and its shared row/scroll
+accounting. Other hidden reasons remain countable, and a zero count renders no
+summary line.
+
 PR 18 is the manifest cutover. It retires all listed items in the released
 product only after the owner PRs are complete and the cutover smoke is
 recorded. It does not replace an owner PR.
