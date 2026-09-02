@@ -4,6 +4,9 @@
 
 use std::path::PathBuf;
 
+pub mod domain;
+pub mod sanitize;
+
 /// The commands that this foundation supports.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
