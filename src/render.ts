@@ -590,7 +590,7 @@ function headerLine(provider: ProviderQuota, layout: Layout): string {
   if (!annotation) {
     return colorize(truncate(name, layout.width), "bold", layout.color);
   }
-  const status = annotation.text;
+  const status = truncate(annotation.text, Math.max(1, layout.width - 2));
   const nameWidth = Math.max(1, layout.width - status.length - 1);
   const shownName = truncate(name, nameWidth);
   const gap = Math.max(1, layout.width - shownName.length - status.length);

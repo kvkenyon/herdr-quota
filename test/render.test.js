@@ -125,6 +125,17 @@ test("Grok renders its own auth recovery and unknown providers stay hidden", asy
   assert.doesNotMatch(output, /Future/i);
 });
 
+test("Grok empty-quota headers fit the 20-column dashboard", async () => {
+  const value = await report("grok");
+  value.providers[0].windows = [];
+  value.providers[0].effective = [];
+
+  const output = render(value, { width: 20, height: 12 });
+  assert.match(output, /^… consumer quota un…$/m);
+  assert.match(output, /^ Consumer quota una…$/m);
+  for (const line of output.split("\n")) assert.ok(line.length <= 20, line);
+});
+
 test("Copilot renders reported windows, resets, partial state, and sign-in honestly", async () => {
   const quota = render(await report("copilot"));
   assert.match(quota, /GitHub Copilot/);
