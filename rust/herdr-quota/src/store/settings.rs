@@ -301,10 +301,15 @@ impl SettingsStore {
                 availability: SettingsAvailability::Incompatible,
             },
             Err(SettingsError::Corrupt) => {
-                atomic::quarantine_if_unchanged(&self.path, &bytes).ok();
-                SettingsLoadResult {
-                    settings: defaults,
-                    availability: SettingsAvailability::Recovered,
+                match atomic::quarantine_if_unchanged(&self.path, &bytes) {
+                    Ok(_) => SettingsLoadResult {
+                        settings: defaults,
+                        availability: SettingsAvailability::Recovered,
+                    },
+                    Err(_) => SettingsLoadResult {
+                        settings: defaults,
+                        availability: SettingsAvailability::Unavailable,
+                    },
                 }
             }
             Err(SettingsError::Unsafe | SettingsError::Unavailable(_)) => SettingsLoadResult {
@@ -494,10 +499,12 @@ mod tests {
     };
     use serde_json::{Value, json};
     use std::ffi::OsStr;
-    use std::fs;
+    use std::fs::{self, File};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    #[cfg(unix)]
+    use std::os::fd::AsRawFd;
     #[cfg(unix)]
     use std::os::unix::fs::{PermissionsExt, symlink};
 
@@ -694,6 +701,28 @@ mod tests {
                 .mode()
                 & 0o777,
             0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn quarantine_lock_timeout_reports_unavailable() {
+        let directory = TestDirectory::new();
+        let path = directory.path().join("settings.json");
+        fs::write(&path, b"{truncated").expect("write corrupt settings");
+        let parent = File::open(directory.path()).expect("open settings directory");
+        assert_eq!(
+            unsafe { libc::flock(parent.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+
+        let loaded = SettingsStore::new(&path).load();
+
+        assert_eq!(loaded.availability, SettingsAvailability::Unavailable);
+        assert_eq!(loaded.settings, DashboardSettings::default());
+        assert_eq!(
+            fs::read(path).expect("read corrupt settings"),
+            b"{truncated"
         );
     }
 
