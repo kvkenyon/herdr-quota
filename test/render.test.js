@@ -126,10 +126,13 @@ test("grok and unknown providers are never rendered", async () => {
 test("Copilot renders reported windows, resets, partial state, and sign-in honestly", async () => {
   const quota = render(await report("copilot"));
   assert.match(quota, /GitHub Copilot/);
+  assert.match(quota, /^\? 1 partial · 0 tracked/m);
+  assert.match(quota, /GitHub Copilot {2,}partial data/);
   assert.match(quota, /Chat.*60%.*13d.*--/);
   assert.match(quota, /Completions.*40%.*13d.*--/);
   assert.match(quota, /Premium.*20%.*13d.*--/);
   assert.doesNotMatch(quota, /on pace|out \d/);
+  assert.doesNotMatch(quota, /unreadable/);
 
   const signedOut = render(await report("excluded-providers"));
   assert.match(signedOut, /GitHub Copilot.*signed out/);

@@ -28,6 +28,12 @@ export type Attention =
   | { kind: "healthy"; tracked: number }
   | {
       kind: "data_health";
+      reason: "partial";
+      partial: number;
+      tracked: number;
+    }
+  | {
+      kind: "data_health";
       reason: "unreadable" | "pace_unknown";
       unreadable: number;
       tracked: number;
@@ -175,13 +181,19 @@ export function selectAttention(report: QuotaReport): Attention {
   const trackedEffective: EffectiveAvailability[] = [];
   let tracked = 0;
   let unreadable = 0;
+  let partial = 0;
 
   providers.forEach((provider, providerOrder) => {
+    if (provider.semanticsStatus === "partial") partial++;
     const known = knownEffective(provider).filter(decisionGrade);
-    if (!providerIsCurrent(provider) || known.length === 0) {
+    if (
+      !providerIsCurrent(provider) ||
+      (known.length === 0 && provider.semanticsStatus !== "partial")
+    ) {
       unreadable++;
       return;
     }
+    if (known.length === 0) return;
     tracked++;
     trackedEffective.push(...known);
     known.forEach((effective, effectiveOrder) => {
@@ -199,6 +211,9 @@ export function selectAttention(report: QuotaReport): Attention {
   if (limiting) return limiting.attention;
   if (unreadable > 0) {
     return { kind: "data_health", reason: "unreadable", unreadable, tracked };
+  }
+  if (partial > 0) {
+    return { kind: "data_health", reason: "partial", partial, tracked };
   }
   if (tracked > 0 && trackedEffective.every(onPace)) {
     return { kind: "healthy", tracked };

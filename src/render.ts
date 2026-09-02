@@ -193,6 +193,18 @@ function attentionText(attention: Attention, width: number, now: Date): string {
     );
   }
   if (attention.kind === "data_health") {
+    if (attention.reason === "partial") {
+      const noun = attention.partial === 1 ? "provider" : "providers";
+      const verb = attention.partial === 1 ? "has" : "have";
+      return fittingText(
+        [
+          `? ${attention.partial} ${noun} ${verb} partial data · ${attention.tracked} tracked`,
+          `? ${attention.partial} partial · ${attention.tracked} tracked`,
+          `? ${attention.partial} partial`,
+        ],
+        width,
+      );
+    }
     if (attention.reason === "pace_unknown") {
       return fittingText(
         [

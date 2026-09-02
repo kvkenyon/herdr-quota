@@ -254,5 +254,7 @@ export function providerAnnotation(
   if (provider.state.status === "error") return { text: "error", tone: "bad" };
   if (provider.state.status === "unavailable" || !provider.windows.length)
     return { text: "no reading", tone: "muted" };
+  if (provider.semanticsStatus === "partial")
+    return { text: "partial data", tone: "warn" };
   return undefined;
 }
