@@ -1,0 +1,66 @@
+# Rust dashboard smoke protocol
+
+Use this manual protocol after a Rust dashboard feature becomes runnable. It
+checks the Rust dashboard directly. It does not compare Rust output with the
+TypeScript dashboard.
+
+## Record for each run
+
+Record the date, OS and architecture, Rust PR, binary version or commit,
+terminal program, terminal size, input data state, steps, and result. Record a
+failure with the visible safe text and the reproduction steps. Do not record
+tokens, paths, raw collector output, or provider account data.
+
+## Direct dashboard runs
+
+Run the Rust `dashboard` subcommand in a real PTY. Set the PTY to each exact
+size before launch:
+
+| Run    | PTY size             | Required checks                                                 |
+| ------ | -------------------- | --------------------------------------------------------------- |
+| Wide   | 36 columns × 23 rows | Open, first render, refresh, feature path, navigation, and quit |
+| Narrow | 20 columns × 12 rows | Open, first render, feature path, row reachability, and quit    |
+
+For both runs, check these points that apply to the shipped feature:
+
+1. The dashboard opens in a TTY. It renders without terminal control text.
+2. The title, decision text, position, and controls stay readable. No row
+   wraps or clips in a way that changes its meaning.
+3. Use `j`/`k` and Page Up/Page Down when rows can scroll. Check that each row
+   is reachable and the pinned context remains visible.
+4. Use `r` when collection is available. Check the feature's refresh or
+   failure state. Do not expose raw output.
+5. Exercise the keys and modal path added or changed by the PR. For PR 15,
+   include Preferences, confirmation, fragmented Escape, rapid refresh, and
+   signal/quit cleanup.
+6. Quit with `q` and check that the alternate screen, cursor, and terminal
+   input mode are restored.
+
+Run the direct smoke on native macOS and Linux release artifacts before the
+cutover. A feature PR records the applicable direct runs; it does not need a
+Herdr lifecycle run.
+
+## Guarded cutover lab run
+
+Only the manifest cutover PR performs this run. Generate its ship brief with
+the required `--herdr-lab` guard before any Herdr lifecycle action. Use a named
+non-default Herdr lab session.
+
+In that guarded lab, verify this sequence:
+
+1. Open the sidebar from a tab that has an existing layout.
+2. Check first refresh and the visible dashboard state.
+3. Close the sidebar.
+4. Check that the original layout and focus return and that no sidebar state
+   residue remains.
+
+The lab proves lifecycle behavior only. It does not prove display width: run
+the direct PTY checks at 36 × 23 and 20 × 12 as well. Do not run server-global
+Herdr lifecycle commands, and do not add a lifecycle command to an unguarded
+brief.
+
+## Handoff statement
+
+Each Rust PR handoff states the two direct-run results, the platform, and the
+feature path checked. The cutover handoff also states the guarded named-lab
+result. The evidence is a manual completion record, not a comparison harness.
