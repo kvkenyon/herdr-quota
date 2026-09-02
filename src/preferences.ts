@@ -74,7 +74,8 @@ function isProviderFocus(value: PreferenceFocus): value is SupportedProvider {
     value === "claude" ||
     value === "codex" ||
     value === "cursor" ||
-    value === "kimi"
+    value === "kimi" ||
+    value === "copilot"
   );
 }
 

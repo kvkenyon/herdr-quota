@@ -21,11 +21,11 @@ test("adapts the complete schema-v5 fixture", async () => {
   assert.equal(report.adaptationWarnings.length, 0);
 });
 
-test("drops grok, copilot, and unknown providers even when returned", async () => {
+test("drops grok and unknown providers even when returned", async () => {
   const report = adaptQuotaResponse(await fixture("excluded-providers"));
   assert.deepEqual(
     report.providers.map((provider) => provider.provider),
-    ["claude", "kimi"],
+    ["claude", "copilot", "kimi"],
   );
   assert.equal(report.adaptationWarnings.length, 0);
 });

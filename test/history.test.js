@@ -211,10 +211,16 @@ test("history v1 migrates in memory and v2 is written on the next save", async (
   assert.equal(operations.target(), `${JSON.stringify(retained)}\n`);
 });
 
-test("history v2 keeps the four provider allow-list and is future to v0.3", () => {
+test("history v2 keeps the five provider allow-list", () => {
   assert.equal(HISTORY_SCHEMA_VERSION, 2);
   assert.ok(HISTORY_SCHEMA_VERSION > 1);
-  for (const provider of ["Claude", "OpenAI Codex", "Cursor", "Kimi"]) {
+  for (const provider of [
+    "Claude",
+    "OpenAI Codex",
+    "Cursor",
+    "Kimi",
+    "GitHub Copilot",
+  ]) {
     const value = snapshot(0);
     value.providers[0].provider = provider;
     assert.doesNotThrow(() =>
@@ -225,7 +231,7 @@ test("history v2 keeps the four provider allow-list and is future to v0.3", () =
     );
   }
   const value = snapshot(0);
-  value.providers[0].provider = "GitHub Copilot";
+  value.providers[0].provider = "Grok";
   assert.throws(
     () =>
       parseHistoryDocument({

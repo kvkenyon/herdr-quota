@@ -122,19 +122,22 @@ test("transition v1 migrates in memory and v2 is written on the next save", asyn
   }
 });
 
-test("transition v2 keeps the four provider allow-list and is future to v0.3", () => {
+test("transition v2 keeps the five provider allow-list", () => {
   assert.equal(TRANSITION_SCHEMA_VERSION, 2);
   assert.ok(TRANSITION_SCHEMA_VERSION > 1);
-  for (const provider of ["Claude", "OpenAI Codex", "Cursor", "Kimi"]) {
+  for (const provider of [
+    "Claude",
+    "OpenAI Codex",
+    "Cursor",
+    "Kimi",
+    "GitHub Copilot",
+  ]) {
     assert.doesNotThrow(() =>
       parseTransitionDocument(document([event(0, { provider })])),
     );
   }
   assert.throws(
-    () =>
-      parseTransitionDocument(
-        document([event(0, { provider: "GitHub Copilot" })]),
-      ),
+    () => parseTransitionDocument(document([event(0, { provider: "Grok" })])),
     /transitions_corrupt/,
   );
 });

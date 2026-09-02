@@ -359,6 +359,9 @@ function safeLimitIdentity(
     "cursor:spend_limit": "Spend",
     "kimi:five_hour": "Session",
     "kimi:weekly": "Week",
+    "copilot:chat": "Chat",
+    "copilot:completions": "Completions",
+    "copilot:premium_interactions": "Premium",
   };
   const known = fixed[`${provider.provider.toLowerCase()}:${id}`];
   if (known) return known;

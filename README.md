@@ -1,6 +1,6 @@
 # AI Quota for Herdr
 
-**See the next Claude, OpenAI Codex, Cursor, or Kimi limit before it stops your work—without leaving Herdr.**
+**See the next Claude, OpenAI Codex, Cursor, Kimi, or GitHub Copilot limit before it stops your work—without leaving Herdr.**
 
 ```bash
 herdr plugin install kvkenyon/herdr-quota --yes
@@ -68,7 +68,7 @@ Remove the `[[keys.command]]` block from `config.toml` and reload configuration 
 
 The sidebar refreshes immediately, then five minutes after each completed attempt without overlapping collectors. A whole-collector failure keeps the last good reading visible and retries after 10, 20, then at most 30 minutes. Pressing `r` preempts the current attempt, refreshes immediately, and resets that backoff.
 
-The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal four-provider tier set fits at ordinary terminal height. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, limiting-capacity attention line, position (`Rows 5–8 of 16`), and keyboard footer stay pinned. Actionable history gets one compact change line when the pane is at least 10 rows tall; at 6 or 8 rows it steps aside entirely for live data. Decorative provider gaps disappear before scrolling is needed and never inflate that row count. The full default footer remains `j/k · PgUp/PgDn · p prefs · r · q/esc`; only a new unacknowledged transition temporarily adds the discoverable `a alert` action and a compact `!` title marker, without adding a content row or replacing the limiting answer.
+The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal five-provider tier set fits at ordinary terminal height. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, limiting-capacity attention line, position (`Rows 5–8 of 16`), and keyboard footer stay pinned. Actionable history gets one compact change line when the pane is at least 10 rows tall; at 6 or 8 rows it steps aside entirely for live data. Decorative provider gaps disappear before scrolling is needed and never inflate that row count. The full default footer remains `j/k · PgUp/PgDn · p prefs · r · q/esc`; only a new unacknowledged transition temporarily adds the discoverable `a alert` action and a compact `!` title marker, without adding a content row or replacing the limiting answer.
 
 Essential labels, percentages, resets, history, and state text use the terminal's default foreground so they remain legible in Herdr's light and dark themes. Bold weight is reserved for titles, provider headers, the limiting tier, focus, and severity—not every row. `!`, `=`, `?`, arrows, checkboxes, focus markers, and explicit state words carry all meaning without color; optional color only reinforces them. Unknown readings stay `--` rather than becoming a misleading zero.
 
@@ -78,7 +78,7 @@ The committed validation sheets exercise the real ANSI renderer against Herdr's 
 
 Press `p` inside the pane. Use `j`/`k` or Up/Down to move focus, Space or Enter to show/hide a provider, `u`/`d` to move a visible provider, and Left/Right or Space to change the meter or transition controls. `Capacity cue` cycles through `off`, `25%`, `10%`, and `5%`; `Forecast cue` independently turns the established forecast before reset policy on or off. Press `s` to save or `c`/Escape to cancel without changing the live dashboard. `x` opens reset confirmation; `y` resets the draft to all providers in the original order with remaining meters and transition cues off, but an explicit save is still required. `Clear transition history` has its own `y` confirmation and never deletes quota history or provider settings. The focused row and every action remain reachable in 20/24/36-column panes, including short heights.
 
-Provider order changes provider sections only. Attention still selects the most restrictive visible evidence using the established safety semantics. Hidden providers disappear from detail, attention, and the change line, while a compact hidden count always discloses the choice. If all four are hidden, the pane says `No providers shown` and gives the exact recovery instruction `Press p for Preferences` (compact `Press p for prefs` at 20 columns); it never claims that everything is on pace.
+Provider order changes provider sections only. Attention still selects the most restrictive visible evidence using the established safety semantics. Hidden providers disappear from detail, attention, and the change line, while a compact hidden count always discloses the choice. If all five are hidden, the pane says `No providers shown` and gives the exact recovery instruction `Press p for Preferences` (compact `Press p for prefs` at 20 columns); it never claims that everything is on pace.
 
 ### Transition cues
 
@@ -136,19 +136,21 @@ Tier rows follow each provider's own quota model:
 - **OpenAI Codex** - account session/week windows, per-model windows such as `Spark week`, and code-review windows. When no code-review window is returned, an explicit `Code review -- not reported` row says so instead of pretending review shares the base quota.
 - **Cursor** - `Included`, `Auto`, and `3rd-party models` (Cursor's "API usage" bucket, which meters third-party model calls, not your own API keys).
 - **Kimi** - session, week, and any additional limits Kimi describes, in provider order.
+- **GitHub Copilot** - Chat, Completions, Premium, and other reported windows. Copilot does not report trusted window relationships. The pane shows each window and does not make a combined quota claim.
 
-Grok and GitHub Copilot are neither queried nor rendered. Only the four providers above are part of this product.
+Grok and unknown providers are not queried or rendered. The five providers above are part of this product.
 
 ### When a provider is signed out
 
 A provider that needs authentication shows `signed out` and a single recovery command instead of numbers, so an unavailable reading is never mistaken for zero quota:
 
-| Provider     | Sign in with            |
-| ------------ | ----------------------- |
-| Claude       | `claude`, then `/login` |
-| OpenAI Codex | `codex login`           |
-| Cursor       | `cursor-agent login`    |
-| Kimi         | `kimi login`            |
+| Provider       | Sign in with                    |
+| -------------- | ------------------------------- |
+| Claude         | `claude`, then `/login`         |
+| OpenAI Codex   | `codex login`                   |
+| Cursor         | `cursor-agent login`            |
+| Kimi           | `kimi login`                    |
+| GitHub Copilot | `github-copilot-cli auth login` |
 
 The sidebar itself never starts an interactive login and never touches credentials; sign in with the provider's own CLI, then press `r`.
 
@@ -183,7 +185,7 @@ The plugin delegates provider access to its plugin-local `quota-axi@~0.1.29` exe
 - Saving Preferences rerenders the existing last-good report immediately. It does not launch another collector, reset retry backoff, erase history, alter credentials, or require a Herdr server restart.
 - Transition audit/dedupe state is separate at `${XDG_STATE_HOME:-~/.local/state}/herdr-quota/transitions-v1.json`. Its schema is v2. Schema-v1 files migrate in memory. A load does not rewrite the file. The next state write uses schema v2. The file is bounded to 256 events or 30 days and contains only marketed provider/scope/limit identity, finite policy, reset-cycle identity, transition kind, event timestamp, and optional acknowledgement timestamp. It uses the same private `0700` directory, `0600` file, no-symlink, owner, atomic sibling-replacement boundary as settings. It never contains percentages, quota payloads, account IDs, credentials, paths, raw output/errors, tokens, source text, or arbitrary provider fields; event wording recovers the displayed percentage from the separately sanitized quota-history sample when retained.
 - Schema-v1 history files migrate in memory. A load does not rewrite the file. The next history write uses schema v2. The `history-v1.json` and `transitions-v1.json` file names do not change.
-- Herdr Quota 0.3.x sees settings v3, history v2, and transition state v2 as future schemas. It does not replace or delete these files. The four provider IDs remain `claude`, `codex`, `cursor`, and `kimi`.
+- Herdr Quota 0.3.x sees settings v3, history v2, and transition state v2 as future schemas. It does not replace or delete these files. The five provider IDs are `claude`, `codex`, `cursor`, `kimi`, and `copilot`.
 - Clearing transition history is separately confirmed inside Preferences. It neither writes nor deletes quota history or provider settings, and unsupported/read-only settings documents remain untouched. A fresh baseline is established before future evaluation resumes.
 - Automatic refresh exists only while the pane process is alive: five minutes after success, with bounded 10/20/30-minute whole-collector failure backoff.
 - Raw responses, account identifiers, credentials, and credential paths are never logged.

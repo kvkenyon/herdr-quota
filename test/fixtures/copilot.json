@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-08-18T17:58:30.000Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "copilot",
+      "label": "GitHub Copilot",
+      "source": "api",
+      "windows": [
+        {
+          "id": "chat",
+          "label": "chat",
+          "kind": "monthly",
+          "percentRemaining": 60,
+          "resetsAt": "2026-09-01T00:00:00.000Z",
+          "pace": { "status": "unknown" }
+        },
+        {
+          "id": "completions",
+          "label": "completions",
+          "kind": "monthly",
+          "percentRemaining": 40,
+          "resetsAt": "2026-09-01T00:00:00.000Z",
+          "pace": { "status": "unknown" }
+        },
+        {
+          "id": "premium_interactions",
+          "label": "premium interactions",
+          "kind": "monthly",
+          "percentRemaining": 20,
+          "resetsAt": "2026-09-01T00:00:00.000Z",
+          "pace": { "status": "unknown" }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "partial",
+        "effectiveAvailability": []
+      },
+      "state": { "status": "fresh", "stale": false }
+    }
+  ]
+}

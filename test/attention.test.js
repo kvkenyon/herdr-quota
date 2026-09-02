@@ -162,6 +162,12 @@ test("healthy, partial, stale, and auth states remain honest", async () => {
     unreadable: 2,
     tracked: 0,
   });
+  assert.deepEqual(selectAttention(await report("copilot")), {
+    kind: "data_health",
+    reason: "partial",
+    partial: 1,
+    tracked: 0,
+  });
 
   // A current known constraint remains more useful than an auth summary; the
   // signed-out providers still keep their honest detail rows.

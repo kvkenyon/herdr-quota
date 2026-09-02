@@ -54,7 +54,7 @@ test("atomic replacement writes only the finite schema with private permissions"
     const store = new SettingsStore(path);
     await store.save({
       ...defaultSettings(),
-      providerOrder: ["cursor", "claude", "kimi", "codex"],
+      providerOrder: ["cursor", "claude", "kimi", "codex", "copilot"],
       hiddenProviders: ["kimi"],
       meterMode: "used",
       accountId: "account-secret",
@@ -64,7 +64,7 @@ test("atomic replacement writes only the finite schema with private permissions"
     const text = await readFile(path, "utf8");
     assert.deepEqual(JSON.parse(text), {
       schemaVersion: SETTINGS_SCHEMA_VERSION,
-      providerOrder: ["cursor", "claude", "kimi", "codex"],
+      providerOrder: ["cursor", "claude", "kimi", "codex", "copilot"],
       hiddenProviders: ["kimi"],
       meterMode: "used",
       remainingThreshold: "off",
@@ -99,7 +99,7 @@ test("v0.2.1 schema-v1 settings migrate in memory without rewriting", async () =
       availability: "ready",
       settings: {
         ...defaultSettings(),
-        providerOrder: ["cursor", "claude", "codex", "kimi"],
+        providerOrder: ["cursor", "claude", "codex", "kimi", "copilot"],
         hiddenProviders: ["kimi"],
         meterMode: "used",
       },
@@ -122,7 +122,7 @@ test("schema-v2 settings migrate in memory and v3 is written on save", async () 
       availability: "ready",
       settings: {
         schemaVersion: SETTINGS_SCHEMA_VERSION,
-        providerOrder: ["cursor", "claude", "codex", "kimi"],
+        providerOrder: ["cursor", "claude", "codex", "kimi", "copilot"],
         hiddenProviders: ["kimi"],
         meterMode: "used",
         remainingThreshold: 25,
@@ -134,16 +134,53 @@ test("schema-v2 settings migrate in memory and v3 is written on save", async () 
     await store.save(loaded.settings);
     assert.equal(
       await readFile(path, "utf8"),
-      '{"schemaVersion":3,"providerOrder":["cursor","claude","codex","kimi"],"hiddenProviders":["kimi"],"meterMode":"used","remainingThreshold":25,"forecastBeforeReset":true}\n',
+      '{"schemaVersion":3,"providerOrder":["cursor","claude","codex","kimi","copilot"],"hiddenProviders":["kimi"],"meterMode":"used","remainingThreshold":25,"forecastBeforeReset":true}\n',
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test("settings v3 keeps the v0.3 provider set and is future to v0.3", () => {
+test("settings append Copilot in memory and only write it on save", async () => {
+  const directory = await temporaryDirectory();
+  const path = join(directory, "herdr-quota", "settings.json");
+  const legacy =
+    '{"schemaVersion":3,"providerOrder":["cursor","claude","codex","kimi"],"hiddenProviders":["kimi"],"meterMode":"used","remainingThreshold":25,"forecastBeforeReset":true}\n';
+  try {
+    await mkdir(join(directory, "herdr-quota"), { recursive: true });
+    await writeFile(path, legacy, { mode: 0o600 });
+    const store = new SettingsStore(path);
+    const loaded = await store.load();
+    assert.deepEqual(loaded.settings.providerOrder, [
+      "cursor",
+      "claude",
+      "codex",
+      "kimi",
+      "copilot",
+    ]);
+    assert.equal(await readFile(path, "utf8"), legacy);
+    await store.save(loaded.settings);
+    assert.deepEqual(JSON.parse(await readFile(path, "utf8")).providerOrder, [
+      "cursor",
+      "claude",
+      "codex",
+      "kimi",
+      "copilot",
+    ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("settings v3 keeps the five provider allow-list", () => {
   assert.equal(SETTINGS_SCHEMA_VERSION, 3);
-  assert.deepEqual(SUPPORTED_PROVIDERS, ["claude", "codex", "cursor", "kimi"]);
+  assert.deepEqual(SUPPORTED_PROVIDERS, [
+    "claude",
+    "codex",
+    "cursor",
+    "kimi",
+    "copilot",
+  ]);
   assert.ok(SETTINGS_SCHEMA_VERSION > 2);
 });
 
@@ -243,7 +280,7 @@ test("unsupported schemas remain intact and unknown fields are ignored", async (
       }),
       {
         ...defaultSettings(),
-        providerOrder: ["cursor", "claude", "codex", "kimi"],
+        providerOrder: ["cursor", "claude", "codex", "kimi", "copilot"],
         hiddenProviders: ["cursor"],
       },
     );
