@@ -9,6 +9,7 @@ import {
   providerAnnotation,
   providerTiers,
 } from "../dist/tiers.js";
+import { MARKETED_PROVIDERS } from "../dist/types.js";
 
 async function providers(name) {
   const raw = JSON.parse(
@@ -22,6 +23,10 @@ function byId(list, provider) {
 }
 
 test("only the four marketed providers are allowed", () => {
+  assert.deepEqual(
+    MARKETED_PROVIDERS.map((provider) => provider.id),
+    ["claude", "codex", "cursor", "kimi"],
+  );
   assert.deepEqual(
     [...ALLOWED_PROVIDERS],
     ["claude", "codex", "cursor", "kimi"],

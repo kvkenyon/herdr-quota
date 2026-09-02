@@ -1,12 +1,18 @@
-import type { ProviderQuota, QuotaWindow } from "./types.js";
+import {
+  MARKETED_PROVIDERS,
+  marketedProvider,
+  type ProviderQuota,
+  type QuotaWindow,
+} from "./types.js";
 import { friendlyProviderError } from "./sanitize.js";
-import { SUPPORTED_PROVIDERS } from "./settings.js";
 
 /**
  * The marketed provider set. Anything else quota-axi can report (Grok,
  * GitHub Copilot, future providers) is neither queried nor rendered.
  */
-export const ALLOWED_PROVIDERS = SUPPORTED_PROVIDERS;
+export const ALLOWED_PROVIDERS = MARKETED_PROVIDERS.map(
+  (provider) => provider.id,
+);
 
 export function isAllowedProvider(provider: string): boolean {
   return (ALLOWED_PROVIDERS as readonly string[]).includes(
@@ -40,13 +46,6 @@ export interface ProviderAnnotation {
   text: string;
   tone: "bad" | "warn" | "muted";
 }
-
-const RECOVERY_INSTRUCTIONS: Record<string, string> = {
-  claude: "claude, then /login",
-  codex: "codex login",
-  cursor: "cursor-agent login",
-  kimi: "kimi login",
-};
 
 interface TierLabel {
   label: string;
@@ -218,8 +217,8 @@ export function presentProvider(provider: ProviderQuota): ProviderPresentation {
     return {
       kind: "recovery",
       instruction:
-        RECOVERY_INSTRUCTIONS[provider.provider.toLowerCase()] ??
-        "sign in with the provider CLI",
+        marketedProvider(provider.provider.toLowerCase())
+          ?.recoveryInstruction ?? "sign in with the provider CLI",
     };
   }
   if (!provider.windows.length) {

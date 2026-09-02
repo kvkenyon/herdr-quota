@@ -3,16 +3,13 @@ import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { MARKETED_PROVIDERS, type SupportedProvider } from "./types.js";
 
 export const SETTINGS_SCHEMA_VERSION = 2;
-export const SUPPORTED_PROVIDERS = [
-  "claude",
-  "codex",
-  "cursor",
-  "kimi",
-] as const;
+export const SUPPORTED_PROVIDERS: readonly SupportedProvider[] =
+  MARKETED_PROVIDERS.map((provider) => provider.id);
 
-export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
+export type { SupportedProvider } from "./types.js";
 export type MeterMode = "remaining" | "used";
 export type RemainingThreshold = "off" | 25 | 10 | 5;
 
