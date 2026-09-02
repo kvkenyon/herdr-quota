@@ -3,9 +3,9 @@
 This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
 
 - Runtime/provider boundary: consume only the plugin-local `quota-axi --json --full` schema-v5 output. Keep credential and endpoint implementation upstream; see `docs/data-sources.md`.
-- Local history is the schema-v1 bounded allow-list in `src/history.ts`; never widen it to raw collector/provider fields. Timeline and failure contracts live in `test/history.test.js` and `test/fixtures/history-timelines.json`.
+- Local history is the schema-v2 bounded allow-list in `src/history.ts`; never widen it to raw collector/provider fields. Timeline and failure contracts live in `test/history.test.js` and `test/fixtures/history-timelines.json`.
 - Preferences persist only the finite schema in `src/settings.ts`. Visibility/order/meter mode and opt-in transition policy are local inputs: do not let them alter collection, retry, upstream quota semantics, or quota-history storage.
-- Transition audit/dedupe is the bounded schema-v1 allow-list in `src/transitions.ts`; state-machine, gap, unsafe-file, acknowledgement, and clear-history contracts live in `test/transitions*.test.js` and the PTY suite. Never route cues through Herdr's general notification delivery, which can leave the pane.
+- Transition audit/dedupe is the bounded schema-v2 allow-list in `src/transitions.ts`; state-machine, gap, unsafe-file, acknowledgement, and clear-history contracts live in `test/transitions*.test.js` and the PTY suite. Never route cues through Herdr's general notification delivery, which can leave the pane.
 - Essential TUI evidence uses the terminal default foreground; severity and selection must remain explicit through weight, markers, and text. ANSI/NO_COLOR contrast contracts live in `test/render.test.js` and `test/personalization-render.test.js`.
 - The full local gate is `npm run check`. It regenerates `docs/dashboard-preview.svg` from sanitized fixtures, so commit intentional preview changes. That preview is plain text with ANSI stripped, so anything the sidebar encodes visually has to survive without colour.
 - Herdr lifecycle testing must use a named non-default session. Follow the task environment's lab helper contract; never run server-global lifecycle commands directly.

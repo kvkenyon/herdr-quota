@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "snapshots": [
+    {
+      "capturedAt": "2026-08-20T11:00:00.000Z",
+      "providers": [
+        {
+          "provider": "Claude",
+          "dataHealth": "current",
+          "authEligible": true,
+          "facts": [
+            {
+              "scope": "All models",
+              "limit": "Week",
+              "remaining": 70,
+              "resetAt": "2026-09-01T00:00:00.000Z",
+              "pace": { "state": "on_pace", "reserve": 4 },
+              "runway": { "state": "through_reset" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
