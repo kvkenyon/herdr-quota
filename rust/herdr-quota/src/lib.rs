@@ -9,6 +9,7 @@ pub mod domain;
 pub mod sanitize;
 pub mod store;
 mod unix_signal;
+pub mod ui;
 
 /// The commands that this foundation supports.
 #[derive(Debug, PartialEq, Eq)]
