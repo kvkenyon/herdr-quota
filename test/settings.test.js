@@ -17,15 +17,22 @@ import test from "node:test";
 import {
   defaultSettings,
   parseSettingsDocument,
+  SETTINGS_SCHEMA_VERSION,
   SettingsStore,
   settingsPath,
+  SUPPORTED_PROVIDERS,
 } from "../dist/settings.js";
+
+const settingsV2Fixture = await readFile(
+  new URL("fixtures/settings-v2.json", import.meta.url),
+  "utf8",
+);
 
 async function temporaryDirectory() {
   return await mkdtemp(join(tmpdir(), "herdr-quota-settings-"));
 }
 
-test("first run uses v2 defaults at the XDG config path", async () => {
+test("first run uses v3 defaults at the XDG config path", async () => {
   const directory = await temporaryDirectory();
   try {
     const path = settingsPath({ XDG_CONFIG_HOME: directory }, "/unused");
@@ -56,7 +63,7 @@ test("atomic replacement writes only the finite schema with private permissions"
     });
     const text = await readFile(path, "utf8");
     assert.deepEqual(JSON.parse(text), {
-      schemaVersion: 2,
+      schemaVersion: SETTINGS_SCHEMA_VERSION,
       providerOrder: ["cursor", "claude", "kimi", "codex"],
       hiddenProviders: ["kimi"],
       meterMode: "used",
@@ -103,7 +110,44 @@ test("v0.2.1 schema-v1 settings migrate in memory without rewriting", async () =
   }
 });
 
-test("schema-v2 transition policy accepts only the finite product controls", () => {
+test("schema-v2 settings migrate in memory and v3 is written on save", async () => {
+  const directory = await temporaryDirectory();
+  const path = join(directory, "herdr-quota", "settings.json");
+  try {
+    await mkdir(join(directory, "herdr-quota"), { recursive: true });
+    await writeFile(path, settingsV2Fixture, { mode: 0o600 });
+    const store = new SettingsStore(path);
+    const loaded = await store.load();
+    assert.deepEqual(loaded, {
+      availability: "ready",
+      settings: {
+        schemaVersion: SETTINGS_SCHEMA_VERSION,
+        providerOrder: ["cursor", "claude", "codex", "kimi"],
+        hiddenProviders: ["kimi"],
+        meterMode: "used",
+        remainingThreshold: 25,
+        forecastBeforeReset: true,
+      },
+    });
+    assert.equal(await readFile(path, "utf8"), settingsV2Fixture);
+
+    await store.save(loaded.settings);
+    assert.equal(
+      await readFile(path, "utf8"),
+      '{"schemaVersion":3,"providerOrder":["cursor","claude","codex","kimi"],"hiddenProviders":["kimi"],"meterMode":"used","remainingThreshold":25,"forecastBeforeReset":true}\n',
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("settings v3 keeps the v0.3 provider set and is future to v0.3", () => {
+  assert.equal(SETTINGS_SCHEMA_VERSION, 3);
+  assert.deepEqual(SUPPORTED_PROVIDERS, ["claude", "codex", "cursor", "kimi"]);
+  assert.ok(SETTINGS_SCHEMA_VERSION > 2);
+});
+
+test("current transition policy accepts only the finite product controls", () => {
   for (const remainingThreshold of ["off", 25, 10, 5]) {
     assert.equal(
       parseSettingsDocument({
@@ -164,7 +208,7 @@ test("unsupported schemas remain intact and unknown fields are ignored", async (
   const path = join(directory, "herdr-quota", "settings.json");
   try {
     await mkdir(join(directory, "herdr-quota"), { recursive: true });
-    const future = '{"schemaVersion":99,"future":"keep"}\n';
+    const future = `{"schemaVersion":${SETTINGS_SCHEMA_VERSION + 1},"future":"keep"}\n`;
     await writeFile(path, future, { mode: 0o600 });
     const incompatible = await new SettingsStore(path).load();
     assert.equal(incompatible.availability, "incompatible");

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "events": [
+    {
+      "provider": "OpenAI Codex",
+      "scope": "All models",
+      "limit": "Week",
+      "cycle": "2026-08-27T12:00:00.000Z",
+      "policy": {
+        "remainingThreshold": 25,
+        "forecastBeforeReset": false
+      },
+      "kind": "threshold_baseline",
+      "occurredAt": "2026-08-20T12:00:00.000Z"
+    }
+  ]
+}

@@ -26,7 +26,7 @@ import type {
   TransitionView,
 } from "./types.js";
 
-export const TRANSITION_SCHEMA_VERSION = 1;
+export const TRANSITION_SCHEMA_VERSION = 2;
 export const TRANSITION_MAX_EVENTS = 256;
 export const TRANSITION_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 export const TRANSITION_CLOCK_SKEW_MS = 5 * 60_000;
@@ -53,7 +53,7 @@ export interface TransitionEvent {
 }
 
 export interface TransitionDocument {
-  schemaVersion: 1;
+  schemaVersion: 2;
   events: TransitionEvent[];
 }
 
@@ -204,7 +204,10 @@ function parseEvent(value: unknown): TransitionEvent | undefined {
 
 export function parseTransitionDocument(value: unknown): TransitionDocument {
   if (!isObject(value)) throw new TransitionDocumentError("corrupt");
-  if (value.schemaVersion !== TRANSITION_SCHEMA_VERSION) {
+  if (
+    value.schemaVersion !== 1 &&
+    value.schemaVersion !== TRANSITION_SCHEMA_VERSION
+  ) {
     if (typeof value.schemaVersion === "number")
       throw new TransitionDocumentError("incompatible");
     throw new TransitionDocumentError("corrupt");

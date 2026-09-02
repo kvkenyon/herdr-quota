@@ -24,6 +24,10 @@ const timelineFixture = JSON.parse(
 const completeFixture = JSON.parse(
   await readFile(new URL("fixtures/complete.json", import.meta.url), "utf8"),
 );
+const historyV1Fixture = await readFile(
+  new URL("fixtures/history-v1.json", import.meta.url),
+  "utf8",
+);
 
 function emptyDocument() {
   return { schemaVersion: HISTORY_SCHEMA_VERSION, snapshots: [] };
@@ -194,6 +198,44 @@ test("a persisted second usable run produces established change evidence", async
   );
 });
 
+test("history v1 migrates in memory and v2 is written on the next save", async () => {
+  const operations = memoryOperations(historyV1Fixture);
+  const history = new LocalHistory("/state/history.json", operations);
+  const retained = await history.retained();
+  assert.equal(retained.schemaVersion, HISTORY_SCHEMA_VERSION);
+  assert.equal(retained.snapshots.length, 1);
+  assert.equal(operations.target(), historyV1Fixture);
+
+  await writeHistoryDocumentAtomic("/state/history.json", retained, operations);
+  assert.equal(JSON.parse(operations.target()).schemaVersion, 2);
+  assert.equal(operations.target(), `${JSON.stringify(retained)}\n`);
+});
+
+test("history v2 keeps the four provider allow-list and is future to v0.3", () => {
+  assert.equal(HISTORY_SCHEMA_VERSION, 2);
+  assert.ok(HISTORY_SCHEMA_VERSION > 1);
+  for (const provider of ["Claude", "OpenAI Codex", "Cursor", "Kimi"]) {
+    const value = snapshot(0);
+    value.providers[0].provider = provider;
+    assert.doesNotThrow(() =>
+      parseHistoryDocument({
+        schemaVersion: HISTORY_SCHEMA_VERSION,
+        snapshots: [value],
+      }),
+    );
+  }
+  const value = snapshot(0);
+  value.providers[0].provider = "GitHub Copilot";
+  assert.throws(
+    () =>
+      parseHistoryDocument({
+        schemaVersion: HISTORY_SCHEMA_VERSION,
+        snapshots: [value],
+      }),
+    /history_corrupt/,
+  );
+});
+
 test("deduplicates equivalent samples by cadence but records real changes", () => {
   const start = Date.parse("2026-08-20T12:00:00.000Z");
   const first = updateHistoryDocument(emptyDocument(), snapshot(start));
@@ -297,7 +339,7 @@ test("unchanged, equal-rounded, and ordinary same-cycle samples reserve the line
 });
 
 test("schema mismatch is preserved and corrupt history recovers safely", async () => {
-  const incompatibleText = '{"schemaVersion":99,"snapshots":[]}\n';
+  const incompatibleText = `{"schemaVersion":${HISTORY_SCHEMA_VERSION + 1},"snapshots":[]}\n`;
   const incompatible = memoryOperations(incompatibleText);
   const incompatibleHistory = new LocalHistory(
     "/state/history.json",
@@ -343,17 +385,18 @@ test("clock rollback restarts a segment instead of connecting future data", asyn
 
 test("atomic writes use a private sibling then rename", async () => {
   const operations = memoryOperations(undefined);
-  await writeHistoryDocumentAtomic(
-    "/state/history.json",
-    { schemaVersion: HISTORY_SCHEMA_VERSION, snapshots: [snapshot(0)] },
-    operations,
-  );
+  const expected = {
+    schemaVersion: HISTORY_SCHEMA_VERSION,
+    snapshots: [snapshot(0)],
+  };
+  await writeHistoryDocumentAtomic("/state/history.json", expected, operations);
   assert.deepEqual(operations.events.slice(0, 3), [
     "mkdir 448",
     "write 384 wx",
     "rename",
   ]);
   assert.equal(operations.lastTemporary.endsWith(".tmp"), true);
+  assert.equal(operations.target(), `${JSON.stringify(expected)}\n`);
   assert.equal(
     parseHistoryDocument(JSON.parse(operations.target())).snapshots.length,
     1,
@@ -405,6 +448,10 @@ test("history parser rejects extra private fields", () => {
     ],
   };
   assert.throws(() => parseHistoryDocument(privateDocument), /history_corrupt/);
+  assert.throws(
+    () => parseHistoryDocument({ snapshots: [] }),
+    /history_corrupt/,
+  );
 });
 
 function memoryOperations(initial, options = {}) {

@@ -11,6 +11,17 @@ side-by-side or differential verification layer. Ship one feature at a time
 with ordinary Rust unit tests and a manual dashboard smoke check, then keep
 moving.
 
+## Persistence preparation
+
+Rust program PR 3 reserves new closed schema versions before provider work.
+Settings use v3. Quota history and transition state use v2. The field sets and
+the four provider IDs do not change. The TypeScript stores migrate the previous
+versions in memory. They do not write during a load. The next save writes the
+new version.
+
+Herdr Quota 0.3.x sees these documents as future versions. It preserves the
+file bytes. The file paths do not change.
+
 Each later Rust ship brief must include this rule in substance. It must also
 state the manual smoke evidence for its feature.
 

@@ -28,6 +28,10 @@ import {
 
 const BASE = Date.parse("2026-08-20T12:00:00.000Z");
 const RESET = "2026-08-27T12:00:00.000Z";
+const transitionsV1Fixture = await readFile(
+  new URL("fixtures/transitions-v1.json", import.meta.url),
+  "utf8",
+);
 
 function configured() {
   return { ...defaultSettings(), remainingThreshold: 25 };
@@ -94,6 +98,47 @@ test("transition path is a separate XDG state document", () => {
   );
 });
 
+test("transition v1 migrates in memory and v2 is written on the next save", async () => {
+  const directory = await temporaryDirectory();
+  const path = join(directory, "transitions-v1.json");
+  try {
+    await writeFile(path, transitionsV1Fixture, { mode: 0o600 });
+    const migrated = parseTransitionDocument(JSON.parse(transitionsV1Fixture));
+    assert.equal(migrated.schemaVersion, TRANSITION_SCHEMA_VERSION);
+
+    const store = new LocalTransitions(path);
+    assert.equal(
+      (await store.loadView(history(snapshot(0, 40)), configured()))
+        .availability,
+      "ready",
+    );
+    assert.equal(await readFile(path, "utf8"), transitionsV1Fixture);
+
+    await writeTransitionDocumentAtomic(path, migrated);
+    assert.equal(await readFile(path, "utf8"), `${JSON.stringify(migrated)}\n`);
+    assert.equal(JSON.parse(await readFile(path, "utf8")).schemaVersion, 2);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("transition v2 keeps the four provider allow-list and is future to v0.3", () => {
+  assert.equal(TRANSITION_SCHEMA_VERSION, 2);
+  assert.ok(TRANSITION_SCHEMA_VERSION > 1);
+  for (const provider of ["Claude", "OpenAI Codex", "Cursor", "Kimi"]) {
+    assert.doesNotThrow(() =>
+      parseTransitionDocument(document([event(0, { provider })])),
+    );
+  }
+  assert.throws(
+    () =>
+      parseTransitionDocument(
+        document([event(0, { provider: "GitHub Copilot" })]),
+      ),
+    /transitions_corrupt/,
+  );
+});
+
 test("private atomic writes and acknowledgement survive pane reopen", async () => {
   const directory = await temporaryDirectory();
   const path = join(directory, "state", "herdr-quota", "transitions-v1.json");
@@ -154,7 +199,7 @@ test("clear deletes only transition history and leaves neighboring quota history
 test("unsupported future schema is preserved across load, evaluate, and clear", async () => {
   const directory = await temporaryDirectory();
   const path = join(directory, "transitions-v1.json");
-  const future = '{"schemaVersion":99,"future":"keep"}\n';
+  const future = `{"schemaVersion":${TRANSITION_SCHEMA_VERSION + 1},"future":"keep"}\n`;
   try {
     await writeFile(path, future, { mode: 0o600 });
     const store = new LocalTransitions(path);
@@ -287,6 +332,10 @@ test("parser and writer reject secret or raw-payload fields", async () => {
     },
   ]);
   assert.throws(() => parseTransitionDocument(unsafe), /transitions_corrupt/);
+  assert.throws(
+    () => parseTransitionDocument({ events: [] }),
+    /transitions_corrupt/,
+  );
 
   const directory = await temporaryDirectory();
   try {

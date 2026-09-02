@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 2,
+  "providerOrder": ["cursor", "claude", "codex", "kimi"],
+  "hiddenProviders": ["kimi"],
+  "meterMode": "used",
+  "remainingThreshold": 25,
+  "forecastBeforeReset": true
+}

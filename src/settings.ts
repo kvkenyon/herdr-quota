@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { MARKETED_PROVIDERS, type SupportedProvider } from "./types.js";
 
-export const SETTINGS_SCHEMA_VERSION = 2;
+export const SETTINGS_SCHEMA_VERSION = 3;
 export const SUPPORTED_PROVIDERS: readonly SupportedProvider[] =
   MARKETED_PROVIDERS.map((provider) => provider.id);
 
@@ -14,7 +14,7 @@ export type MeterMode = "remaining" | "used";
 export type RemainingThreshold = "off" | 25 | 10 | 5;
 
 export interface DashboardSettings {
-  schemaVersion: 2;
+  schemaVersion: 3;
   providerOrder: SupportedProvider[];
   hiddenProviders: SupportedProvider[];
   meterMode: MeterMode;
@@ -150,14 +150,15 @@ export function normalizeSettings(value: DashboardSettings): DashboardSettings {
 }
 
 /**
- * Reads only the current finite settings schema. Extra object fields and
- * future provider ids are ignored so a newer writer cannot leak data into the
- * runtime or make a downgrade brittle.
+ * Reads only the finite settings schemas. Extra object fields and future
+ * provider ids are ignored. This prevents data from a newer writer from
+ * entering the runtime or making a downgrade brittle.
  */
 export function parseSettingsDocument(value: unknown): DashboardSettings {
   if (!isObject(value)) throw new SettingsDocumentError("corrupt");
   if (
     value.schemaVersion !== 1 &&
+    value.schemaVersion !== 2 &&
     value.schemaVersion !== SETTINGS_SCHEMA_VERSION
   ) {
     if (typeof value.schemaVersion === "number")
@@ -167,7 +168,7 @@ export function parseSettingsDocument(value: unknown): DashboardSettings {
   if (value.meterMode !== "remaining" && value.meterMode !== "used")
     throw new SettingsDocumentError("corrupt");
   if (
-    value.schemaVersion === SETTINGS_SCHEMA_VERSION &&
+    value.schemaVersion !== 1 &&
     value.remainingThreshold !== "off" &&
     value.remainingThreshold !== 25 &&
     value.remainingThreshold !== 10 &&
@@ -175,7 +176,7 @@ export function parseSettingsDocument(value: unknown): DashboardSettings {
   )
     throw new SettingsDocumentError("corrupt");
   if (
-    value.schemaVersion === SETTINGS_SCHEMA_VERSION &&
+    value.schemaVersion !== 1 &&
     typeof value.forecastBeforeReset !== "boolean"
   )
     throw new SettingsDocumentError("corrupt");
@@ -190,9 +191,7 @@ export function parseSettingsDocument(value: unknown): DashboardSettings {
         ? "off"
         : (value.remainingThreshold as RemainingThreshold),
     forecastBeforeReset:
-      value.schemaVersion === SETTINGS_SCHEMA_VERSION
-        ? value.forecastBeforeReset === true
-        : false,
+      value.schemaVersion !== 1 ? value.forecastBeforeReset === true : false,
   };
 }
 

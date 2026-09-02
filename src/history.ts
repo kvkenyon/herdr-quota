@@ -20,7 +20,7 @@ import {
   type MarketedProviderLabel,
 } from "./types.js";
 
-export const HISTORY_SCHEMA_VERSION = 1;
+export const HISTORY_SCHEMA_VERSION = 2;
 export const HISTORY_MAX_SNAPSHOTS = 512;
 export const HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 export const HISTORY_EQUIVALENT_INTERVAL_MS = 15 * 60_000;
@@ -70,7 +70,7 @@ export interface HistorySnapshot {
 }
 
 export interface HistoryDocument {
-  schemaVersion: 1;
+  schemaVersion: 2;
   snapshots: HistorySnapshot[];
 }
 
@@ -271,8 +271,14 @@ function parseSnapshot(value: unknown): HistorySnapshot | undefined {
 
 export function parseHistoryDocument(value: unknown): HistoryDocument {
   if (!isObject(value)) throw new Error("history_corrupt");
-  if (value.schemaVersion !== HISTORY_SCHEMA_VERSION)
-    throw new Error("history_incompatible");
+  if (
+    value.schemaVersion !== 1 &&
+    value.schemaVersion !== HISTORY_SCHEMA_VERSION
+  ) {
+    if (typeof value.schemaVersion === "number")
+      throw new Error("history_incompatible");
+    throw new Error("history_corrupt");
+  }
   if (
     !exactKeys(value, ["schemaVersion", "snapshots"]) ||
     !Array.isArray(value.snapshots) ||
@@ -773,11 +779,15 @@ export async function writeHistoryDocumentAtomic(
   await operations.mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await operations.writeFile(temporary, `${JSON.stringify(document)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-      flag: "wx",
-    });
+    await operations.writeFile(
+      temporary,
+      `${JSON.stringify(parseHistoryDocument(document))}\n`,
+      {
+        encoding: "utf8",
+        mode: 0o600,
+        flag: "wx",
+      },
+    );
     await operations.rename(temporary, path);
   } catch (error) {
     await operations.unlink(temporary).catch(() => undefined);
