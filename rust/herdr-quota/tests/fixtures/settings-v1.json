@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "providerOrder": ["cursor", "claude", "codex", "kimi"],
+  "hiddenProviders": ["kimi"],
+  "meterMode": "used"
+}
