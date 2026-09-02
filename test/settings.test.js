@@ -417,6 +417,11 @@ function memoryOperations(initial, failAt, statOverrides = {}) {
     async open(path, flags) {
       if (failAt === "open" && flags & constants.O_CREAT)
         throw new Error("unwritable");
+      if (flags & constants.O_EXCL && files.has(path)) {
+        const error = new Error("exists");
+        error.code = "EEXIST";
+        throw error;
+      }
       if (flags & constants.O_CREAT) files.set(path, "");
       return {
         async stat() {
@@ -448,3 +453,25 @@ function memoryOperations(initial, failAt, statOverrides = {}) {
     files: () => [...files.keys()],
   };
 }
+
+test("a shared settings lock fails safely after bounded acquisition", async () => {
+  const operations = memoryOperations("{\"schemaVersion\":4}\n");
+  const lock = await operations.open(
+    "/config/settings.json.lock",
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+    0o600,
+  );
+
+  await assert.rejects(() =>
+    new SettingsStore("/config/settings.json", operations).save(
+      defaultSettings(),
+    ),
+  );
+  await lock.close();
+
+  assert.equal(operations.target(), "{\"schemaVersion\":4}\n");
+  assert.deepEqual(operations.files().sort(), [
+    "/config/settings.json",
+    "/config/settings.json.lock",
+  ]);
+});

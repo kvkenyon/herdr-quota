@@ -5,10 +5,10 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(unix)]
-use std::os::fd::AsRawFd;
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 
@@ -111,7 +111,7 @@ pub fn quarantine_if_unchanged(
     path: &Path,
     expected: &[u8],
 ) -> Result<Option<PathBuf>, AtomicError> {
-    let _lock = lock_parent(path)?;
+    let _lock = lock_sibling(path)?;
     let Some(current) = read_replaceable(path)? else {
         return Ok(None);
     };
@@ -143,7 +143,7 @@ where
     H: FnMut(WriteStage) -> io::Result<()>,
 {
     create_private_parent(path).map_err(AtomicError::from)?;
-    let _lock = lock_parent(path)?;
+    let _lock = lock_sibling(path)?;
     let existing = read_replaceable(path)?;
     validate_existing(existing.as_deref()).map_err(ReplaceError::Validation)?;
 
@@ -171,31 +171,39 @@ where
     result
 }
 
-#[cfg(unix)]
-struct SiblingLock(File);
+struct SiblingLock(PathBuf);
 
-#[cfg(unix)]
 impl Drop for SiblingLock {
     fn drop(&mut self) {
-        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+        fs::remove_file(&self.0).ok();
     }
 }
 
-#[cfg(unix)]
-fn lock_parent(path: &Path) -> Result<SiblingLock, AtomicError> {
-    let file = File::open(parent_directory(path))?;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(io::Error::last_os_error().into());
+fn lock_sibling(path: &Path) -> Result<SiblingLock, AtomicError> {
+    let mut name = OsString::from(path.file_name().ok_or(AtomicError::InvalidPath)?);
+    name.push(".lock");
+    let lock_path = parent_directory(path).join(name);
+    for attempt in 0..50 {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        match options.open(&lock_path) {
+            Ok(file) => {
+                if let Err(error) = set_private_file_permissions(&file) {
+                    drop(file);
+                    fs::remove_file(&lock_path).ok();
+                    return Err(error.into());
+                }
+                return Ok(SiblingLock(lock_path));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists && attempt < 49 => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
-    Ok(SiblingLock(file))
-}
-
-#[cfg(not(unix))]
-struct SiblingLock;
-
-#[cfg(not(unix))]
-fn lock_parent(_path: &Path) -> Result<SiblingLock, AtomicError> {
-    Ok(SiblingLock)
+    unreachable!()
 }
 
 fn create_private_parent(path: &Path) -> io::Result<()> {
@@ -444,6 +452,23 @@ mod tests {
         competitor.join().expect("join competing save");
 
         assert_eq!(fs::read(&path).expect("read final settings"), b"future\n");
+    }
+
+    #[test]
+    fn a_shared_lock_fails_safely_after_bounded_acquisition() {
+        let directory = TestDirectory::new();
+        let path = directory.path().join("settings.json");
+        let lock_path = directory.path().join("settings.json.lock");
+        fs::write(&path, b"current\n").expect("write current settings");
+        fs::write(&lock_path, b"").expect("hold shared lock");
+
+        let result = super::replace_atomically(&path, b"next\n", |_| Ok::<(), Infallible>(()));
+
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read(&path).expect("read current settings"),
+            b"current\n"
+        );
     }
 
     #[cfg(unix)]
