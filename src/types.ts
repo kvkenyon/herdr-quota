@@ -1,8 +1,36 @@
-import type {
-  DashboardSettings,
-  SettingsAvailability,
-  SupportedProvider,
-} from "./settings.js";
+import type { DashboardSettings, SettingsAvailability } from "./settings.js";
+
+/**
+ * The complete product-owned provider catalog. Keep this finite: quota-axi
+ * can report other providers, but this sidebar does not query, render, or
+ * persist them.
+ */
+export const MARKETED_PROVIDERS = [
+  {
+    id: "claude",
+    label: "Claude",
+    recoveryInstruction: "claude, then /login",
+  },
+  { id: "codex", label: "OpenAI Codex", recoveryInstruction: "codex login" },
+  { id: "cursor", label: "Cursor", recoveryInstruction: "cursor-agent login" },
+  { id: "kimi", label: "Kimi", recoveryInstruction: "kimi login" },
+] as const;
+
+export type SupportedProvider = (typeof MARKETED_PROVIDERS)[number]["id"];
+export type MarketedProviderLabel =
+  (typeof MARKETED_PROVIDERS)[number]["label"];
+
+export function marketedProvider(
+  id: string,
+): (typeof MARKETED_PROVIDERS)[number] | undefined {
+  return MARKETED_PROVIDERS.find((provider) => provider.id === id);
+}
+
+export function marketedProviderLabel(
+  label: string,
+): (typeof MARKETED_PROVIDERS)[number] | undefined {
+  return MARKETED_PROVIDERS.find((provider) => provider.label === label);
+}
 
 export type PaceStatus = "ahead" | "on_pace" | "behind" | "mixed" | "unknown";
 export type RunwayStatus =

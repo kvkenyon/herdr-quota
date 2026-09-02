@@ -3,6 +3,7 @@ import type {
   ProviderQuota,
   QuotaWindow,
 } from "./types.js";
+import { marketedProvider } from "./types.js";
 
 export function formatPercent(value?: number): string {
   return value === undefined ? "--" : `${Math.round(value)}%`;
@@ -37,16 +38,9 @@ export function ageText(iso?: string, now = new Date()): string {
   return seconds < 10 ? "just now" : `${formatDuration(seconds)} ago`;
 }
 
-const MARKETED_NAMES: Record<string, string> = {
-  claude: "Claude",
-  codex: "OpenAI Codex",
-  cursor: "Cursor",
-  kimi: "Kimi",
-};
-
 export function displayName(provider: ProviderQuota): string {
   return (
-    MARKETED_NAMES[provider.provider.toLowerCase()] ??
+    marketedProvider(provider.provider.toLowerCase())?.label ??
     provider.label ??
     provider.provider
   );

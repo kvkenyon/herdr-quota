@@ -14,6 +14,11 @@ import type {
   RemainingThreshold,
   SupportedProvider,
 } from "./settings.js";
+import {
+  MARKETED_PROVIDERS,
+  marketedProviderLabel,
+  type MarketedProviderLabel,
+} from "./types.js";
 import type {
   TransitionAvailability,
   TransitionDisplayEvent,
@@ -26,8 +31,8 @@ export const TRANSITION_MAX_EVENTS = 256;
 export const TRANSITION_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 export const TRANSITION_CLOCK_SKEW_MS = 5 * 60_000;
 
-const PROVIDERS = ["Claude", "OpenAI Codex", "Cursor", "Kimi"] as const;
-type TransitionProvider = (typeof PROVIDERS)[number];
+const PROVIDERS = MARKETED_PROVIDERS.map((provider) => provider.label);
+type TransitionProvider = MarketedProviderLabel;
 type PersistedTransitionKind =
   "threshold_baseline" | "forecast_baseline" | TransitionKind;
 
@@ -238,8 +243,7 @@ function policyFor(settings: DashboardSettings): TransitionPolicy {
 }
 
 function providerId(provider: TransitionProvider): SupportedProvider {
-  if (provider === "OpenAI Codex") return "codex";
-  return provider.toLowerCase() as SupportedProvider;
+  return marketedProviderLabel(provider)!.id;
 }
 
 function visible(provider: TransitionProvider, settings: DashboardSettings) {

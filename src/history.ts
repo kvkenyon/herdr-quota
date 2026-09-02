@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { displayName } from "./format.js";
 import { providerNeedsSignIn } from "./tiers.js";
 import type {
   EffectiveAvailability,
@@ -15,6 +14,11 @@ import type {
   QuotaReport,
   RunwayStatus,
 } from "./types.js";
+import {
+  MARKETED_PROVIDERS,
+  marketedProvider,
+  type MarketedProviderLabel,
+} from "./types.js";
 
 export const HISTORY_SCHEMA_VERSION = 1;
 export const HISTORY_MAX_SNAPSHOTS = 512;
@@ -26,8 +30,8 @@ const MEANINGFUL_REMAINING_DROP = 10;
 const MEANINGFUL_RESERVE_CHANGE = 10;
 const MEANINGFUL_PROJECTION_CHANGE_MS = 2 * 60 * 60_000;
 
-const PROVIDERS = ["Claude", "OpenAI Codex", "Cursor", "Kimi"] as const;
-type HistoryProviderName = (typeof PROVIDERS)[number];
+const PROVIDERS = MARKETED_PROVIDERS.map((provider) => provider.label);
+type HistoryProviderName = MarketedProviderLabel;
 type HistoryDataHealth =
   "current" | "stale" | "unavailable" | "error" | "unknown";
 type HistoryPaceStatus = Exclude<PaceStatus, "unknown">;
@@ -417,8 +421,8 @@ function normalizeRunway(
 function normalizeProvider(
   provider: ProviderQuota,
 ): HistoryProviderSnapshot | undefined {
-  const marketed = displayName(provider);
-  if (!PROVIDERS.includes(marketed as HistoryProviderName)) return undefined;
+  const marketed = marketedProvider(provider.provider.toLowerCase())?.label;
+  if (!marketed) return undefined;
   const health = providerHealth(provider);
   let facts: HistoryFact[] = [];
   if (
@@ -452,7 +456,7 @@ function normalizeProvider(
     left.scope.localeCompare(right.scope),
   );
   return {
-    provider: marketed as HistoryProviderName,
+    provider: marketed,
     ...health,
     facts,
   };

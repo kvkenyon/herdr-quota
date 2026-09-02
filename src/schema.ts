@@ -5,8 +5,8 @@ import type {
   QuotaReport,
   QuotaWindow,
 } from "./types.js";
+import { marketedProvider } from "./types.js";
 import { stripAnsi } from "./ansi.js";
-import { isAllowedProvider } from "./tiers.js";
 
 const STATUSES = new Set([
   "fresh",
@@ -314,7 +314,7 @@ export function adaptQuotaResponse(value: unknown): QuotaReport {
   // being silently discarded.
   const accepted = raw.providers.filter((item) => {
     const id = text(object(item)?.provider);
-    return id === undefined || isAllowedProvider(id);
+    return id === undefined || marketedProvider(id.toLowerCase()) !== undefined;
   });
   return {
     generatedAt,
