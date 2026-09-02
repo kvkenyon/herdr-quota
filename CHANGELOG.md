@@ -5,7 +5,7 @@
 ### Changed
 
 - Settings now use schema v3. Quota history and transition state now use schema v2. The stores migrate the previous versions in memory and write the new version on the next save.
-- The schema change does not add fields or providers. Claude, OpenAI Codex, Cursor, and Kimi remain the complete provider set.
+- GitHub Copilot joins Claude, OpenAI Codex, Cursor, and Kimi in the complete provider set. Existing settings add Copilot to the provider order in memory and do not change on disk until the next save.
 - Herdr Quota 0.3.x treats the new documents as future schemas and preserves their bytes.
 
 ## 0.3.0 — 2026-08-20
