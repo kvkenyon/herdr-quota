@@ -5,10 +5,11 @@ import { adaptQuotaResponse } from "../../dist/schema.js";
 import { SettingsStore } from "../../dist/settings.js";
 import { LocalTransitions } from "../../dist/transitions.js";
 
+const fixtureName = process.env.TEST_QUOTA_FIXTURE ?? "complete";
 const fixture = adaptQuotaResponse(
   JSON.parse(
     await readFile(
-      new URL("../fixtures/complete.json", import.meta.url),
+      new URL(`../fixtures/${fixtureName}.json`, import.meta.url),
       "utf8",
     ),
   ),

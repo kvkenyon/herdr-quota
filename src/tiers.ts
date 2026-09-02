@@ -7,8 +7,8 @@ import {
 import { friendlyProviderError } from "./sanitize.js";
 
 /**
- * The marketed provider set. Anything else quota-axi can report (Grok,
- * GitHub Copilot, future providers) is neither queried nor rendered.
+ * The marketed provider set. Anything else quota-axi can report (Grok and
+ * future providers) is neither queried nor rendered.
  */
 export const ALLOWED_PROVIDERS = MARKETED_PROVIDERS.map(
   (provider) => provider.id,
@@ -123,11 +123,21 @@ function kimiTierLabel(window: QuotaWindow): TierLabel {
   return passthrough(window);
 }
 
+function copilotTierLabel(window: QuotaWindow): TierLabel {
+  if (window.id === "chat") return { label: "Chat", compact: "Chat" };
+  if (window.id === "completions")
+    return { label: "Completions", compact: "Complete" };
+  if (window.id === "premium_interactions")
+    return { label: "Premium", compact: "Premium" };
+  return passthrough(window);
+}
+
 const TIER_LABELS: Record<string, (window: QuotaWindow) => TierLabel> = {
   claude: claudeTierLabel,
   codex: codexTierLabel,
   cursor: cursorTierLabel,
   kimi: kimiTierLabel,
+  copilot: copilotTierLabel,
 };
 
 function tierConclusion(window: QuotaWindow): TierConclusion {

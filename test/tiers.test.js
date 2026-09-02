@@ -22,18 +22,31 @@ function byId(list, provider) {
   return list.find((item) => item.provider === provider);
 }
 
-test("only the four marketed providers are allowed", () => {
+test("only the five marketed providers are allowed", () => {
   assert.deepEqual(
     MARKETED_PROVIDERS.map((provider) => provider.id),
-    ["claude", "codex", "cursor", "kimi"],
+    ["claude", "codex", "cursor", "kimi", "copilot"],
   );
   assert.deepEqual(
     [...ALLOWED_PROVIDERS],
-    ["claude", "codex", "cursor", "kimi"],
+    ["claude", "codex", "cursor", "kimi", "copilot"],
   );
   assert.equal(isAllowedProvider("Claude"), true);
   assert.equal(isAllowedProvider("grok"), false);
-  assert.equal(isAllowedProvider("copilot"), false);
+  assert.equal(isAllowedProvider("copilot"), true);
+});
+
+test("copilot keeps each reported quota window separate", async () => {
+  const copilot = byId(await providers("copilot"), "copilot");
+  assert.deepEqual(
+    providerTiers(copilot).map((row) => [row.label, row.compactLabel]),
+    [
+      ["Chat", "Chat"],
+      ["Completions", "Complete"],
+      ["Premium", "Premium"],
+    ],
+  );
+  assert.equal(providerTiers(copilot)[0].conclusion.kind, "unknown");
 });
 
 test("claude tiers get concise human labels in provider order", async () => {
@@ -159,6 +172,10 @@ test("every provider has its own sign-in remedy", () => {
   assert.equal(
     presentProvider(bareProvider("cursor", auth)).instruction,
     "cursor-agent login",
+  );
+  assert.equal(
+    presentProvider(bareProvider("copilot", auth)).instruction,
+    "github-copilot-cli auth login",
   );
 });
 

@@ -14,6 +14,11 @@ export const MARKETED_PROVIDERS = [
   { id: "codex", label: "OpenAI Codex", recoveryInstruction: "codex login" },
   { id: "cursor", label: "Cursor", recoveryInstruction: "cursor-agent login" },
   { id: "kimi", label: "Kimi", recoveryInstruction: "kimi login" },
+  {
+    id: "copilot",
+    label: "GitHub Copilot",
+    recoveryInstruction: "github-copilot-cli auth login",
+  },
 ] as const;
 
 export type SupportedProvider = (typeof MARKETED_PROVIDERS)[number]["id"];

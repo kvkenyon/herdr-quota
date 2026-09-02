@@ -114,11 +114,30 @@ test("no provider art, aggregates-only output, or implementation jargon", async 
   assert.doesNotMatch(output, /all_models|seven_day|five_hour|api_usage/);
 });
 
-test("grok, copilot, and unknown providers are never rendered", async () => {
+test("grok and unknown providers are never rendered", async () => {
   const output = render(await report("excluded-providers"));
   assert.match(output, /Claude/);
   assert.match(output, /Kimi/);
-  assert.doesNotMatch(output, /Grok|Copilot|Future/i);
+  assert.match(output, /GitHub Copilot/);
+  assert.match(output, /github-copilot-cli auth login/);
+  assert.doesNotMatch(output, /Grok|Future/i);
+});
+
+test("Copilot renders reported windows, resets, partial state, and sign-in honestly", async () => {
+  const quota = render(await report("copilot"));
+  assert.match(quota, /GitHub Copilot/);
+  assert.match(quota, /Chat.*60%.*13d.*--/);
+  assert.match(quota, /Completions.*40%.*13d.*--/);
+  assert.match(quota, /Premium.*20%.*13d.*--/);
+  assert.doesNotMatch(quota, /on pace|out \d/);
+
+  const signedOut = render(await report("excluded-providers"));
+  assert.match(signedOut, /GitHub Copilot.*signed out/);
+  assert.match(signedOut, /github-copilot-cli auth login/);
+  assert.doesNotMatch(
+    signedOut.split("GitHub Copilot")[1].split("Kimi")[0],
+    /%/,
+  );
 });
 
 test("mixed authentication shows per-provider recovery without numbers", async () => {
