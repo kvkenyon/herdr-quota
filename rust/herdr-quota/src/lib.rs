@@ -9,6 +9,7 @@ pub mod domain;
 pub mod sanitize;
 pub mod store {
     pub(crate) mod atomic;
+    pub mod history;
     pub mod settings;
 }
 mod unix_signal;
