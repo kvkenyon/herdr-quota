@@ -205,15 +205,30 @@ test("Grok labels consumer quota and keeps usable CLI-only access distinct", () 
 });
 
 test("Grok keeps rate limiting, partial data, and stale data distinct", () => {
-  for (const [state, expected] of [
-    [{ status: "rate_limited", stale: false }, "rate limited"],
-    [{ status: "fresh", stale: false }, "partial data"],
-    [{ status: "stale", stale: true }, "stale"],
+  for (const [state, semanticsStatus, expected] of [
+    [
+      { status: "rate_limited", stale: false, authStatus: "usable" },
+      undefined,
+      "rate limited",
+    ],
+    [
+      { status: "fresh", stale: false, authStatus: "usable" },
+      "partial",
+      "partial data",
+    ],
+    [
+      { status: "stale", stale: true, authStatus: "usable" },
+      undefined,
+      "stale",
+    ],
   ]) {
     const provider = bareProvider("grok", state);
-    provider.windows = [{ id: "credits", label: "credits", kind: "weekly" }];
-    if (expected === "partial data") provider.semanticsStatus = "partial";
+    provider.semanticsStatus = semanticsStatus;
     assert.equal(providerAnnotation(provider).text, expected);
+    assert.deepEqual(presentProvider(provider), {
+      kind: "message",
+      message: "Quota unavailable",
+    });
   }
 });
 

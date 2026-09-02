@@ -221,6 +221,17 @@ export function providerNeedsSignIn(provider: ProviderQuota): boolean {
   );
 }
 
+function grokConsumerQuotaUnavailable(provider: ProviderQuota): boolean {
+  return (
+    provider.provider.toLowerCase() === "grok" &&
+    provider.state.status === "fresh" &&
+    !provider.state.stale &&
+    provider.state.authStatus === "usable" &&
+    provider.semanticsStatus !== "partial" &&
+    !provider.windows.length
+  );
+}
+
 /**
  * Decides what fills a provider section. Signed-out and unreadable providers
  * never show numbers, so an unavailable reading is never mistaken for zero
@@ -238,11 +249,7 @@ export function presentProvider(provider: ProviderQuota): ProviderPresentation {
           ?.recoveryInstruction ?? "sign in with the provider CLI",
     };
   }
-  if (
-    provider.provider.toLowerCase() === "grok" &&
-    provider.state.authStatus === "usable" &&
-    !provider.windows.length
-  ) {
+  if (grokConsumerQuotaUnavailable(provider)) {
     return { kind: "message", message: "Consumer quota unavailable" };
   }
   if (!provider.windows.length) {
@@ -261,20 +268,16 @@ export function providerAnnotation(
 ): ProviderAnnotation | undefined {
   if (provider.state.reason === "keychain_access_required") return undefined;
   if (providerNeedsSignIn(provider)) return { text: "signed out", tone: "bad" };
-  if (
-    provider.provider.toLowerCase() === "grok" &&
-    provider.state.authStatus === "usable" &&
-    !provider.windows.length
-  )
-    return { text: "consumer quota unavailable", tone: "muted" };
   if (provider.state.stale || provider.state.status === "stale")
     return { text: "stale", tone: "warn" };
   if (provider.state.status === "rate_limited")
     return { text: "rate limited", tone: "warn" };
   if (provider.state.status === "error") return { text: "error", tone: "bad" };
-  if (provider.state.status === "unavailable" || !provider.windows.length)
-    return { text: "no reading", tone: "muted" };
   if (provider.semanticsStatus === "partial")
     return { text: "partial data", tone: "warn" };
+  if (grokConsumerQuotaUnavailable(provider))
+    return { text: "consumer quota unavailable", tone: "muted" };
+  if (provider.state.status === "unavailable" || !provider.windows.length)
+    return { text: "no reading", tone: "muted" };
   return undefined;
 }
