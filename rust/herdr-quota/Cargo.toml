@@ -1,0 +1,14 @@
+[package]
+name = "herdr-quota"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Rust foundation for the Herdr quota sidebar"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "herdr-quota"
+path = "src/main.rs"
