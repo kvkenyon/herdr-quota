@@ -11,8 +11,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::os::fd::AsRawFd;
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+#[cfg(unix)]
+const LOCK_TIMEOUT: Duration = Duration::from_millis(500);
+#[cfg(unix)]
+const LOCK_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 /// An error from the atomic storage boundary.
 #[derive(Debug)]
@@ -184,10 +190,22 @@ impl Drop for SiblingLock {
 #[cfg(unix)]
 fn lock_parent(path: &Path) -> Result<SiblingLock, AtomicError> {
     let file = File::open(parent_directory(path))?;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(io::Error::last_os_error().into());
+    let deadline = Instant::now() + LOCK_TIMEOUT;
+    loop {
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(SiblingLock(file));
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::WouldBlock && error.kind() != io::ErrorKind::Interrupted {
+            return Err(error.into());
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                io::Error::new(io::ErrorKind::TimedOut, "storage lock is unavailable").into(),
+            );
+        }
+        std::thread::sleep(LOCK_RETRY_DELAY);
     }
-    Ok(SiblingLock(file))
 }
 
 #[cfg(not(unix))]
@@ -492,6 +510,46 @@ mod tests {
         super::replace_atomically(&path, b"next\n", |_| Ok::<(), Infallible>(()))
             .expect("replace after termination");
         assert_eq!(fs::read(path).expect("read settings"), b"next\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_acquisition_times_out_without_changing_the_target() {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        let directory = TestDirectory::new();
+        let path = directory.path().join("settings.json");
+        let marker = directory.path().join("locked");
+        fs::write(&path, b"current\n").expect("write current settings");
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--ignored",
+                "--exact",
+                "store::atomic::tests::hold_parent_lock_until_terminated",
+            ])
+            .env("HERDR_LOCK_TEST_PATH", &path)
+            .env("HERDR_LOCK_TEST_MARKER", &marker)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start lock holder");
+        let start_deadline = Instant::now() + Duration::from_secs(2);
+        while !marker.exists() && Instant::now() < start_deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(marker.exists(), "lock holder did not start");
+
+        let started = Instant::now();
+        let result = super::replace_atomically(&path, b"next\n", |_| Ok::<(), Infallible>(()));
+        let elapsed = started.elapsed();
+        child.kill().expect("terminate lock holder");
+        child.wait().expect("wait for lock holder");
+
+        assert!(result.is_err());
+        assert!(elapsed >= super::LOCK_TIMEOUT);
+        assert!(elapsed < Duration::from_secs(2));
+        assert_eq!(fs::read(path).expect("read settings"), b"current\n");
     }
 
     #[cfg(unix)]
