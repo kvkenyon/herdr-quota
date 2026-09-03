@@ -138,8 +138,14 @@ fn codex_label(window: &QuotaWindow) -> (String, String) {
         _ => {
             let model = window.id.strip_prefix("model:").and_then(|id| {
                 let (_, duration) = id.rsplit_once(':')?;
-                let duration = duration.split('_').next().unwrap_or(duration);
-                matches!(duration, "5h" | "7d").then_some(duration)
+                ["5h", "7d"].into_iter().find(|candidate| {
+                    duration == *candidate
+                        || duration
+                            .strip_prefix(&format!("{candidate}_"))
+                            .is_some_and(|suffix| {
+                                !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+                            })
+                })
             });
             match model {
                 Some("7d") => {
@@ -457,6 +463,20 @@ mod tests {
             TierConclusion::NotReported
         ));
         assert_eq!(rows.last().unwrap().label, "Code review");
+    }
+
+    #[test]
+    fn codex_model_duration_requires_an_exact_supported_suffix() {
+        let mut valid = window("model:gpt-5.1-codex-mini:7d_2");
+        valid.label = "gpt-5.1-codex-mini weekly".into();
+        let mut malformed = window("model:future:7d_beta");
+        malformed.label = "Future provider label".into();
+
+        let rows = provider_tiers(&provider("codex", vec![valid, malformed]));
+
+        assert_eq!(rows[0].label, "mini week");
+        assert_eq!(rows[1].label, "Future provider label");
+        assert_eq!(rows[1].compact_label, "Future provider label");
     }
 
     #[test]
