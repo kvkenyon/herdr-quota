@@ -264,7 +264,7 @@ where
                         current_generation.store(generation, Ordering::Release);
                     }
                     worker.cancel_active();
-                    tasks.abort_all();
+                    tasks.shutdown().await;
                     let _ = acknowledged.send(());
                     return;
                 }
@@ -275,7 +275,7 @@ where
                         state.closed = true;
                     }
                     worker.cancel_active();
-                    tasks.abort_all();
+                    tasks.shutdown().await;
                     return;
                 }
             },
