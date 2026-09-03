@@ -3,10 +3,11 @@ use std::process::ExitCode;
 use std::fs;
 
 use herdr_quota::domain::schema::parse_quota_response;
-use herdr_quota::ui::render::{DashboardConfig, dashboard, preview_svg, render_lines};
+use herdr_quota::ui::render::{DashboardConfig, preview_svg, render_lines};
 use herdr_quota::{Command, parse_command, version};
 
-fn main() -> ExitCode {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> ExitCode {
     match parse_command(std::env::args().skip(1)) {
         Ok(Command::Version) => {
             println!("herdr-quota {}", version());
@@ -38,16 +39,10 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
-        Ok(Command::Dashboard { fixture }) => match load_report(&fixture) {
-            Ok(report) => match dashboard(&report) {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(_) => {
-                    eprintln!("dashboard requires an interactive terminal");
-                    ExitCode::from(1)
-                }
-            },
-            Err(error) => {
-                eprintln!("{error}");
+        Ok(Command::Dashboard) => match herdr_quota::ui::runtime::dashboard().await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => {
+                eprintln!("dashboard could not use the interactive terminal");
                 ExitCode::from(1)
             }
         },
