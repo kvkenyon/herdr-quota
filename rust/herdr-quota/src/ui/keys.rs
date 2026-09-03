@@ -21,6 +21,7 @@ pub enum DashboardAction {
     Activate,
     MoveUp,
     MoveDown,
+    SelectProvider(usize),
     Save,
     Cancel,
     Reset,
@@ -94,6 +95,7 @@ fn key_action(byte: u8) -> Option<DashboardAction> {
         b'y' | b'Y' => Some(DashboardAction::Confirm),
         b'n' | b'N' => Some(DashboardAction::Decline),
         b' ' => Some(DashboardAction::Toggle),
+        b'1'..=b'6' => Some(DashboardAction::SelectProvider((byte - b'1') as usize)),
         b'\r' | b'\n' => Some(DashboardAction::Activate),
         _ => None,
     }
@@ -181,6 +183,17 @@ mod tests {
                 DashboardAction::Quit,
                 DashboardAction::ScrollDown,
                 DashboardAction::PageDown,
+            ]
+        );
+    }
+
+    #[test]
+    fn provider_shortcuts_are_bounded_to_the_visible_catalog() {
+        assert_eq!(
+            TerminalInputParser::default().push(b"16"),
+            vec![
+                DashboardAction::SelectProvider(0),
+                DashboardAction::SelectProvider(5)
             ]
         );
     }

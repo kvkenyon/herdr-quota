@@ -5,17 +5,11 @@
 //! cannot split a provider heading from the row model or leak collector text.
 
 use std::collections::BTreeSet;
-use std::io::{self, Stdout};
 
 use chrono::{Datelike, Timelike};
-use crossterm::{
-    event::{self, Event, KeyCode},
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
+use crossterm::event::KeyCode;
 use ratatui::{
-    Frame, Terminal,
-    backend::CrosstermBackend,
+    Frame,
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -31,7 +25,7 @@ use crate::domain::{
     schema::QuotaReport,
     tiers::TierConclusion,
 };
-use crate::store::settings::{DashboardSettings, SettingsStore, StartupView};
+use crate::store::settings::StartupView;
 use crate::ui::{
     bar::MeterMode,
     model::{ProviderDetail, ProviderVisibility, ProviderVisibilityMap, dashboard_model},
@@ -244,6 +238,10 @@ fn visible_model(
         });
     }
     model
+}
+
+pub(super) fn visible_provider_count(report: &QuotaReport, config: &DashboardConfig) -> usize {
+    visible_model(report, config).providers.len()
 }
 
 fn compact_provider_name(provider: MarketedProvider) -> &'static str {
@@ -1361,64 +1359,19 @@ pub fn preview_svg(lines: &[String], width: u16, height: u16) -> String {
     )
 }
 
-/// Drive the interactive Crossterm dashboard with finite local preferences.
-pub fn dashboard(report: &QuotaReport) -> io::Result<()> {
-    let settings_store = SettingsStore::from_environment().ok();
-    let settings = settings_store
-        .as_ref()
-        .map(|store| store.load().settings)
-        .unwrap_or_default();
-    enable_raw_mode()?;
-    let mut session = TerminalSession {
-        raw: true,
-        alternate: false,
-    };
-    let mut stdout = io::stdout();
-    session.alternate = true;
-    execute!(stdout, EnterAlternateScreen)?;
-    let result = dashboard_loop(&mut stdout, report, settings_store.as_ref(), settings);
-    let cleanup = session.restore(&mut stdout);
-    result.and(cleanup)
-}
-
-struct TerminalSession {
-    raw: bool,
-    alternate: bool,
-}
-
-impl TerminalSession {
-    fn restore(&mut self, stdout: &mut Stdout) -> io::Result<()> {
-        let leave = if self.alternate {
-            self.alternate = false;
-            execute!(stdout, LeaveAlternateScreen)
-        } else {
-            Ok(())
-        };
-        let raw = if self.raw {
-            self.raw = false;
-            disable_raw_mode()
-        } else {
-            Ok(())
-        };
-        leave.and(raw)
-    }
-}
-
-impl Drop for TerminalSession {
-    fn drop(&mut self) {
-        let _ = self.restore(&mut io::stdout());
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InputAction {
+pub(super) enum InputAction {
     None,
     Quit,
     SavePreferences,
     AcknowledgeTransition,
 }
 
-fn handle_key(config: &mut DashboardConfig, key: KeyCode, provider_count: usize) -> InputAction {
+pub(super) fn handle_key(
+    config: &mut DashboardConfig,
+    key: KeyCode,
+    provider_count: usize,
+) -> InputAction {
     if key == KeyCode::Char('q') {
         return InputAction::Quit;
     }
@@ -1536,71 +1489,13 @@ fn handle_key(config: &mut DashboardConfig, key: KeyCode, provider_count: usize)
     }
 }
 
-fn config_from_settings(settings: &DashboardSettings) -> DashboardConfig {
-    DashboardConfig {
-        user_hidden: settings
-            .hidden_providers
-            .iter()
-            .map(|provider| provider.id().to_owned())
-            .collect(),
-        color: std::env::var_os("NO_COLOR").is_none(),
-        view: match settings.startup_view {
-            StartupView::Overview => DashboardView::Overview,
-            StartupView::Details => DashboardView::Details,
-        },
-        startup_view: settings.startup_view,
-        saved_startup_view: settings.startup_view,
-        ..DashboardConfig::default()
-    }
-}
-
-fn dashboard_loop(
-    stdout: &mut Stdout,
-    report: &QuotaReport,
-    settings_store: Option<&SettingsStore>,
-    mut settings: DashboardSettings,
-) -> io::Result<()> {
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    let mut config = config_from_settings(&settings);
-    loop {
-        terminal.draw(|frame| {
-            let area = frame.area();
-            let rows = render_frame(report, area.width, area.height, &config);
-            frame.render_widget(
-                Dashboard {
-                    rows: &rows,
-                    config: &config,
-                },
-                area,
-            );
-        })?;
-        if let Event::Key(key) = event::read()? {
-            let provider_count = visible_model(report, &config).providers.len();
-            match handle_key(&mut config, key.code, provider_count) {
-                InputAction::Quit => return Ok(()),
-                InputAction::SavePreferences => {
-                    settings.startup_view = config.startup_view;
-                    if settings_store.is_some_and(|store| store.save(&settings).is_ok()) {
-                        config.saved_startup_view = config.startup_view;
-                        config.view = config.return_view;
-                        config.save_failed = false;
-                    } else {
-                        config.save_failed = true;
-                    }
-                }
-                InputAction::AcknowledgeTransition | InputAction::None => {}
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::provider::{
         EffectiveAvailability, EffectivePace, ProviderState, QuotaWindow, Runway, WindowPace,
     };
+    use crate::store::settings::DashboardSettings;
 
     fn provider(id: &str, remaining: Option<f64>, status: ProviderStatus) -> ProviderQuota {
         ProviderQuota {
@@ -2514,7 +2409,12 @@ mod tests {
             startup_view: StartupView::Details,
             ..DashboardSettings::default()
         };
-        let mut config = config_from_settings(&settings);
+        let mut config = DashboardConfig {
+            view: DashboardView::Details,
+            startup_view: settings.startup_view,
+            saved_startup_view: settings.startup_view,
+            ..DashboardConfig::default()
+        };
         assert_eq!(config.view, DashboardView::Details);
         handle_key(&mut config, KeyCode::Char('p'), 1);
         assert_eq!(config.view, DashboardView::Preferences);
