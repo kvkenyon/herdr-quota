@@ -13,11 +13,11 @@ dashboard, also run the applicable manual dashboard smoke checks.
 
 ## Persistence preparation
 
-Rust program PR 3 reserves new closed schema versions before provider work.
-Settings use v3. Quota history and transition state use v2. The field sets and
-the six provider IDs do not change. The TypeScript stores migrate the previous
-versions in memory. They do not write during a load. The next save writes the
-new version.
+Rust program PR 3 reserved closed schema versions before provider work. Quota
+history and transition state use v2. Rust settings use v4 after PR 20 added the
+finite `overview` or `details` startup view; schemas v1-v3 default it to
+`overview` in memory. The six provider IDs do not change. Stores do not write
+during a load; the next Rust settings save writes schema v4.
 
 Herdr Quota 0.3.x sees these documents as future versions. It preserves the
 file bytes. The file paths do not change.

@@ -39,8 +39,8 @@ use crate::ui::{
         PreferencesState,
     },
     render::{
-        DashboardConfig, DashboardStatus, DashboardView, InputAction, clamp_scroll,
-        draw_dashboard, handle_key, visible_provider_count,
+        DashboardConfig, DashboardStatus, DashboardView, InputAction, clamp_scroll, draw_dashboard,
+        handle_key, visible_provider_count,
     },
     terminal::{RawInput, TerminalGuard},
 };
