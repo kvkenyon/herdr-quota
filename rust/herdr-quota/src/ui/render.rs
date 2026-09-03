@@ -85,6 +85,12 @@ fn display_name(provider: &ProviderQuota) -> &str {
 }
 
 fn provider_state(provider: &ProviderQuota) -> Option<&'static str> {
+    if matches!(
+        provider.state.auth_status.as_deref(),
+        Some("unusable" | "expired_refreshable")
+    ) {
+        return Some("sign-in required");
+    }
     match provider.state.status {
         ProviderStatus::Fresh if !provider.state.stale => None,
         ProviderStatus::Fresh | ProviderStatus::Stale => Some("stale"),
@@ -96,7 +102,12 @@ fn provider_state(provider: &ProviderQuota) -> Option<&'static str> {
 }
 
 fn has_current_quota(provider: &ProviderQuota) -> bool {
-    provider.state.status == ProviderStatus::Fresh && !provider.state.stale
+    provider.state.status == ProviderStatus::Fresh
+        && !provider.state.stale
+        && !matches!(
+            provider.state.auth_status.as_deref(),
+            Some("unusable" | "expired_refreshable")
+        )
 }
 
 fn has_trustworthy_quota(provider: &ProviderQuota) -> bool {
@@ -234,16 +245,12 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
     if visible.is_empty() {
         return ("? No providers shown".into(), RowStyle::Warning);
     }
-    if visible.iter().any(|provider| !has_current_quota(provider)) {
-        return ("? Limits non-current".into(), RowStyle::Warning);
-    }
-    if visible
+    let trustworthy: Vec<_> = visible
         .iter()
-        .any(|provider| !has_trustworthy_quota(provider))
-    {
-        return ("? Quota data partial".into(), RowStyle::Warning);
-    }
-    if let Some((provider, remaining)) = visible
+        .copied()
+        .filter(|provider| has_trustworthy_quota(provider))
+        .collect();
+    if let Some((provider, remaining)) = trustworthy
         .iter()
         .flat_map(|provider| {
             provider.windows.iter().filter_map(move |window| {
@@ -265,16 +272,7 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
             );
         }
     }
-    if visible.iter().any(|provider| {
-        has_current_quota(provider)
-            && provider
-                .windows
-                .iter()
-                .any(|window| window.percent_remaining.is_none())
-    }) {
-        return ("? Some limits unknown".into(), RowStyle::Warning);
-    }
-    let current_windows: Vec<_> = visible
+    let current_windows: Vec<_> = trustworthy
         .iter()
         .flat_map(|provider| provider.windows.iter())
         .collect();
@@ -285,6 +283,21 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
             .is_some_and(|pace| matches!(pace.status, PaceStatus::Ahead | PaceStatus::Mixed))
     }) {
         return ("? Pace needs review".into(), RowStyle::Warning);
+    }
+    if visible.iter().any(|provider| !has_current_quota(provider)) {
+        return ("? Limits non-current".into(), RowStyle::Warning);
+    }
+    if visible
+        .iter()
+        .any(|provider| !has_trustworthy_quota(provider))
+    {
+        return ("? Quota data partial".into(), RowStyle::Warning);
+    }
+    if current_windows
+        .iter()
+        .any(|window| window.percent_remaining.is_none())
+    {
+        return ("? Some limits unknown".into(), RowStyle::Warning);
     }
     if !current_windows.is_empty()
         && current_windows.iter().all(|window| {
@@ -823,6 +836,49 @@ mod tests {
         );
         assert_eq!(lines[1].trim_end(), "? Limits non-current");
         assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
+    }
+
+    #[test]
+    fn unusable_auth_is_noncurrent_and_actionable_siblings_still_rank() {
+        for auth_status in ["unusable", "expired_refreshable"] {
+            let mut auth_provider = provider("codex", Some(6.0), ProviderStatus::Fresh);
+            auth_provider.state.auth_status = Some(auth_status.into());
+            let auth_report = report(vec![auth_provider.clone()]);
+            for (columns, rows) in [(36, 23), (20, 12)] {
+                let plain = DashboardConfig::default();
+                let colored = DashboardConfig {
+                    color: true,
+                    ..DashboardConfig::default()
+                };
+                let lines = render_lines(&auth_report, columns, rows, &plain);
+                assert_eq!(lines[1].trim_end(), "? Limits non-current");
+                assert!(
+                    lines
+                        .iter()
+                        .any(|line| line.starts_with("> codex · sign-in"))
+                );
+                assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
+                assert!(lines.iter().all(|line| !line.starts_with(" !")));
+                assert_eq!(lines, render_lines(&auth_report, columns, rows, &colored));
+                let buffer = render_buffer(&auth_report, columns, rows, &plain);
+                assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .all(|cell| cell.modifier == Modifier::empty())
+                );
+            }
+
+            let mixed = report(vec![
+                provider("claude", Some(7.0), ProviderStatus::Fresh),
+                auth_provider,
+            ]);
+            for (columns, rows) in [(36, 23), (20, 12)] {
+                let lines = render_lines(&mixed, columns, rows, &DashboardConfig::default());
+                assert_eq!(lines[1].trim_end(), "! claude · 7% left");
+            }
+        }
     }
 
     #[test]
