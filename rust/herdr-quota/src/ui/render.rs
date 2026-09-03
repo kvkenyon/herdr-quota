@@ -180,11 +180,12 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
                 .as_deref()
                 .map(|value| format!(" · {value}"))
                 .unwrap_or_default();
+            let critical = window.percent_remaining.is_some_and(|value| value <= 10.0);
+            let marker = if critical { "!" } else { " " };
             let text = format!(
-                "  {label:<label_budget$} {}{meter}{reset}",
+                " {marker}{label:<label_budget$} {}{meter}{reset}",
                 percent(window.percent_remaining)
             );
-            let critical = window.percent_remaining.is_some_and(|value| value <= 10.0);
             rows.push(SemanticRow {
                 text,
                 style: if critical {
@@ -272,11 +273,23 @@ pub fn render_lines(
     height: u16,
     config: &DashboardConfig,
 ) -> Vec<String> {
+    render_frame(report, width, height, config)
+        .into_iter()
+        .map(|row| row.text)
+        .collect()
+}
+
+fn render_frame(
+    report: &QuotaReport,
+    width: u16,
+    height: u16,
+    config: &DashboardConfig,
+) -> Vec<SemanticRow> {
     let width = width.max(1) as usize;
     let height = height.max(1) as usize;
     let rows = semantic_rows(report, config, width as u16);
     let title = "Herdr Quota";
-    let (attention, _) = attention(report, config);
+    let (attention, attention_style) = attention(report, config);
     let controls = if width >= 30 {
         "j/k · PgUp/PgDn · r · q"
     } else {
@@ -287,26 +300,47 @@ pub fn render_lines(
     let body_end = footer.max(body_start);
     let viewport = body_end.saturating_sub(body_start);
     let scroll = config.scroll.min(rows.len().saturating_sub(viewport));
-    let mut output = vec![String::new(); height];
-    output[0] = truncate(title, width);
+    let mut output = vec![
+        SemanticRow {
+            text: String::new(),
+            style: RowStyle::Normal
+        };
+        height
+    ];
+    output[0] = SemanticRow {
+        text: truncate(title, width),
+        style: RowStyle::Heading,
+    };
     if height > 1 {
-        output[1] = truncate(&attention, width);
+        output[1] = SemanticRow {
+            text: truncate(&attention, width),
+            style: attention_style,
+        };
     }
     if height > 2 {
-        output[2] = truncate(&position(scroll, rows.len(), viewport), width);
+        output[2].text = truncate(&position(scroll, rows.len(), viewport), width);
     }
     if rows.is_empty() && viewport > 0 {
-        output[body_start] = truncate("? No providers shown · Press p for prefs", width);
+        output[body_start] = SemanticRow {
+            text: truncate("? No providers shown · Press p for prefs", width),
+            style: RowStyle::Warning,
+        };
     }
     for (index, row) in rows.iter().skip(scroll).take(viewport).enumerate() {
-        output[body_start + index] = truncate(&row.text, width);
+        output[body_start + index] = SemanticRow {
+            text: truncate(&row.text, width),
+            style: row.style,
+        };
     }
     if height > 1 {
-        output[footer] = truncate(controls, width);
+        output[footer].text = truncate(controls, width);
     }
     output
         .into_iter()
-        .map(|line| pad_cells(&line, width))
+        .map(|row| SemanticRow {
+            text: pad_cells(&row.text, width),
+            ..row
+        })
         .collect()
 }
 
@@ -335,28 +369,19 @@ fn pad_cells(value: &str, width: usize) -> String {
 }
 
 struct Dashboard<'a> {
-    lines: &'a [String],
+    rows: &'a [SemanticRow],
     config: &'a DashboardConfig,
 }
 
 impl Widget for Dashboard<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
-        for (y, line) in self.lines.iter().take(area.height as usize).enumerate() {
-            let style = if y == 0 {
-                RowStyle::Heading
-            } else if line.starts_with('!') {
-                RowStyle::Critical
-            } else if line.starts_with('?') {
-                RowStyle::Warning
-            } else {
-                RowStyle::Normal
-            };
+        for (y, row) in self.rows.iter().take(area.height as usize).enumerate() {
             buffer.set_stringn(
                 area.x,
                 area.y + y as u16,
-                line,
+                &row.text,
                 area.width as usize,
-                style.ratatui(self.config.color),
+                row.style.ratatui(self.config.color),
             );
         }
     }
@@ -369,11 +394,11 @@ pub fn render_buffer(
     height: u16,
     config: &DashboardConfig,
 ) -> Buffer {
-    let lines = render_lines(report, width, height, config);
+    let rows = render_frame(report, width, height, config);
     let area = Rect::new(0, 0, width.max(1), height.max(1));
     let mut buffer = Buffer::empty(area);
     Dashboard {
-        lines: &lines,
+        rows: &rows,
         config,
     }
     .render(area, &mut buffer);
@@ -412,12 +437,45 @@ pub fn preview_svg(lines: &[String], width: u16, height: u16) -> String {
 /// Drive the interactive Crossterm dashboard. `j`/`k`, Page keys, `r`, `q`, and Escape are local.
 pub fn dashboard(report: &QuotaReport) -> io::Result<()> {
     enable_raw_mode()?;
+    let mut session = TerminalSession {
+        raw: true,
+        alternate: false,
+    };
     let mut stdout = io::stdout();
+    session.alternate = true;
     execute!(stdout, EnterAlternateScreen)?;
     let result = dashboard_loop(&mut stdout, report);
-    disable_raw_mode()?;
-    execute!(stdout, LeaveAlternateScreen)?;
-    result
+    let cleanup = session.restore(&mut stdout);
+    result.and(cleanup)
+}
+
+struct TerminalSession {
+    raw: bool,
+    alternate: bool,
+}
+
+impl TerminalSession {
+    fn restore(&mut self, stdout: &mut Stdout) -> io::Result<()> {
+        let leave = if self.alternate {
+            self.alternate = false;
+            execute!(stdout, LeaveAlternateScreen)
+        } else {
+            Ok(())
+        };
+        let raw = if self.raw {
+            self.raw = false;
+            disable_raw_mode()
+        } else {
+            Ok(())
+        };
+        leave.and(raw)
+    }
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        let _ = self.restore(&mut io::stdout());
+    }
 }
 
 fn dashboard_loop(stdout: &mut Stdout, report: &QuotaReport) -> io::Result<()> {
@@ -430,10 +488,10 @@ fn dashboard_loop(stdout: &mut Stdout, report: &QuotaReport) -> io::Result<()> {
     loop {
         terminal.draw(|frame| {
             let area = frame.area();
-            let lines = render_lines(report, area.width, area.height, &config);
+            let rows = render_frame(report, area.width, area.height, &config);
             frame.render_widget(
                 Dashboard {
-                    lines: &lines,
+                    rows: &rows,
                     config: &config,
                 },
                 area,
@@ -585,12 +643,77 @@ mod tests {
 
     #[test]
     fn no_color_render_uses_default_foreground_styles() {
-        let report = report(vec![provider("claude", Some(9.0), ProviderStatus::Fresh)]);
+        let report = report(vec![
+            provider("claude", Some(9.0), ProviderStatus::Fresh),
+            provider("codex", Some(7.0), ProviderStatus::Fresh),
+            provider("cursor", Some(50.0), ProviderStatus::Unavailable),
+        ]);
         for (columns, rows) in [(20, 12), (36, 23)] {
-            let buffer = render_buffer(&report, columns, rows, &DashboardConfig::default());
+            let plain = DashboardConfig::default();
+            let colored = DashboardConfig {
+                color: true,
+                ..DashboardConfig::default()
+            };
+            assert_eq!(
+                render_lines(&report, columns, rows, &plain),
+                render_lines(&report, columns, rows, &colored)
+            );
+            let lines = render_lines(&report, columns, rows, &plain);
+            assert_eq!(
+                lines.iter().filter(|line| line.starts_with(" !")).count(),
+                2
+            );
+            assert!(lines.iter().any(|line| line.starts_with("> cursor")));
+            let buffer = render_buffer(&report, columns, rows, &plain);
             assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
             assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
+            assert!(
+                buffer
+                    .content
+                    .iter()
+                    .all(|cell| cell.modifier == Modifier::empty())
+            );
         }
+    }
+
+    #[test]
+    fn colored_buffer_preserves_semantic_row_styles() {
+        let report = report(vec![
+            provider("claude", Some(9.0), ProviderStatus::Fresh),
+            provider("codex", Some(7.0), ProviderStatus::Fresh),
+            provider("cursor", Some(50.0), ProviderStatus::Unavailable),
+        ]);
+        let config = DashboardConfig {
+            color: true,
+            ..DashboardConfig::default()
+        };
+        let lines = render_lines(&report, 36, 23, &config);
+        let buffer = render_buffer(&report, 36, 23, &config);
+        let row_style = |prefix: &str| {
+            let y = lines
+                .iter()
+                .position(|line| line.starts_with(prefix))
+                .unwrap();
+            buffer.content[y * 36].style()
+        };
+
+        let critical_rows: Vec<_> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| line.starts_with(" !"))
+            .collect();
+        assert_eq!(critical_rows.len(), 2);
+        for (y, _) in critical_rows {
+            let style = buffer.content[y * 36].style();
+            assert_eq!(style.fg, Some(Color::Red));
+            assert!(style.add_modifier.contains(Modifier::BOLD));
+        }
+        let warning = row_style("> cursor");
+        assert_eq!(warning.fg, Some(Color::Yellow));
+        assert!(warning.add_modifier.contains(Modifier::BOLD));
+        let heading = row_style("> claude");
+        assert_eq!(heading.fg, Some(Color::Reset));
+        assert!(heading.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
