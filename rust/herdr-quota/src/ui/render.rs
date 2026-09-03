@@ -229,18 +229,29 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
                         },
                         label_budget,
                     );
-                    let meter = if width >= 30 && tier.displayed_percent.is_some() {
-                        format!(" [{}]", gauge(tier.displayed_percent, 6))
-                    } else {
-                        String::new()
-                    };
-                    let conclusion = match tier.conclusion {
+                    let percent = percent(tier.percent_remaining);
+                    let candidate_conclusion = match tier.conclusion {
                         TierConclusion::NotReported => " · not reported",
                         TierConclusion::OnPace => " · on pace",
                         TierConclusion::Ahead { .. } => " · ahead",
                         TierConclusion::Spend { .. } => " · spend",
                         TierConclusion::Unknown => "",
                     };
+                    let base_width = 2 + label_budget + 1 + UnicodeWidthStr::width(&*percent);
+                    let conclusion = if base_width + UnicodeWidthStr::width(candidate_conclusion)
+                        <= width as usize
+                    {
+                        candidate_conclusion
+                    } else {
+                        ""
+                    };
+                    let meter =
+                        if conclusion.is_empty() && width >= 30 && tier.displayed_percent.is_some()
+                        {
+                            format!(" [{}]", gauge(tier.displayed_percent, 6))
+                        } else {
+                            String::new()
+                        };
                     let critical = tier.percent_remaining.is_some_and(|value| value <= 10.0);
                     let warning = matches!(tier.conclusion, TierConclusion::NotReported);
                     let marker = if critical {
@@ -253,7 +264,7 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
                     rows.push(SemanticRow {
                         text: format!(
                             " {marker}{label:<label_budget$} {}{meter}{conclusion}",
-                            percent(tier.percent_remaining)
+                            percent
                         ),
                         style: if critical {
                             RowStyle::Critical
@@ -1251,7 +1262,11 @@ mod tests {
                 .iter()
                 .any(|line| line.starts_with("> Claude · partial data"))
         );
+        assert!(lines.iter().any(|line| line.contains("· ahead")));
         assert!(!lines.iter().any(|line| line.starts_with(" ~ last known")));
+
+        let compact = render_lines(&report, 20, 12, &DashboardConfig::default());
+        assert!(!compact.iter().any(|line| line.contains("· ah")));
     }
 
     #[test]
