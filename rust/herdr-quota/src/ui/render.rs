@@ -806,9 +806,11 @@ fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Ve
                     } else {
                         format!(" {marker}{label} {percent}")
                     };
-                    let meter = (width >= 30 && tier.displayed_percent.is_some())
-                        .then(|| format!(" [{}]", gauge(tier.displayed_percent, 6)))
-                        .unwrap_or_default();
+                    let meter = if width >= 30 && tier.displayed_percent.is_some() {
+                        format!(" [{}]", gauge(tier.displayed_percent, 6))
+                    } else {
+                        String::new()
+                    };
                     rows.push(SemanticRow {
                         text: fitting(
                             [
