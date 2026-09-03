@@ -221,6 +221,17 @@ pub struct HistoryView {
     pub evidence: Option<HistoryEvidence>,
 }
 
+/// A compact selected-provider trace derived only from retained safe facts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryTrend {
+    /// Six to eight one-cell samples, oldest to newest. `·` is an unsafe gap.
+    pub cells: String,
+    /// The material consequence selected by the existing evidence ranking.
+    pub evidence: HistoryEvidence,
+    /// Time between the two samples that produced `evidence`.
+    pub elapsed_seconds: i64,
+}
+
 pub(crate) fn timestamp_millis(value: &str) -> Option<i128> {
     PrimitiveDateTime::parse(value, HISTORY_TIMESTAMP_FORMAT)
         .ok()
@@ -675,6 +686,66 @@ fn evidence_for_fact(
     None
 }
 
+fn trend_cell(remaining: f64) -> char {
+    const LEVELS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let index =
+        ((remaining.clamp(0.0, 100.0) / 100.0) * (LEVELS.len() - 1) as f64).round() as usize;
+    LEVELS[index]
+}
+
+/// Build one bounded material trend for a selected provider.
+///
+/// This does not create another evidence policy: it reuses the same immediate
+/// comparison, materiality thresholds, and ranking as [`history_view`]. Older
+/// samples only shape the trace, and unsafe or different-cycle samples become
+/// visible gaps rather than being joined or estimated.
+pub fn history_trend(
+    document: &HistoryDocument,
+    provider: MarketedProvider,
+) -> Option<HistoryTrend> {
+    const MIN_CELLS: usize = 6;
+    const MAX_CELLS: usize = 8;
+
+    if document.schema_version != HISTORY_SCHEMA_VERSION || document.snapshots.len() < MIN_CELLS {
+        return None;
+    }
+    let current_snapshot = document.snapshots.last()?;
+    let current_provider = current_snapshot.providers.iter().find(|item| {
+        item.provider.marketed() == provider
+            && item.data_health == HistoryDataHealth::Current
+            && item.auth_eligible
+    })?;
+    let (_, evidence, current_fact) = current_provider
+        .facts
+        .iter()
+        .filter_map(|fact| {
+            evidence_for_fact(&document.snapshots, current_provider, fact)
+                .map(|(rank, evidence)| (rank, evidence, fact))
+        })
+        .min_by_key(|(rank, _, _)| *rank)?;
+    let start = document.snapshots.len().saturating_sub(MAX_CELLS);
+    let cells = document.snapshots[start..]
+        .iter()
+        .map(|snapshot| {
+            fact_in(snapshot, current_provider.provider, &current_fact.scope)
+                .filter(|fact| fact.reset_at == current_fact.reset_at)
+                .map_or('·', |fact| trend_cell(fact.remaining))
+        })
+        .collect::<String>();
+    let previous_at =
+        timestamp_millis(&document.snapshots[document.snapshots.len() - 2].captured_at)?;
+    let current_at = timestamp_millis(&current_snapshot.captured_at)?;
+    let elapsed_seconds = i64::try_from((current_at - previous_at) / 1_000)
+        .ok()
+        .filter(|seconds| *seconds > 0)?;
+
+    Some(HistoryTrend {
+        cells,
+        evidence,
+        elapsed_seconds,
+    })
+}
+
 /// Select the highest-priority material change from the latest two samples.
 pub fn history_view(document: &HistoryDocument, availability: HistoryAvailability) -> HistoryView {
     let Some(current) = document.snapshots.last() else {
@@ -1022,5 +1093,73 @@ mod tests {
             history_view(&document, HistoryAvailability::Ready).evidence,
             None
         );
+    }
+
+    #[test]
+    fn selected_provider_trend_is_bounded_same_cycle_and_gap_preserving() {
+        let reset = "2026-09-09T12:00:00.000Z";
+        let mut snapshots = (0..8)
+            .map(|index| {
+                let mut item = fact(82.0 - index as f64 * 3.0);
+                item.reset_at = Some(reset.to_owned());
+                snapshot(
+                    &format!("2026-09-02T12:{:02}:00.000Z", index * 5),
+                    vec![item],
+                )
+            })
+            .collect::<Vec<_>>();
+        snapshots[2].providers[0].data_health = HistoryDataHealth::Unavailable;
+        snapshots[2].providers[0].auth_eligible = false;
+        snapshots[2].providers[0].facts.clear();
+        snapshots[4].providers[0].facts[0].reset_at = Some("2026-09-08T12:00:00.000Z".to_owned());
+        snapshots[6].providers[0].facts[0].remaining = 64.0;
+        snapshots[7].providers[0].facts[0].remaining = 46.0;
+        let document = HistoryDocument {
+            schema_version: HISTORY_SCHEMA_VERSION,
+            snapshots,
+        };
+
+        let trend = history_trend(&document, MarketedProvider::Claude)
+            .expect("the immediate material drop is eligible");
+
+        assert_eq!(trend.cells.chars().count(), 8);
+        assert_eq!(trend.cells.chars().nth(2), Some('·'));
+        assert_eq!(trend.cells.chars().nth(4), Some('·'));
+        assert_eq!(trend.elapsed_seconds, 5 * 60);
+        assert_eq!(trend.evidence.kind, HistoryEvidenceKind::RemainingDrop);
+        assert_eq!(trend.evidence.amount, Some(18));
+        assert_eq!(
+            history_view(&document, HistoryAvailability::Ready).evidence,
+            Some(trend.evidence)
+        );
+    }
+
+    #[test]
+    fn selected_provider_trend_suppresses_short_or_non_current_history() {
+        let snapshots = (0..6)
+            .map(|index| {
+                snapshot(
+                    &format!("2026-09-02T12:{:02}:00.000Z", index * 5),
+                    vec![fact(if index == 5 { 40.0 } else { 60.0 })],
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut non_current = HistoryDocument {
+            schema_version: HISTORY_SCHEMA_VERSION,
+            snapshots,
+        };
+        let mut incompatible = non_current.clone();
+        incompatible.schema_version += 1;
+        assert_eq!(history_trend(&incompatible, MarketedProvider::Claude), None);
+
+        non_current.snapshots.last_mut().unwrap().providers[0].data_health =
+            HistoryDataHealth::Stale;
+        non_current.snapshots.last_mut().unwrap().providers[0]
+            .facts
+            .clear();
+        assert_eq!(history_trend(&non_current, MarketedProvider::Claude), None);
+
+        non_current.snapshots.pop();
+        assert_eq!(history_trend(&non_current, MarketedProvider::Claude), None);
     }
 }

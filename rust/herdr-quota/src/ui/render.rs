@@ -19,6 +19,7 @@ use ratatui::{
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::domain::{
+    history_evidence::{HistoryDocument, HistoryEvidenceKind, HistoryTrend, history_trend},
     provider::{
         EffectiveAvailability, EffectiveStatus, MarketedProvider, PaceStatus, ProjectionConfidence,
         ProviderQuota, ProviderStatus, RunwayStatus, SemanticsStatus,
@@ -722,7 +723,80 @@ fn overview_evidence_rows(
     rows
 }
 
-fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
+fn compact_duration(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    if seconds >= 60 * 60 {
+        let rounded = (seconds as f64 / (60 * 60) as f64).round() as i64;
+        if seconds % (60 * 60) == 0 {
+            format!("{rounded}h")
+        } else {
+            format!("~{rounded}h")
+        }
+    } else if seconds >= 60 {
+        let rounded = (seconds as f64 / 60.0).round() as i64;
+        if seconds % 60 == 0 {
+            format!("{rounded}m")
+        } else {
+            format!("~{rounded}m")
+        }
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+fn trend_consequence(trend: &HistoryTrend) -> String {
+    let elapsed = compact_duration(trend.elapsed_seconds);
+    let amount = trend.evidence.amount.unwrap_or_default().abs();
+    match trend.evidence.kind {
+        HistoryEvidenceKind::Reset => "↻ reset".into(),
+        HistoryEvidenceKind::RemainingDrop => format!("↓ {amount}pp/{elapsed}"),
+        HistoryEvidenceKind::RemainingGain => format!("↑ {amount}pp/{elapsed}"),
+        HistoryEvidenceKind::PaceWorse => format!("↓ pace/{elapsed}"),
+        HistoryEvidenceKind::PaceBetter => format!("↑ pace/{elapsed}"),
+        HistoryEvidenceKind::ProjectionEarlier => trend.evidence.amount.map_or_else(
+            || "↘ out sooner".into(),
+            |value| format!("↘ out {} sooner", compact_duration(value.abs())),
+        ),
+        HistoryEvidenceKind::ProjectionLater => trend.evidence.amount.map_or_else(
+            || "↗ out later".into(),
+            |value| format!("↗ out {} later", compact_duration(value.abs())),
+        ),
+    }
+}
+
+fn trend_row(
+    history: Option<&HistoryDocument>,
+    provider: MarketedProvider,
+    width: usize,
+) -> Option<SemanticRow> {
+    if width < 30 {
+        return None;
+    }
+    let trend = history_trend(history?, provider)?;
+    let consequence = trend_consequence(&trend);
+    let subject = trend.evidence.limit.as_deref().or_else(|| {
+        (!matches!(trend.evidence.scope.as_str(), "All models" | "All products"))
+            .then_some(trend.evidence.scope.as_str())
+    });
+    let mut candidates = Vec::new();
+    if let Some(subject) = subject {
+        candidates.push(format!("  {}  {subject} {consequence}", trend.cells));
+    }
+    candidates.push(format!("  {}  {consequence}", trend.cells));
+    candidates.push(format!("  {} {consequence}", trend.cells));
+    let text = fitting(candidates, width);
+    (!text.is_empty()).then_some(SemanticRow {
+        text,
+        style: RowStyle::Normal,
+    })
+}
+
+fn detail_rows_with_history(
+    report: &QuotaReport,
+    history: Option<&HistoryDocument>,
+    config: &DashboardConfig,
+    width: u16,
+) -> Vec<SemanticRow> {
     let model = visible_model(report, config);
     let Some(section) = model.providers.get(
         config
@@ -761,6 +835,14 @@ fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Ve
                 RowStyle::Heading
             },
         });
+        if report
+            .providers
+            .iter()
+            .find(|provider| provider_id(provider) == Some(section.provider))
+            .is_some_and(|provider| has_decision_safe_quota(section, provider))
+        {
+            rows.extend(trend_row(history, section.provider, width as usize));
+        }
         match &section.detail {
             ProviderDetail::Recovery { instruction } => rows.push(SemanticRow {
                 text: fitting(
@@ -863,12 +945,21 @@ fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Ve
     rows
 }
 
-fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
+fn semantic_rows_with_history(
+    report: &QuotaReport,
+    history: Option<&HistoryDocument>,
+    config: &DashboardConfig,
+    width: u16,
+) -> Vec<SemanticRow> {
     match config.view {
         DashboardView::Overview => overview_rows(report, config, width),
-        DashboardView::Details => detail_rows(report, config, width),
+        DashboardView::Details => detail_rows_with_history(report, history, config, width),
         DashboardView::Preferences | DashboardView::TransitionReview => Vec::new(),
     }
+}
+
+fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
+    semantic_rows_with_history(report, None, config, width)
 }
 
 fn decision_constraint<'a>(
@@ -1093,7 +1184,18 @@ pub fn render_lines(
     height: u16,
     config: &DashboardConfig,
 ) -> Vec<String> {
-    render_frame(Some(report), width, height, config)
+    render_lines_with_history(report, None, width, height, config)
+}
+
+/// Render with an optional retained safe-history document.
+pub fn render_lines_with_history(
+    report: &QuotaReport,
+    history: Option<&HistoryDocument>,
+    width: u16,
+    height: u16,
+    config: &DashboardConfig,
+) -> Vec<String> {
+    render_frame(Some(report), history, width, height, config)
         .into_iter()
         .map(|row| row.text)
         .collect()
@@ -1106,7 +1208,7 @@ pub fn render_dashboard_lines(
     height: u16,
     config: &DashboardConfig,
 ) -> Vec<String> {
-    render_frame(report, width, height, config)
+    render_frame(report, None, width, height, config)
         .into_iter()
         .map(|row| row.text)
         .collect()
@@ -1221,6 +1323,7 @@ fn failure_line(config: &DashboardConfig, width: usize) -> Option<String> {
 
 fn render_frame(
     report: Option<&QuotaReport>,
+    history: Option<&HistoryDocument>,
     width: u16,
     height: u16,
     config: &DashboardConfig,
@@ -1257,7 +1360,7 @@ fn render_frame(
     } else {
         match config.view {
             DashboardView::Overview | DashboardView::Details => {
-                semantic_rows(report_value, config, width as u16)
+                semantic_rows_with_history(report_value, history, config, width as u16)
             }
             DashboardView::TransitionReview => vec![SemanticRow {
                 text: "No new transition events".into(),
@@ -1477,7 +1580,7 @@ pub(super) fn draw_dashboard(
     config: &DashboardConfig,
 ) {
     let area = frame.area();
-    let rows = render_frame(report, area.width, area.height, config);
+    let rows = render_frame(report, None, area.width, area.height, config);
     frame.render_widget(
         Dashboard {
             rows: &rows,
@@ -1508,7 +1611,7 @@ pub fn render_buffer(
     height: u16,
     config: &DashboardConfig,
 ) -> Buffer {
-    let rows = render_frame(Some(report), width, height, config);
+    let rows = render_frame(Some(report), None, width, height, config);
     let area = Rect::new(0, 0, width.max(1), height.max(1));
     let mut buffer = Buffer::empty(area);
     Dashboard {
@@ -1526,7 +1629,7 @@ pub fn render_dashboard_buffer(
     height: u16,
     config: &DashboardConfig,
 ) -> Buffer {
-    let rows = render_frame(report, width, height, config);
+    let rows = render_frame(report, None, width, height, config);
     let area = Rect::new(0, 0, width.max(1), height.max(1));
     let mut buffer = Buffer::empty(area);
     Dashboard {
@@ -1699,10 +1802,42 @@ pub(super) fn handle_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::history_evidence::{
+        HISTORY_SCHEMA_VERSION, HistoryDataHealth, HistoryEvidence, HistoryFact,
+        HistoryProviderName, HistoryProviderSnapshot, HistorySnapshot,
+    };
     use crate::domain::provider::{
         EffectiveAvailability, EffectivePace, ProviderState, QuotaWindow, Runway, WindowPace,
     };
     use crate::store::settings::DashboardSettings;
+
+    fn trend_history() -> HistoryDocument {
+        let provider = HistoryProviderName::new(MarketedProvider::Claude);
+        let snapshots = [80.0, 76.0, 72.0, 68.0, 64.0, 46.0]
+            .into_iter()
+            .enumerate()
+            .map(|(index, remaining)| HistorySnapshot {
+                captured_at: format!("2026-09-02T12:{:02}:00.000Z", index * 5),
+                providers: vec![HistoryProviderSnapshot {
+                    provider,
+                    data_health: HistoryDataHealth::Current,
+                    auth_eligible: true,
+                    facts: vec![HistoryFact {
+                        scope: "All models".into(),
+                        limit: Some("Week".into()),
+                        remaining,
+                        reset_at: None,
+                        pace: None,
+                        runway: None,
+                    }],
+                }],
+            })
+            .collect();
+        HistoryDocument {
+            schema_version: HISTORY_SCHEMA_VERSION,
+            snapshots,
+        }
+    }
 
     fn provider(id: &str, remaining: Option<f64>, status: ProviderStatus) -> ProviderQuota {
         ProviderQuota {
@@ -2801,6 +2936,82 @@ mod tests {
         handle_key(&mut config, KeyCode::Esc, 1);
         assert_eq!(config.startup_view, StartupView::Details);
         assert_eq!(config.view, DashboardView::Details);
+    }
+
+    #[test]
+    fn detail_trend_is_plain_bounded_and_elides_before_decision_copy() {
+        let report = report(vec![provider("claude", Some(46.0), ProviderStatus::Fresh)]);
+        let history = trend_history();
+        let mut plain = detail_config();
+        plain.color = false;
+
+        let wide = render_lines_with_history(&report, Some(&history), 36, 12, &plain);
+        let trend = wide
+            .iter()
+            .find(|line| line.contains("18pp/5m"))
+            .expect("roomy selected-provider detail shows the trend");
+        let cells = trend
+            .split_whitespace()
+            .next()
+            .expect("trace cells precede consequence");
+        assert!((6..=10).contains(&cells.chars().count()));
+        assert!(trend.contains("↓ 18pp/5m"));
+        assert!(!trend.contains("\u{1b}["));
+
+        let without_history = render_lines(&report, 36, 12, &plain);
+        assert_eq!(wide[1], without_history[1], "decision copy is unchanged");
+        let narrow = render_lines_with_history(&report, Some(&history), 20, 12, &plain);
+        assert_eq!(narrow, render_lines(&report, 20, 12, &plain));
+    }
+
+    #[test]
+    fn trend_consequence_keeps_projection_precision_coarse() {
+        let trend = HistoryTrend {
+            cells: "██████".into(),
+            evidence: HistoryEvidence {
+                kind: HistoryEvidenceKind::ProjectionEarlier,
+                provider: HistoryProviderName::new(MarketedProvider::Claude),
+                scope: "All models".into(),
+                limit: Some("Week".into()),
+                amount: Some(3 * 60 * 60),
+            },
+            elapsed_seconds: 5 * 60,
+        };
+        assert_eq!(trend_consequence(&trend), "↘ out 3h sooner");
+    }
+
+    #[test]
+    fn detail_trend_marks_history_gaps_and_suppresses_unsafe_live_state() {
+        let report = report(vec![provider("claude", Some(46.0), ProviderStatus::Fresh)]);
+        let mut history = trend_history();
+        history.snapshots[2].providers[0].data_health = HistoryDataHealth::Unavailable;
+        history.snapshots[2].providers[0].auth_eligible = false;
+        history.snapshots[2].providers[0].facts.clear();
+        history.snapshots[3].providers[0].facts[0].reset_at =
+            Some("2026-09-09T12:00:00.000Z".into());
+        let lines = render_lines_with_history(&report, Some(&history), 36, 12, &detail_config());
+        let trend = lines
+            .iter()
+            .find(|line| line.contains("18pp/5m"))
+            .expect("material evidence remains current across older gaps");
+        assert!(trend.contains("··"));
+
+        let mut partial = report.clone();
+        partial.providers[0].semantics_status = Some(SemanticsStatus::Partial);
+        assert!(
+            !render_lines_with_history(&partial, Some(&history), 36, 12, &detail_config())
+                .iter()
+                .any(|line| line.contains("18pp"))
+        );
+
+        let mut stale = report;
+        stale.providers[0].state.status = ProviderStatus::Stale;
+        stale.providers[0].state.stale = true;
+        assert!(
+            !render_lines_with_history(&stale, Some(&history), 36, 12, &detail_config())
+                .iter()
+                .any(|line| line.contains("18pp"))
+        );
     }
 
     #[test]
