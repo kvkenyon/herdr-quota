@@ -240,10 +240,10 @@ where
                     let _ = acknowledged.send(());
                 }
                 Some(Command::Close(acknowledged)) => {
+                    closed.store(true, Ordering::Release);
                     tasks.abort_all();
                     let mut state = publication_state.lock().await;
                     state.closed = true;
-                    closed.store(true, Ordering::Release);
                     generation = generation.saturating_add(1);
                     state.generation = generation;
                     current_generation.store(generation, Ordering::Release);
@@ -252,10 +252,10 @@ where
                     return;
                 }
                 None => {
+                    closed.store(true, Ordering::Release);
                     tasks.abort_all();
                     let mut state = publication_state.lock().await;
                     state.closed = true;
-                    closed.store(true, Ordering::Release);
                     return;
                 }
             },
