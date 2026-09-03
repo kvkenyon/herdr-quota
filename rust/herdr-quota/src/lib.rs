@@ -18,8 +18,15 @@ mod unix_signal;
 pub enum Command {
     /// Print the package version.
     Version,
-    /// Reserve a fixture input for a later preview implementation.
-    Preview { fixture: PathBuf },
+    /// Render a sanitized fixture as deterministic terminal text.
+    Preview {
+        fixture: PathBuf,
+        width: u16,
+        height: u16,
+        svg: Option<PathBuf>,
+    },
+    /// Open the rendered fixture in a terminal dashboard.
+    Dashboard { fixture: PathBuf },
 }
 
 /// An error from command-line parsing.
@@ -54,8 +61,11 @@ where
 
     match arguments.as_slice() {
         [flag] if flag == "--version" => Ok(Command::Version),
-        [command, flag, fixture] if command == "preview" && flag == "--fixture" => {
-            Ok(Command::Preview {
+        [command, flag, fixture, rest @ ..] if command == "preview" && flag == "--fixture" => {
+            parse_preview(PathBuf::from(fixture), rest)
+        }
+        [command, flag, fixture] if command == "dashboard" && flag == "--fixture" => {
+            Ok(Command::Dashboard {
                 fixture: PathBuf::from(fixture),
             })
         }
@@ -65,7 +75,7 @@ where
 
 /// Return command help for unsupported input.
 pub fn usage() -> &'static str {
-    "usage: herdr-quota --version | herdr-quota preview --fixture <path>"
+    "usage: herdr-quota --version | herdr-quota preview --fixture <path> [--width <cells> --height <rows> --svg <path>] | herdr-quota dashboard --fixture <path>"
 }
 
 /// Return the package version.
@@ -73,17 +83,34 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Return the placeholder text for the fixture-only preview command.
-pub fn preview_message(fixture: &std::path::Path) -> String {
-    format!(
-        "preview placeholder: fixture '{}' is not rendered yet",
-        fixture.display()
-    )
+fn parse_preview(fixture: PathBuf, rest: &[String]) -> Result<Command, ParseError> {
+    let mut width = 36;
+    let mut height = 23;
+    let mut svg = None;
+    let mut arguments = rest.iter();
+    while let Some(flag) = arguments.next() {
+        let value = arguments.next().ok_or_else(|| ParseError::new(usage()))?;
+        match flag.as_str() {
+            "--width" => width = value.parse().map_err(|_| ParseError::new(usage()))?,
+            "--height" => height = value.parse().map_err(|_| ParseError::new(usage()))?,
+            "--svg" => svg = Some(PathBuf::from(value)),
+            _ => return Err(ParseError::new(usage())),
+        }
+    }
+    if width == 0 || height == 0 {
+        return Err(ParseError::new(usage()));
+    }
+    Ok(Command::Preview {
+        fixture,
+        width,
+        height,
+        svg,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, parse_command, preview_message, usage, version};
+    use super::{Command, parse_command, usage, version};
     use std::path::PathBuf;
 
     #[test]
@@ -97,6 +124,9 @@ mod tests {
             parse_command(["preview", "--fixture", "test/fixture.json"]),
             Ok(Command::Preview {
                 fixture: PathBuf::from("test/fixture.json"),
+                width: 36,
+                height: 23,
+                svg: None,
             })
         );
     }
@@ -115,10 +145,25 @@ mod tests {
     }
 
     #[test]
-    fn labels_preview_as_a_placeholder() {
+    fn parses_preview_dimensions_and_svg() {
         assert_eq!(
-            preview_message(std::path::Path::new("test/fixture.json")),
-            "preview placeholder: fixture 'test/fixture.json' is not rendered yet"
+            parse_command([
+                "preview",
+                "--fixture",
+                "test/fixture.json",
+                "--width",
+                "20",
+                "--height",
+                "12",
+                "--svg",
+                "docs/preview.svg"
+            ]),
+            Ok(Command::Preview {
+                fixture: PathBuf::from("test/fixture.json"),
+                width: 20,
+                height: 12,
+                svg: Some(PathBuf::from("docs/preview.svg")),
+            })
         );
     }
 }

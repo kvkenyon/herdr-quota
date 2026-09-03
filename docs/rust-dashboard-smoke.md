@@ -16,10 +16,10 @@ tokens, paths, raw collector output, or provider account data.
 Run the Rust `dashboard` subcommand in a real PTY. Set the PTY to each exact
 size before launch:
 
-| Run    | PTY size             | Required checks                                                 |
-| ------ | -------------------- | --------------------------------------------------------------- |
-| Wide   | 36 columns × 23 rows | Open, first render, refresh, feature path, navigation, and quit |
-| Narrow | 20 columns × 12 rows | Open, first render, feature path, row reachability, and quit    |
+| Run    | PTY size             | Required checks                                              |
+| ------ | -------------------- | ------------------------------------------------------------ |
+| Wide   | 36 columns × 23 rows | Open, first render, feature path, navigation, and quit       |
+| Narrow | 20 columns × 12 rows | Open, first render, feature path, row reachability, and quit |
 
 For both runs, check these points that apply to the shipped feature:
 
@@ -64,3 +64,19 @@ brief.
 Each Rust PR handoff states the two direct-run results, the platform, and the
 feature path checked. The cutover handoff also states the guarded named-lab
 result. The evidence is a manual completion record, not a comparison harness.
+
+## PR 14 renderer record
+
+Date: 2026-09-02. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
+`herdr-quota` at `501a750` plus this renderer worktree, run directly through a
+native `script` PTY using the sanitized `complete.json` schema-v5 fixture.
+
+| PTY size | Steps                                                    | Result                                                                                                              |
+| -------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 36 × 23  | Opened `dashboard`, moved down twice, then quit with `q` | Title, attention, position, tier rows, and full controls stayed visible; the dashboard exited and restored the PTY. |
+| 20 × 12  | Opened `dashboard`, moved down, then quit with `q`       | Compact controls and pinned context stayed readable; the dashboard exited and restored the PTY.                     |
+
+The static fixture has no collector, so refresh is intentionally unavailable.
+Semantic-row reachability and cell-width bounds are
+covered by ordinary Rust unit tests; this record is a direct dashboard smoke,
+not a comparison against the TypeScript runtime.

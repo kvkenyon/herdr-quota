@@ -56,9 +56,10 @@ item has separate parts. The later PR is the completion owner.
 
 At the FI-10/FI-11 Ratatui renderer seam, explicitly disabled providers are
 excluded from both the hidden-provider summary count and its shared row/scroll
-accounting. Unavailable non-disabled marketed providers remain countable,
-unsupported providers remain excluded at the schema boundary, and a zero count
-renders no summary line.
+accounting. Visible unavailable providers retain a textual recovery state and
+do not count as hidden. A marketed provider counts only when it is genuinely
+not rendered for a separate non-user-disabled reason; a zero count renders no
+summary line.
 
 PR 18 is the manifest cutover. It retires all listed items in the released
 product only after the owner PRs are complete and the cutover smoke is
