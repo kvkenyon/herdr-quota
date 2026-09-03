@@ -247,22 +247,27 @@ where
                     let _ = acknowledged.send(());
                 }
                 Some(Command::Close(acknowledged)) => {
-                    closed.store(true, Ordering::Release);
-                    tasks.abort_all();
-                    let mut state = publication_state.lock().expect("publication lock");
-                    state.closed = true;
-                    generation = generation.saturating_add(1);
-                    state.generation = generation;
-                    current_generation.store(generation, Ordering::Release);
+                    {
+                        let mut state = publication_state.lock().expect("publication lock");
+                        closed.store(true, Ordering::Release);
+                        state.closed = true;
+                        generation = generation.saturating_add(1);
+                        state.generation = generation;
+                        current_generation.store(generation, Ordering::Release);
+                    }
                     worker.cancel_active();
+                    tasks.abort_all();
                     let _ = acknowledged.send(());
                     return;
                 }
                 None => {
-                    closed.store(true, Ordering::Release);
+                    {
+                        let mut state = publication_state.lock().expect("publication lock");
+                        closed.store(true, Ordering::Release);
+                        state.closed = true;
+                    }
+                    worker.cancel_active();
                     tasks.abort_all();
-                    let mut state = publication_state.lock().expect("publication lock");
-                    state.closed = true;
                     return;
                 }
             },
@@ -380,6 +385,7 @@ mod tests {
         starts: AtomicUsize,
         cancellations: AtomicUsize,
         successes: Mutex<Vec<&'static str>>,
+        attempts: Mutex<Vec<RefreshAttempt>>,
         post_started: Mutex<Vec<&'static str>>,
         published: Mutex<Vec<&'static str>>,
         failures: Mutex<Vec<&'static str>>,
@@ -396,6 +402,7 @@ mod tests {
                 starts: AtomicUsize::new(0),
                 cancellations: AtomicUsize::new(0),
                 successes: Mutex::new(Vec::new()),
+                attempts: Mutex::new(Vec::new()),
                 post_started: Mutex::new(Vec::new()),
                 published: Mutex::new(Vec::new()),
                 failures: Mutex::new(Vec::new()),
@@ -442,6 +449,7 @@ mod tests {
         fn on_success(&self, value: &&'static str, attempt: &RefreshAttempt) {
             if attempt.is_current() {
                 self.successes.lock().expect("lock").push(*value);
+                self.attempts.lock().expect("lock").push(attempt.clone());
             }
         }
 
@@ -517,6 +525,47 @@ mod tests {
             None
         );
         assert_eq!(published.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn close_linearizes_after_an_in_progress_publication() {
+        let worker = std::sync::Arc::new(TestWorker::new());
+        let collected = worker.collect_next();
+        let pending_post = worker.post_next();
+        let handle = open(std::sync::Arc::clone(&worker));
+        flush().await;
+        collected.send(Ok("first")).expect("receiver");
+        let attempt = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(attempt) = worker.attempts.lock().expect("lock").first().cloned() {
+                    return attempt;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("successful attempt");
+        let attempt_in_publication = attempt.clone();
+        let (entered_send, entered_receive) = std::sync::mpsc::channel();
+        let (release_send, release_receive) = std::sync::mpsc::channel();
+        let publication = std::thread::spawn(move || {
+            attempt_in_publication.publish(|| {
+                entered_send.send(()).expect("observer");
+                release_receive.recv().expect("release");
+                attempt_in_publication.is_current()
+            })
+        });
+        entered_receive.recv().expect("publication started");
+
+        let close_handle = handle.clone();
+        let close = tokio::spawn(async move { close_handle.close().await });
+        flush().await;
+        release_send.send(()).expect("publication");
+
+        assert_eq!(publication.join().expect("publication thread"), Some(true));
+        close.await.expect("close task");
+        assert_eq!(attempt.publish(|| ()), None);
+        assert!(pending_post.send(Ok("saved")).is_err());
     }
 
     #[tokio::test]
@@ -750,5 +799,19 @@ mod tests {
         flush().await;
         assert!(worker.successes.lock().expect("lock").is_empty());
         assert!(worker.scheduled.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropping_the_last_handle_cancels_active_work() {
+        let worker = std::sync::Arc::new(TestWorker::new());
+        let pending = worker.collect_next();
+        let handle = open(std::sync::Arc::clone(&worker));
+        flush().await;
+
+        drop(handle);
+        flush().await;
+
+        assert_eq!(worker.cancellations.load(Ordering::SeqCst), 1);
+        assert!(pending.send(Ok("late")).is_err());
     }
 }
