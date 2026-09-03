@@ -182,6 +182,11 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
     let model = dashboard_model(report, MeterMode::Remaining, &visibility);
     let mut rows = Vec::new();
     for section in model.providers {
+        let current = report
+            .providers
+            .iter()
+            .find(|provider| provider_id(provider) == Some(section.provider))
+            .is_some_and(has_current_quota);
         let annotation = section.annotation.as_ref().map(|value| value.text);
         rows.push(SemanticRow {
             text: annotation
@@ -204,7 +209,7 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
             }),
             ProviderDetail::Tiers(tiers) => {
                 for tier in tiers {
-                    if annotation.is_some() {
+                    if !current {
                         rows.push(SemanticRow {
                             text: format!(
                                 " ~ last known {} {}",
@@ -671,7 +676,7 @@ fn dashboard_loop(stdout: &mut Stdout, report: &QuotaReport) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::domain::provider::{
-        EffectiveAvailability, EffectivePace, ProviderState, QuotaWindow, Runway,
+        EffectiveAvailability, EffectivePace, ProviderState, QuotaWindow, Runway, WindowPace,
     };
 
     fn provider(id: &str, remaining: Option<f64>, status: ProviderStatus) -> ProviderQuota {
@@ -1222,6 +1227,31 @@ mod tests {
                 .any(|line| line.starts_with("> OpenAI Codex · unavailable"))
         );
         assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
+    }
+
+    #[test]
+    fn partial_annotation_keeps_current_semantic_tiers() {
+        let mut claude = provider("claude", Some(50.0), ProviderStatus::Fresh);
+        claude.semantics_status = Some(SemanticsStatus::Partial);
+        claude.windows[0].pace = Some(WindowPace {
+            status: PaceStatus::Ahead,
+            reserve_percent_points: None,
+            burn_multiple: None,
+            projected_exhausted_at: None,
+            projection_confidence: None,
+        });
+
+        let report = report(vec![claude]);
+        let semantic = semantic_rows(&report, &DashboardConfig::default(), 36);
+        assert!(semantic.iter().any(|row| row.text.contains("· ahead")));
+
+        let lines = render_lines(&report, 36, 23, &DashboardConfig::default());
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.starts_with("> Claude · partial data"))
+        );
+        assert!(!lines.iter().any(|line| line.starts_with(" ~ last known")));
     }
 
     #[test]
