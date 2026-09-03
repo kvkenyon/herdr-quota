@@ -53,6 +53,7 @@ struct RuntimeState {
     settings_availability: SettingsAvailability,
     settings_store: Option<SettingsStore>,
     history: LocalHistory,
+    history_matches_report: bool,
     transition_store: Option<TransitionStore>,
     transitions: TransitionView,
     preferences: Option<PreferencesState>,
@@ -98,6 +99,7 @@ impl RuntimeState {
             settings_availability: loaded.availability,
             settings_store,
             history,
+            history_matches_report: false,
             transition_store,
             transitions,
             preferences: None,
@@ -154,10 +156,9 @@ impl RefreshWorker for DashboardWorker {
         let report = report.clone();
         if attempt
             .publish(|| {
-                app_state::reduce(
-                    &mut lock(&state).app,
-                    AppAction::CollectionSucceeded { report },
-                );
+                let mut state = lock(&state);
+                app_state::reduce(&mut state.app, AppAction::CollectionSucceeded { report });
+                state.history_matches_report = false;
             })
             .is_some()
         {
@@ -175,6 +176,12 @@ impl RefreshWorker for DashboardWorker {
             .publish(|| {
                 let mut state = lock(&state);
                 let history_view = state.history.record(&report);
+                state.history_matches_report = !matches!(
+                    history_view.availability,
+                    HistoryAvailability::Incompatible
+                        | HistoryAvailability::Unavailable
+                        | HistoryAvailability::NoUsableData
+                );
                 let history = state.history.current().cloned();
                 let settings = transition_settings(&state.settings);
                 state.transitions = match (
@@ -824,12 +831,19 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
         transition_count: state.transitions.events.len(),
         status: dashboard_status(&state.app),
         retry_minutes: retry_minutes(&state.app),
-        history: state.history.current().cloned(),
+        history: display_history(&state.history, state.history_matches_report),
         view: state.view,
         selected_provider: state.selected_provider,
         startup_view: state.settings.startup_view,
         ..DashboardConfig::default()
     }
+}
+
+fn display_history(
+    history: &LocalHistory,
+    matches_report: bool,
+) -> Option<evidence::HistoryDocument> {
+    matches_report.then(|| history.current().cloned()).flatten()
 }
 
 fn preference_lines(state: &PreferencesState, width: u16, height: u16) -> Vec<Line<'static>> {
@@ -1018,6 +1032,20 @@ fn transition_lines(view: &TransitionView) -> Vec<Line<'static>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn newly_published_report_suppresses_previous_history_until_recorded() {
+        let directory = tempfile::tempdir().expect("temporary history directory");
+        let mut history = LocalHistory::new(directory.path().join("history.json"));
+        let report = crate::domain::schema::parse_quota_response(include_str!(
+            "../../../../test/fixtures/complete.json"
+        ))
+        .expect("complete fixture");
+        history.record_at(&report, SystemTime::UNIX_EPOCH + Duration::from_secs(1_000));
+
+        assert!(display_history(&history, false).is_none());
+        assert_eq!(display_history(&history, true), history.current().cloned());
+    }
 
     #[test]
     fn settings_projection_cannot_add_provider_or_policy_fields() {
