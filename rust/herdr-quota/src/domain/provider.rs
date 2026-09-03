@@ -3,7 +3,7 @@
 use serde::Serialize;
 
 /// A provider that Herdr Quota markets.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MarketedProvider {
     Claude,

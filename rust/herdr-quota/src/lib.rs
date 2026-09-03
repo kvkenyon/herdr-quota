@@ -8,6 +8,7 @@ pub mod collector;
 pub mod domain;
 pub mod sanitize;
 pub mod store;
+pub mod ui;
 mod unix_signal;
 
 /// The commands that this foundation supports.
