@@ -755,14 +755,22 @@ fn trend_consequence(trend: &HistoryTrend) -> String {
         HistoryEvidenceKind::RemainingGain => format!("↑ {amount}pp/{elapsed}"),
         HistoryEvidenceKind::PaceWorse => format!("↓ pace/{elapsed}"),
         HistoryEvidenceKind::PaceBetter => format!("↑ pace/{elapsed}"),
-        HistoryEvidenceKind::ProjectionEarlier => trend.evidence.amount.map_or_else(
-            || "↘ out sooner".into(),
-            |value| format!("↘ out {} sooner", compact_duration(value.abs())),
-        ),
-        HistoryEvidenceKind::ProjectionLater => trend.evidence.amount.map_or_else(
-            || "↗ out later".into(),
-            |value| format!("↗ out {} later", compact_duration(value.abs())),
-        ),
+        HistoryEvidenceKind::ProjectionEarlier => trend
+            .evidence
+            .amount
+            .filter(|value| *value != 0)
+            .map_or_else(
+                || "↘ out sooner".into(),
+                |value| format!("↘ out {} sooner", compact_duration(value.abs())),
+            ),
+        HistoryEvidenceKind::ProjectionLater => trend
+            .evidence
+            .amount
+            .filter(|value| *value != 0)
+            .map_or_else(
+                || "↗ out later".into(),
+                |value| format!("↗ out {} later", compact_duration(value.abs())),
+            ),
     }
 }
 
@@ -1338,7 +1346,7 @@ fn render_frame(
     let no_report = report.is_none();
     let empty = empty_report();
     let report_value = report.unwrap_or(&empty);
-    let rows = if no_report {
+    let mut rows = if no_report {
         vec![
             SemanticRow {
                 text: "No quota readings".into(),
@@ -1424,12 +1432,14 @@ fn render_frame(
     let body_end = footer.max(body_start);
     let viewport = body_end.saturating_sub(body_start);
     if config.view == DashboardView::Overview {
-        let spare = viewport.saturating_sub(rows.len());
-        rows.extend(
-            overview_evidence_rows(report, config, width as u16)
-                .into_iter()
-                .take(spare),
-        );
+        if let Some(report) = report {
+            let spare = viewport.saturating_sub(rows.len());
+            rows.extend(
+                overview_evidence_rows(report, config, width as u16)
+                    .into_iter()
+                    .take(spare),
+            );
+        }
     }
     let scroll = if config.view == DashboardView::Overview {
         config
@@ -3028,6 +3038,32 @@ mod tests {
             elapsed_seconds: 5 * 60,
         };
         assert_eq!(trend_consequence(&trend), "↘ out 3h sooner");
+    }
+
+    #[test]
+    fn trend_consequence_treats_projection_transition_sentinels_as_unmeasured() {
+        let consequence = |kind| {
+            trend_consequence(&HistoryTrend {
+                cells: "██████".into(),
+                evidence: HistoryEvidence {
+                    kind,
+                    provider: HistoryProviderName::new(MarketedProvider::Claude),
+                    scope: "All models".into(),
+                    limit: Some("Week".into()),
+                    amount: Some(0),
+                },
+                elapsed_seconds: 5 * 60,
+            })
+        };
+
+        assert_eq!(
+            consequence(HistoryEvidenceKind::ProjectionEarlier),
+            "↘ out sooner"
+        );
+        assert_eq!(
+            consequence(HistoryEvidenceKind::ProjectionLater),
+            "↗ out later"
+        );
     }
 
     #[test]
