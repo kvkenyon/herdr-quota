@@ -469,8 +469,8 @@ mod tests {
         tokio::time::advance(Duration::from_secs(1)).await;
         flush().await;
         assert_eq!(worker.starts.load(Ordering::SeqCst), 2);
-        drop(second);
         handle.close().await;
+        drop(second);
     }
 
     #[tokio::test(start_paused = true)]
@@ -493,8 +493,8 @@ mod tests {
         tokio::time::advance(NORMAL_REFRESH).await;
         flush().await;
         assert_eq!(worker.starts.load(Ordering::SeqCst), 2);
-        drop(second);
         handle.close().await;
+        drop(second);
     }
 
     #[tokio::test(start_paused = true)]
@@ -509,8 +509,8 @@ mod tests {
 
         assert_eq!(worker.age_ticks.load(Ordering::SeqCst), 1);
         assert_eq!(worker.starts.load(Ordering::SeqCst), 1);
-        drop(pending);
         handle.close().await;
+        drop(pending);
     }
 
     #[tokio::test(start_paused = true)]
@@ -520,9 +520,10 @@ mod tests {
         let handle = open(std::sync::Arc::clone(&worker));
         flush().await;
 
-        for (sender, expected) in attempts
+        for (index, (sender, expected)) in attempts
             .into_iter()
             .zip(FAILURE_BACKOFF.into_iter().chain([FAILURE_BACKOFF[2]]))
+            .enumerate()
         {
             sender.send(Err("failed")).expect("receiver");
             flush().await;
@@ -530,8 +531,10 @@ mod tests {
                 worker.scheduled.lock().expect("lock").last(),
                 Some(&(expected, true))
             );
-            tokio::time::advance(expected).await;
-            flush().await;
+            if index < 3 {
+                tokio::time::advance(expected).await;
+                flush().await;
+            }
         }
         assert_eq!(worker.failures.lock().expect("lock").len(), 4);
         handle.close().await;
