@@ -95,6 +95,10 @@ fn provider_state(provider: &ProviderQuota) -> Option<&'static str> {
     }
 }
 
+fn has_current_quota(provider: &ProviderQuota) -> bool {
+    provider.state.status == ProviderStatus::Fresh && !provider.state.stale
+}
+
 fn percent(value: Option<f64>) -> String {
     value
         .map(|value| format!("{:>3}%", value.round() as i64))
@@ -139,7 +143,7 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
         };
         rows.push(SemanticRow {
             text: heading,
-            style: if provider.state.status == ProviderStatus::Unavailable {
+            style: if !has_current_quota(provider) {
                 RowStyle::Warning
             } else {
                 RowStyle::Heading
@@ -160,6 +164,17 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
             continue;
         }
         for window in &provider.windows {
+            if !has_current_quota(provider) {
+                rows.push(SemanticRow {
+                    text: format!(
+                        " ~ last known {} {}",
+                        truncate(&window.label, if width >= 30 { 13 } else { 9 }),
+                        percent(window.percent_remaining)
+                    ),
+                    style: RowStyle::Warning,
+                });
+                continue;
+            }
             let label_budget = if width >= 30 { 15 } else { 9 };
             let label = truncate(&window.label, label_budget);
             let meter = if width >= 30 {
@@ -216,11 +231,15 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
     if let Some((provider, remaining)) = visible
         .iter()
         .flat_map(|provider| {
-            provider.windows.iter().filter_map(move |window| {
-                window
-                    .percent_remaining
-                    .map(|remaining| (provider, remaining))
-            })
+            provider
+                .windows
+                .iter()
+                .filter(move |_| has_current_quota(provider))
+                .filter_map(move |window| {
+                    window
+                        .percent_remaining
+                        .map(|remaining| (provider, remaining))
+                })
         })
         .min_by(|(_, left), (_, right)| left.total_cmp(right))
     {
@@ -236,12 +255,16 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
         }
     }
     if visible.iter().any(|provider| {
-        provider
-            .windows
-            .iter()
-            .any(|window| window.percent_remaining.is_none())
+        has_current_quota(provider)
+            && provider
+                .windows
+                .iter()
+                .any(|window| window.percent_remaining.is_none())
     }) {
         return ("? Some limits unknown".into(), RowStyle::Warning);
+    }
+    if visible.iter().any(|provider| !has_current_quota(provider)) {
+        return ("? Limits non-current".into(), RowStyle::Warning);
     }
     ("= All known limits on pace".into(), RowStyle::Normal)
 }
@@ -724,6 +747,52 @@ mod tests {
         let heading = row_style("> claude");
         assert_eq!(heading.fg, Some(Color::Reset));
         assert!(heading.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn noncurrent_windows_are_labeled_and_excluded_from_attention() {
+        let states = [
+            ProviderStatus::Unavailable,
+            ProviderStatus::AuthRequired,
+            ProviderStatus::RateLimited,
+            ProviderStatus::Error,
+            ProviderStatus::Stale,
+        ];
+        for (index, status) in states.into_iter().enumerate() {
+            let provider_id = MarketedProvider::ALL[index].id();
+            let report = report(vec![provider(provider_id, Some(7.0), status)]);
+            for (columns, rows) in [(36, 23), (20, 12)] {
+                let plain = DashboardConfig::default();
+                let colored = DashboardConfig {
+                    color: true,
+                    ..DashboardConfig::default()
+                };
+                let lines = render_lines(&report, columns, rows, &plain);
+                assert_eq!(lines, render_lines(&report, columns, rows, &colored));
+                assert_eq!(lines[1].trim_end(), "? Limits non-current");
+                assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
+                assert!(lines.iter().all(|line| !line.starts_with(" !")));
+                let buffer = render_buffer(&report, columns, rows, &plain);
+                assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .all(|cell| cell.modifier == Modifier::empty())
+                );
+            }
+        }
+
+        let mut stale_fresh = provider("claude", Some(7.0), ProviderStatus::Fresh);
+        stale_fresh.state.stale = true;
+        let lines = render_lines(
+            &report(vec![stale_fresh]),
+            36,
+            23,
+            &DashboardConfig::default(),
+        );
+        assert_eq!(lines[1].trim_end(), "? Limits non-current");
+        assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
     }
 
     #[test]
