@@ -508,6 +508,7 @@ fn fact_in<'a>(
     snapshot: &'a HistorySnapshot,
     provider: HistoryProviderName,
     scope: &str,
+    limit: Option<&str>,
 ) -> Option<&'a HistoryFact> {
     let provider = snapshot
         .providers
@@ -516,7 +517,10 @@ fn fact_in<'a>(
     if provider.data_health != HistoryDataHealth::Current || !provider.auth_eligible {
         return None;
     }
-    provider.facts.iter().find(|fact| fact.scope == scope)
+    provider
+        .facts
+        .iter()
+        .find(|fact| fact.scope == scope && fact.limit.as_deref() == limit)
 }
 
 fn evidence(
@@ -613,6 +617,7 @@ fn evidence_for_fact(
         snapshots.get(snapshots.len().checked_sub(2)?)?,
         provider.provider,
         &current.scope,
+        current.limit.as_deref(),
     )?;
     if reset_evidence(previous, current) {
         return Some((
@@ -728,9 +733,14 @@ pub fn history_trend(
     let cells = document.snapshots[start..]
         .iter()
         .map(|snapshot| {
-            fact_in(snapshot, current_provider.provider, &current_fact.scope)
-                .filter(|fact| fact.reset_at.as_deref() == Some(current_reset))
-                .map_or('·', |fact| trend_cell(fact.remaining))
+            fact_in(
+                snapshot,
+                current_provider.provider,
+                &current_fact.scope,
+                current_fact.limit.as_deref(),
+            )
+            .filter(|fact| fact.reset_at.as_deref() == Some(current_reset))
+            .map_or('·', |fact| trend_cell(fact.remaining))
         })
         .collect::<String>();
     let previous_at =
@@ -1157,6 +1167,38 @@ mod tests {
 
         document.snapshots.last_mut().unwrap().providers[0].facts[0].reset_at = None;
         assert_eq!(history_trend(&document, MarketedProvider::Claude), None);
+    }
+
+    #[test]
+    fn selected_provider_trend_keeps_same_scope_limits_distinct() {
+        let snapshots = (0..6)
+            .map(|index| {
+                let mut short = fact(10.0);
+                short.limit = Some("5h".to_owned());
+                let mut weekly = fact(if index == 5 {
+                    46.0
+                } else {
+                    82.0 - index as f64 * 4.0
+                });
+                weekly.limit = Some("Week".to_owned());
+                snapshot(
+                    &format!("2026-09-02T12:{:02}:00.000Z", index * 5),
+                    vec![short, weekly],
+                )
+            })
+            .collect();
+        let document = HistoryDocument {
+            schema_version: HISTORY_SCHEMA_VERSION,
+            snapshots,
+        };
+
+        let trend = history_trend(&document, MarketedProvider::Claude)
+            .expect("weekly material drop is eligible");
+
+        assert_eq!(trend.evidence.limit.as_deref(), Some("Week"));
+        assert_eq!(trend.evidence.kind, HistoryEvidenceKind::RemainingDrop);
+        assert_eq!(trend.cells.chars().next(), Some(trend_cell(82.0)));
+        assert_eq!(trend.cells.chars().last(), Some(trend_cell(46.0)));
     }
 
     #[test]
