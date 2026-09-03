@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use crate::app_state::{self, AppAction, AppState, CollectorFailureKind};
 use crate::collector::{Collector, CollectorFailure};
 use crate::domain::{
-    history_evidence as evidence,
+    history_evidence::{self as evidence, HistoryAvailability},
     provider::{MarketedProvider, ProjectionConfidence},
     schema::QuotaReport,
 };
@@ -156,12 +156,32 @@ impl RefreshWorker for DashboardWorker {
         if attempt
             .publish(|| {
                 let mut state = lock(&state);
-                state.history.record(&report);
+                let history_view = state.history.record(&report);
                 let history = state.history.current().cloned();
                 let settings = transition_settings(&state.settings);
-                if let (Some(store), Some(history)) = (state.transition_store.as_ref(), history) {
-                    state.transitions = store.evaluate(&transition_history(&history), &settings);
-                }
+                state.transitions = match (
+                    history_view.availability,
+                    state.transition_store.as_ref(),
+                    history,
+                ) {
+                    (HistoryAvailability::Incompatible, _, _) => {
+                        empty_transitions(TransitionAvailability::Incompatible)
+                    }
+                    (HistoryAvailability::Unavailable, _, _) => {
+                        empty_transitions(TransitionAvailability::Unavailable)
+                    }
+                    (HistoryAvailability::ClockSkew, Some(store), Some(history)) => store.baseline(
+                        &transition_history(&history),
+                        &settings,
+                        &[TransitionChannel::Threshold, TransitionChannel::Forecast],
+                        None,
+                    ),
+                    (_, Some(store), Some(history)) => {
+                        store.evaluate(&transition_history(&history), &settings)
+                    }
+                    (_, None, _) => empty_transitions(TransitionAvailability::Unavailable),
+                    (_, _, None) => empty_transitions(TransitionAvailability::FirstRun),
+                };
             })
             .is_some()
         {
