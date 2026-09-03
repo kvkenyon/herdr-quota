@@ -723,12 +723,13 @@ pub fn history_trend(
                 .map(|(rank, evidence)| (rank, evidence, fact))
         })
         .min_by_key(|(rank, _, _)| *rank)?;
+    let current_reset = current_fact.reset_at.as_deref()?;
     let start = document.snapshots.len().saturating_sub(MAX_CELLS);
     let cells = document.snapshots[start..]
         .iter()
         .map(|snapshot| {
             fact_in(snapshot, current_provider.provider, &current_fact.scope)
-                .filter(|fact| fact.reset_at == current_fact.reset_at)
+                .filter(|fact| fact.reset_at.as_deref() == Some(current_reset))
                 .map_or('·', |fact| trend_cell(fact.remaining))
         })
         .collect::<String>();
@@ -1132,6 +1133,30 @@ mod tests {
             history_view(&document, HistoryAvailability::Ready).evidence,
             Some(trend.evidence)
         );
+    }
+
+    #[test]
+    fn selected_provider_trend_requires_known_cycle_identity() {
+        let mut snapshots = (0..6)
+            .map(|index| {
+                snapshot(
+                    &format!("2026-09-02T12:{:02}:00.000Z", index * 5),
+                    vec![fact(if index == 5 { 40.0 } else { 60.0 })],
+                )
+            })
+            .collect::<Vec<_>>();
+        snapshots[2].providers[0].facts[0].reset_at = None;
+        let mut document = HistoryDocument {
+            schema_version: HISTORY_SCHEMA_VERSION,
+            snapshots,
+        };
+
+        let trend = history_trend(&document, MarketedProvider::Claude)
+            .expect("a missing historical reset becomes a gap");
+        assert_eq!(trend.cells.chars().nth(2), Some('·'));
+
+        document.snapshots.last_mut().unwrap().providers[0].facts[0].reset_at = None;
+        assert_eq!(history_trend(&document, MarketedProvider::Claude), None);
     }
 
     #[test]
