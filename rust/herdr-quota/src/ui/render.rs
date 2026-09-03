@@ -310,6 +310,13 @@ fn hidden_sibling_unsafe(
             .any(|tier| matches!(tier.conclusion, TierConclusion::NotReported)))
 }
 
+fn has_decision_safe_quota(
+    section: &crate::ui::model::ProviderSection,
+    provider: &ProviderQuota,
+) -> bool {
+    has_trustworthy_quota(provider) && !hidden_sibling_unsafe(section, provider)
+}
+
 fn overview_row(
     section: &crate::ui::model::ProviderSection,
     provider: &ProviderQuota,
@@ -538,7 +545,7 @@ fn overview_evidence_rows(
         else {
             continue;
         };
-        if !has_trustworthy_quota(provider) || hidden_sibling_unsafe(section, provider) {
+        if !has_decision_safe_quota(section, provider) {
             continue;
         }
         let Some(effective) = limiting_effective(provider) else {
@@ -727,11 +734,16 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
 }
 
 fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (String, RowStyle) {
-    let visible: Vec<_> = report
+    let model = visible_model(report, config);
+    let visible: Vec<_> = model
         .providers
         .iter()
-        .filter(|provider| {
-            provider_id(provider).is_some_and(|id| !config.user_hidden.contains(id.id()))
+        .filter_map(|section| {
+            report
+                .providers
+                .iter()
+                .find(|provider| provider_id(provider) == Some(section.provider))
+                .map(|provider| (section, provider))
         })
         .collect();
     if visible.is_empty() {
@@ -739,8 +751,9 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
     }
     let trustworthy: Vec<_> = visible
         .iter()
-        .copied()
-        .filter(|provider| has_trustworthy_quota(provider))
+        .filter_map(|(section, provider)| {
+            has_decision_safe_quota(section, provider).then_some(*provider)
+        })
         .collect();
     let constraints = trustworthy
         .iter()
@@ -845,12 +858,15 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
     }) {
         return ("? Pace needs review".into(), RowStyle::Warning);
     }
-    if visible.iter().any(|provider| !has_current_quota(provider)) {
+    if visible
+        .iter()
+        .any(|(_, provider)| !has_current_quota(provider))
+    {
         return ("? Limits non-current".into(), RowStyle::Warning);
     }
     if visible
         .iter()
-        .any(|provider| !has_trustworthy_quota(provider))
+        .any(|(section, provider)| !has_decision_safe_quota(section, provider))
     {
         return ("? Quota data partial".into(), RowStyle::Warning);
     }
@@ -1750,7 +1766,7 @@ mod tests {
         healthy.effective[0].effective_percent_remaining = Some(80.0);
         healthy.effective[0].runway.as_mut().unwrap().status = RunwayStatus::ThroughReset;
 
-        let mut projected = provider("codex", Some(80.0), ProviderStatus::Fresh);
+        let mut projected = provider("claude", Some(80.0), ProviderStatus::Fresh);
         projected.effective[0].effective_percent_remaining = Some(80.0);
         let runway = projected.effective[0].runway.as_mut().unwrap();
         runway.status = RunwayStatus::ProjectedExhaustion;
@@ -1847,6 +1863,14 @@ mod tests {
         sibling.windows.clear();
         sibling.effective.clear();
         incomplete_siblings.providers.push(sibling);
+        let codex_with_unreported_sibling =
+            report(vec![provider("codex", Some(50.0), ProviderStatus::Fresh)]);
+        let mut codex_projected = provider("codex", Some(50.0), ProviderStatus::Fresh);
+        let runway = codex_projected.effective[0].runway.as_mut().unwrap();
+        runway.status = RunwayStatus::ProjectedExhaustion;
+        runway.projected_exhausted_at = Some("2026-09-02T13:00:00Z".into());
+        runway.projection_confidence = Some(ProjectionConfidence::Established);
+        let codex_projected = report(vec![codex_projected]);
 
         let with_pace = |status| {
             let mut report = base.clone();
@@ -1865,6 +1889,8 @@ mod tests {
             (unknown_semantics, "? Quota data partial"),
             (partial_semantics, "? Quota data partial"),
             (incomplete_siblings, "? Quota data partial"),
+            (codex_with_unreported_sibling, "? Quota data partial"),
+            (codex_projected, "? Quota data partial"),
             (with_pace(PaceStatus::Ahead), "? Pace needs review"),
             (with_pace(PaceStatus::Mixed), "? Pace needs review"),
             (with_pace(PaceStatus::Behind), "= Limits on pace"),
