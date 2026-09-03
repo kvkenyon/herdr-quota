@@ -16,6 +16,10 @@ tokens, paths, raw collector output, or provider account data.
 Run the Rust `dashboard` subcommand in a real PTY. Set the PTY to each exact
 size before launch:
 
+Run the ordinary Rust PTY integration test from a non-interactive `cargo test`
+process. Wrapping Cargo in another allocated controlling TTY can make terminal
+size discovery report the outer terminal instead of the nested exact-size PTY.
+
 | Run    | PTY size             | Required checks                                              |
 | ------ | -------------------- | ------------------------------------------------------------ |
 | Wide   | 36 columns × 12 rows | Open, first render, feature path, navigation, and quit       |
@@ -171,3 +175,23 @@ so trend evidence is intentionally absent there. Ordinary Rust tests cover the
 bounded trace, material consequence, same-cycle eligibility, visible gaps,
 NO_COLOR text, and unsafe/narrow suppression. No Herdr lifecycle behavior was
 driven.
+
+## PR 23 readiness and launch record
+
+Date: 2026-09-03. Platform: macOS arm64 (Darwin 25.1.0), Rust 1.92.0. Runtime:
+Rust `herdr-quota` on merged main `d0f8a80283fe3a1f650cca2e4efaf023b3819b04`
+plus this readiness/launch worktree, run through the production terminal loop
+in an exact-size POSIX PTY with `NO_COLOR`, isolated config/state directories,
+and the purpose-built sanitized `launch.json` schema-v5 fixture.
+
+| PTY size | Steps                                                                                                                                                                     | Result                                                                                                                                                                                     |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 36 × 12  | Opened first-run overview, refreshed repeatedly, moved selection, opened Preferences, and cancelled safely                                                                | Decision, `4 ready · 2 sign-in`, six provenance-tagged provider rows, and the detail/Preferences keyboard path stayed readable with no decorative empty block or terminal-control leakage. |
+| 20 × 12  | Opened directly at 20 × 12, allowed the initial activity/age slot to settle, refreshed, then repeated after a 36 → 20 resize and exercised Preferences confirmation paths | `↻` replaced age in the fixed title slot; gauges/secondary labels yielded before whole provider/state tokens; every Preferences item remained reachable; terminal state restored.          |
+
+The same direct PTY journey includes SIGINT/SIGTERM cleanup checks. Ordinary
+Rust tests separately cover signed-out versus unsupported, aged stale, partial,
+live-without-quota, the finite Preferences vocabulary, privacy exclusions, and
+the exact 36x12/20x12 hierarchy. The fixed-size and resize refresh paths passed
+five consecutive repetitions after the initial age slot settled. No Herdr
+lifecycle behavior was driven.

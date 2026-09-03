@@ -15,7 +15,7 @@ await run(
     "--",
     "preview",
     "--fixture",
-    "test/fixtures/complete.json",
+    "test/fixtures/launch.json",
     "--width",
     "36",
     "--height",

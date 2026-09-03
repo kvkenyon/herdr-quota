@@ -4,6 +4,8 @@
 
 ### Added
 
+- First-run readiness now summarizes trustworthy live providers and explicit sign-in needs, while the overview and Preferences keep every marketed provider visible with finite `live`, aged `stale`, `auth`, `partial`, `quota unavailable`, or `unsupported` copy. No account, credential path, raw source/error, or inferred local estimate enters the UI.
+- The README hero and committed 36-cell preview now use one purpose-built sanitized launch fixture that shows provider comparison, the next quota consequence, readiness, and the keyboard path from the first frame.
 - Selected-provider detail can show one bounded NO_COLOR-safe history trace with concise material consequence text. Only current, same-reset-cycle allow-listed facts participate; unsafe samples break the trace visibly, and narrow panes elide it before decision or tier text.
 
 ### Changed

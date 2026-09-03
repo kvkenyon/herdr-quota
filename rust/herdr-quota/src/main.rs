@@ -22,6 +22,7 @@ async fn main() -> ExitCode {
             Ok(report) => {
                 let mut config = DashboardConfig::default();
                 config.color = std::env::var_os("NO_COLOR").is_none();
+                config.first_run = true;
                 let lines = render_lines(&report, width, height, &config);
                 println!("{}", lines.join("\n"));
                 if let Some(path) = svg {
