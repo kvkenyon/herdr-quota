@@ -46,6 +46,13 @@ async fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
+        Ok(Command::Sidebar) => match herdr_quota::sidebar::run_from_environment().await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => {
+                eprintln!("sidebar could not update the Herdr layout");
+                ExitCode::from(1)
+            }
+        },
         Err(error) => {
             eprintln!("{error}");
             ExitCode::from(2)

@@ -9,6 +9,7 @@ pub mod collector;
 pub mod domain;
 pub mod sanitize;
 pub mod scheduler;
+pub mod sidebar;
 pub mod store;
 pub mod ui;
 mod unix_signal;
@@ -27,6 +28,8 @@ pub enum Command {
     },
     /// Open the live, pane-owned terminal dashboard.
     Dashboard,
+    /// Toggle the pane-preserving Herdr sidebar.
+    Sidebar,
 }
 
 /// An error from command-line parsing.
@@ -65,13 +68,14 @@ where
             parse_preview(PathBuf::from(fixture), rest)
         }
         [command] if command == "dashboard" => Ok(Command::Dashboard),
+        [command] if command == "sidebar" => Ok(Command::Sidebar),
         _ => Err(ParseError::new(usage())),
     }
 }
 
 /// Return command help for unsupported input.
 pub fn usage() -> &'static str {
-    "usage: herdr-quota --version | herdr-quota preview --fixture <path> [--width <cells> --height <rows> --svg <path>] | herdr-quota dashboard"
+    "usage: herdr-quota --version | herdr-quota preview --fixture <path> [--width <cells> --height <rows> --svg <path>] | herdr-quota dashboard | herdr-quota sidebar"
 }
 
 /// Return the package version.
@@ -168,6 +172,15 @@ mod tests {
         assert_eq!(parse_command(["dashboard"]), Ok(Command::Dashboard));
         assert_eq!(
             parse_command(["dashboard", "--fixture", "test/fixture.json"]),
+            Err(super::ParseError::new(usage()))
+        );
+    }
+
+    #[test]
+    fn parses_the_sidebar_action_entrypoint() {
+        assert_eq!(parse_command(["sidebar"]), Ok(Command::Sidebar));
+        assert_eq!(
+            parse_command(["sidebar", "--focus"]),
             Err(super::ParseError::new(usage()))
         );
     }

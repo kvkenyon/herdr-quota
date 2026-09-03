@@ -17,6 +17,7 @@ use crate::domain::{
     schema::QuotaReport,
 };
 use crate::scheduler::{self, RefreshAttempt, RefreshWorker};
+use crate::store::sidebar_state::SidebarOwnershipGuard;
 use crate::store::{
     history::LocalHistory,
     settings::{
@@ -342,6 +343,7 @@ pub async fn dashboard() -> io::Result<()> {
 /// Test seam for exercising the complete terminal loop with a bounded fake collector.
 #[doc(hidden)]
 pub async fn dashboard_with_collector(collector: Collector) -> io::Result<()> {
+    let _sidebar_ownership = SidebarOwnershipGuard::from_environment();
     if !crossterm::tty::IsTty::is_tty(&io::stdin()) || !crossterm::tty::IsTty::is_tty(&io::stdout())
     {
         return Err(io::Error::new(
