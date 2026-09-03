@@ -114,9 +114,12 @@ pub fn dashboard_model(
         .providers
         .iter()
         .filter(|quota| {
-            MarketedProvider::from_id(&quota.provider.to_ascii_lowercase()).map_or(true, |provider| {
-                visibility_for(visibility, provider) == ProviderVisibility::HiddenElsewhere
-            })
+            MarketedProvider::from_id(&quota.provider.to_ascii_lowercase()).map_or(
+                true,
+                |provider| {
+                    visibility_for(visibility, provider) == ProviderVisibility::HiddenElsewhere
+                },
+            )
         })
         .count();
     let sections = providers
