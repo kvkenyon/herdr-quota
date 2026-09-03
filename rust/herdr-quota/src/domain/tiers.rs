@@ -385,7 +385,13 @@ pub fn provider_annotation(provider: &ProviderQuota) -> Option<ProviderAnnotatio
             tone: AnnotationTone::Muted,
         });
     }
-    if provider.state.status == ProviderStatus::Unavailable || provider.windows.is_empty() {
+    if provider.state.status == ProviderStatus::Unavailable {
+        return Some(ProviderAnnotation {
+            text: "unavailable",
+            tone: AnnotationTone::Bad,
+        });
+    }
+    if provider.windows.is_empty() {
         return Some(ProviderAnnotation {
             text: "no reading",
             tone: AnnotationTone::Muted,

@@ -28,6 +28,11 @@ use crate::domain::{
         ProviderQuota, ProviderStatus, RunwayStatus, SemanticsStatus,
     },
     schema::QuotaReport,
+    tiers::TierConclusion,
+};
+use crate::ui::{
+    bar::MeterMode,
+    model::{ProviderDetail, ProviderVisibility, ProviderVisibilityMap, dashboard_model},
 };
 
 /// Local rendering inputs; collection and quota semantics do not depend on them.
@@ -85,23 +90,6 @@ fn display_name(provider: &ProviderQuota) -> &str {
                 .map(MarketedProvider::label)
                 .unwrap_or("Provider")
         })
-}
-
-fn provider_state(provider: &ProviderQuota) -> Option<&'static str> {
-    if matches!(
-        provider.state.auth_status.as_deref(),
-        Some("unusable" | "expired_refreshable")
-    ) {
-        return Some("sign-in required");
-    }
-    match provider.state.status {
-        ProviderStatus::Fresh if !provider.state.stale => None,
-        ProviderStatus::Fresh | ProviderStatus::Stale => Some("stale"),
-        ProviderStatus::Unavailable => Some("unavailable"),
-        ProviderStatus::AuthRequired => Some("sign-in required"),
-        ProviderStatus::RateLimited => Some("rate limited"),
-        ProviderStatus::Error => Some("quota unavailable"),
-    }
 }
 
 fn has_current_quota(provider: &ProviderQuota) -> bool {
@@ -185,76 +173,93 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
         })
         .count();
 
+    let visibility = config
+        .user_hidden
+        .iter()
+        .filter_map(|id| MarketedProvider::from_id(id))
+        .map(|provider| (provider, ProviderVisibility::UserDisabled))
+        .collect::<ProviderVisibilityMap>();
+    let model = dashboard_model(report, MeterMode::Remaining, &visibility);
     let mut rows = Vec::new();
-    for provider in report.providers.iter().filter(|provider| {
-        provider_id(provider).is_some_and(|id| !config.user_hidden.contains(id.id()))
-    }) {
-        let state = provider_state(provider);
-        let heading = if let Some(state) = state {
-            format!("> {} · {}", display_name(provider), state)
-        } else {
-            format!("> {}", display_name(provider))
-        };
+    for section in model.providers {
+        let annotation = section.annotation.as_ref().map(|value| value.text);
         rows.push(SemanticRow {
-            text: heading,
-            style: if !has_current_quota(provider) {
+            text: annotation
+                .map(|value| format!("> {} · {value}", section.label))
+                .unwrap_or_else(|| format!("> {}", section.label)),
+            style: if annotation.is_some() {
                 RowStyle::Warning
             } else {
                 RowStyle::Heading
             },
         });
-        if state.is_some() && provider.windows.is_empty() {
-            rows.push(SemanticRow {
-                text: "  ? Quota unavailable".into(),
+        match section.detail {
+            ProviderDetail::Recovery { instruction } => rows.push(SemanticRow {
+                text: format!("  ? {instruction}"),
                 style: RowStyle::Warning,
-            });
-            continue;
-        }
-        if provider.windows.is_empty() {
-            rows.push(SemanticRow {
-                text: "  ? No quota reported".into(),
+            }),
+            ProviderDetail::Message { message } => rows.push(SemanticRow {
+                text: format!("  ? {message}"),
                 style: RowStyle::Warning,
-            });
-            continue;
-        }
-        for window in &provider.windows {
-            if !has_current_quota(provider) {
-                rows.push(SemanticRow {
-                    text: format!(
-                        " ~ last known {} {}",
-                        truncate(&window.label, if width >= 30 { 13 } else { 9 }),
-                        percent(window.percent_remaining)
-                    ),
-                    style: RowStyle::Warning,
-                });
-                continue;
+            }),
+            ProviderDetail::Tiers(tiers) => {
+                for tier in tiers {
+                    if annotation.is_some() {
+                        rows.push(SemanticRow {
+                            text: format!(
+                                " ~ last known {} {}",
+                                tier.compact_label,
+                                percent(tier.percent_remaining)
+                            ),
+                            style: RowStyle::Warning,
+                        });
+                        continue;
+                    }
+                    let label_budget = if width >= 30 { 15 } else { 9 };
+                    let label = truncate(
+                        if width >= 30 {
+                            &tier.label
+                        } else {
+                            &tier.compact_label
+                        },
+                        label_budget,
+                    );
+                    let meter = if width >= 30 && tier.displayed_percent.is_some() {
+                        format!(" [{}]", gauge(tier.displayed_percent, 6))
+                    } else {
+                        String::new()
+                    };
+                    let conclusion = match tier.conclusion {
+                        TierConclusion::NotReported => " · not reported",
+                        TierConclusion::OnPace => " · on pace",
+                        TierConclusion::Ahead { .. } => " · ahead",
+                        TierConclusion::Spend { .. } => " · spend",
+                        TierConclusion::Unknown => "",
+                    };
+                    let critical = tier.percent_remaining.is_some_and(|value| value <= 10.0);
+                    let warning = matches!(tier.conclusion, TierConclusion::NotReported);
+                    let marker = if critical {
+                        "!"
+                    } else if warning {
+                        "?"
+                    } else {
+                        " "
+                    };
+                    rows.push(SemanticRow {
+                        text: format!(
+                            " {marker}{label:<label_budget$} {}{meter}{conclusion}",
+                            percent(tier.percent_remaining)
+                        ),
+                        style: if critical {
+                            RowStyle::Critical
+                        } else if warning {
+                            RowStyle::Warning
+                        } else {
+                            RowStyle::Normal
+                        },
+                    });
+                }
             }
-            let label_budget = if width >= 30 { 15 } else { 9 };
-            let label = truncate(&window.label, label_budget);
-            let meter = if width >= 30 {
-                format!(" [{}]", gauge(window.percent_remaining, 6))
-            } else {
-                String::new()
-            };
-            let reset = window
-                .reset_text
-                .as_deref()
-                .map(|value| format!(" · {value}"))
-                .unwrap_or_default();
-            let critical = window.percent_remaining.is_some_and(|value| value <= 10.0);
-            let marker = if critical { "!" } else { " " };
-            let text = format!(
-                " {marker}{label:<label_budget$} {}{meter}{reset}",
-                percent(window.percent_remaining)
-            );
-            rows.push(SemanticRow {
-                text,
-                style: if critical {
-                    RowStyle::Critical
-                } else {
-                    RowStyle::Normal
-                },
-            });
         }
     }
     if hidden_unavailable > 0 {
@@ -1188,6 +1193,35 @@ mod tests {
         .join("\n");
         assert!(output.contains("· unavailable"));
         assert!(!output.contains("unavailable provider"));
+    }
+
+    #[test]
+    fn renderer_uses_semantic_provider_labels_and_synthetic_rows() {
+        let mut codex = provider("codex", Some(50.0), ProviderStatus::Fresh);
+        codex.label = Some("collector label".into());
+        codex.windows[0].id = "weekly".into();
+        codex.windows[0].label = "collector weekly label".into();
+        let lines = render_lines(&report(vec![codex]), 36, 23, &DashboardConfig::default());
+        assert!(lines.iter().any(|line| line.starts_with("> OpenAI Codex")));
+        assert!(lines.iter().any(|line| line.starts_with("  Week")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.starts_with(" ?Code review") && line.contains("not reported"))
+        );
+
+        let unavailable = report(vec![provider(
+            "codex",
+            Some(50.0),
+            ProviderStatus::Unavailable,
+        )]);
+        let lines = render_lines(&unavailable, 36, 23, &DashboardConfig::default());
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.starts_with("> OpenAI Codex · unavailable"))
+        );
+        assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
     }
 
     #[test]
