@@ -207,6 +207,11 @@ where
     let mut tasks = JoinSet::new();
     let mut generation = 0_u64;
     let mut failures = 0_usize;
+    // A manual attempt may be requested by several key events before the
+    // replacement collector has settled. One preemption is useful; repeatedly
+    // cancelling the replacement is not. The latch is released when that
+    // attempt settles or an automatic attempt begins.
+    let mut manual_generation: Option<u64> = None;
     let mut timer: Option<std::pin::Pin<Box<Sleep>>> = None;
     let mut age_timer = Box::pin(tokio::time::sleep(AGE_TICK));
 
@@ -234,16 +239,19 @@ where
                 Some(Command::Manual(acknowledged)) => {
                     failures = 0;
                     drop(timer.take());
-                    worker.cancel_active();
-                    let mut state = publication_state.lock().expect("publication lock");
-                    begin_collection(
+                    if manual_generation != Some(generation) {
+                        worker.cancel_active();
+                        let mut state = publication_state.lock().expect("publication lock");
+                        begin_collection(
                             Arc::clone(&worker),
                             event_sender.clone(),
                             &mut tasks,
                             &mut generation,
                             &current_generation,
                         );
-                    state.generation = generation;
+                        state.generation = generation;
+                        manual_generation = Some(generation);
+                    }
                     let _ = acknowledged.send(());
                 }
                 Some(Command::Close(acknowledged)) => {
@@ -292,12 +300,10 @@ where
                                     value,
                                 });
                             }
-                            Err(error) => settle_failure(
-                                &*worker,
-                                &mut failures,
-                                &mut timer,
-                                error,
-                            ),
+                            Err(error) => {
+                                settle_failure(&*worker, &mut failures, &mut timer, error);
+                                manual_generation = None;
+                            }
                         }
                     }
                     Event::PostCollectionFinished { generation: result_generation, result } => {
@@ -318,6 +324,9 @@ where
                                 error,
                             ),
                         }
+                        if result_generation == generation {
+                            manual_generation = None;
+                        }
                     }
                 }
             },
@@ -328,6 +337,7 @@ where
                 }
             } => {
                 timer = None;
+                manual_generation = None;
                 let mut state = publication_state.lock().expect("publication lock");
                 begin_collection(
                     Arc::clone(&worker),
@@ -783,6 +793,32 @@ mod tests {
             Some(&(FAILURE_BACKOFF[0], true))
         );
         handle.close().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn repeated_manual_refreshes_coalesce_until_the_replacement_settles() {
+        let worker = std::sync::Arc::new(TestWorker::new());
+        let original = worker.collect_next();
+        let replacement = worker.collect_next();
+        let after_settle = worker.collect_next();
+        let handle = open(std::sync::Arc::clone(&worker));
+        flush().await;
+
+        handle.manual().await;
+        handle.manual().await;
+        handle.manual().await;
+
+        assert_eq!(worker.starts.load(Ordering::SeqCst), 2);
+        assert_eq!(worker.cancellations.load(Ordering::SeqCst), 1);
+        original.send(Ok("late")).expect("receiver");
+        replacement.send(Err("failed")).expect("receiver");
+        flush().await;
+
+        handle.manual().await;
+        assert_eq!(worker.starts.load(Ordering::SeqCst), 3);
+        assert_eq!(worker.cancellations.load(Ordering::SeqCst), 2);
+        handle.close().await;
+        drop(after_settle);
     }
 
     #[tokio::test(start_paused = true)]

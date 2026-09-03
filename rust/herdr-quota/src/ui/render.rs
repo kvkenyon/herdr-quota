@@ -5,6 +5,7 @@
 //! cannot split a provider heading from the row model or leak collector text.
 
 use std::collections::BTreeSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{Datelike, Timelike};
 use crossterm::event::KeyCode;
@@ -60,6 +61,8 @@ pub struct DashboardConfig {
     pub transition_count: usize,
     /// Current bounded collector state, when visible.
     pub status: Option<DashboardStatus>,
+    /// Rounded-up minutes until the scheduled retry for a collector failure.
+    pub retry_minutes: Option<u64>,
     /// The current finite dashboard surface.
     pub view: DashboardView,
     /// The stable cursor into the visible provider roster.
@@ -82,6 +85,7 @@ impl Default for DashboardConfig {
             interactive: false,
             transition_count: 0,
             status: None,
+            retry_minutes: None,
             view: DashboardView::Overview,
             selected_provider: 0,
             startup_view: StartupView::Overview,
@@ -99,6 +103,12 @@ pub enum DashboardStatus {
     MissingExecutable,
     IncompatibleOutput,
     NetworkProcess,
+}
+
+impl DashboardStatus {
+    fn is_failure(self) -> bool {
+        self != Self::Refreshing
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -599,6 +609,7 @@ fn overview_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
             style: RowStyle::Warning,
         });
     }
+    rows.extend(overview_evidence_rows(report, config, width));
     rows
 }
 
@@ -616,24 +627,8 @@ fn overview_evidence_rows(
                 .min(model.providers.len().saturating_sub(1)),
         )
         .map(|section| section.provider);
-    let trustworthy: Vec<_> = model
-        .providers
-        .iter()
-        .filter_map(|section| {
-            report
-                .providers
-                .iter()
-                .find(|provider| provider_id(provider) == Some(section.provider))
-                .filter(|provider| has_decision_safe_quota(section, provider))
-        })
-        .collect();
-    let decision_provider =
-        decision_constraint(&trustworthy).and_then(|(provider, _)| provider_id(provider));
     let mut rows = Vec::new();
     for section in &model.providers {
-        if selected == Some(section.provider) || decision_provider == Some(section.provider) {
-            continue;
-        }
         let Some(provider) = report
             .providers
             .iter()
@@ -676,7 +671,8 @@ fn overview_evidence_rows(
         if runway.is_some_and(|runway| {
             runway.status == RunwayStatus::ProjectedExhaustion
                 && runway.projection_confidence == Some(ProjectionConfidence::Established)
-        }) {
+        }) && selected != Some(section.provider)
+        {
             let when = moment(
                 runway.and_then(|runway| runway.projected_exhausted_at.as_deref()),
                 compact,
@@ -860,10 +856,29 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
     }
 }
 
-fn decision_constraint<'a>(
-    trustworthy: &[&'a ProviderQuota],
-) -> Option<(&'a ProviderQuota, &'a EffectiveAvailability)> {
-    trustworthy
+fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (String, RowStyle) {
+    let model = visible_model(report, config);
+    let visible: Vec<_> = model
+        .providers
+        .iter()
+        .filter_map(|section| {
+            report
+                .providers
+                .iter()
+                .find(|provider| provider_id(provider) == Some(section.provider))
+                .map(|provider| (section, provider))
+        })
+        .collect();
+    if visible.is_empty() {
+        return ("? No providers shown".into(), RowStyle::Warning);
+    }
+    let trustworthy: Vec<_> = visible
+        .iter()
+        .filter_map(|(section, provider)| {
+            has_decision_safe_quota(section, provider).then_some(*provider)
+        })
+        .collect();
+    let constraints = trustworthy
         .iter()
         .enumerate()
         .flat_map(|(provider_order, provider)| {
@@ -900,7 +915,7 @@ fn decision_constraint<'a>(
                         effective.effective_percent_remaining.unwrap_or(101.0),
                         provider_order,
                         effective_order,
-                        *provider,
+                        provider,
                         effective,
                     ))
                 })
@@ -921,33 +936,8 @@ fn decision_constraint<'a>(
                 })
                 .then_with(|| left.3.cmp(&right.3))
                 .then_with(|| left.4.cmp(&right.4))
-        })
-        .map(|(_, _, _, _, _, provider, effective)| (provider, effective))
-}
-
-fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (String, RowStyle) {
-    let model = visible_model(report, config);
-    let visible: Vec<_> = model
-        .providers
-        .iter()
-        .filter_map(|section| {
-            report
-                .providers
-                .iter()
-                .find(|provider| provider_id(provider) == Some(section.provider))
-                .map(|provider| (section, provider))
-        })
-        .collect();
-    if visible.is_empty() {
-        return ("? No providers shown".into(), RowStyle::Warning);
-    }
-    let trustworthy: Vec<_> = visible
-        .iter()
-        .filter_map(|(section, provider)| {
-            has_decision_safe_quota(section, provider).then_some(*provider)
-        })
-        .collect();
-    if let Some((provider, effective)) = decision_constraint(&trustworthy) {
+        });
+    if let Some((_, _, _, _, _, provider, effective)) = constraints {
         let limiting_id = limiting_window_id(effective);
         let runway = effective
             .runway
@@ -1082,14 +1072,134 @@ pub fn render_lines(
     height: u16,
     config: &DashboardConfig,
 ) -> Vec<String> {
+    render_frame(Some(report), width, height, config)
+        .into_iter()
+        .map(|row| row.text)
+        .collect()
+}
+
+/// Return one live dashboard frame, including bounded first-load state.
+pub fn render_dashboard_lines(
+    report: Option<&QuotaReport>,
+    width: u16,
+    height: u16,
+    config: &DashboardConfig,
+) -> Vec<String> {
     render_frame(report, width, height, config)
         .into_iter()
         .map(|row| row.text)
         .collect()
 }
 
+fn empty_report() -> QuotaReport {
+    QuotaReport {
+        generated_at: String::new(),
+        schema_version: 5,
+        providers: Vec::new(),
+        adaptation_warnings: Vec::new(),
+    }
+}
+
+fn age_text(generated_at: &str) -> (String, String) {
+    let generated = chrono::DateTime::parse_from_rfc3339(generated_at)
+        .ok()
+        .map(|value| value.timestamp())
+        .unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let seconds = now.saturating_sub(generated).max(0) as u64;
+    match seconds {
+        0..=59 => ("just now".into(), "now".into()),
+        60..=3_599 => {
+            let minutes = seconds / 60;
+            (format!("{minutes}m ago"), format!("{minutes}m"))
+        }
+        3_600..=86_399 => {
+            let hours = seconds / 3_600;
+            (format!("{hours}h ago"), format!("{hours}h"))
+        }
+        _ => {
+            let days = seconds / 86_400;
+            (format!("{days}d ago"), format!("{days}d"))
+        }
+    }
+}
+
+fn title_with_activity(
+    title: &str,
+    report: Option<&QuotaReport>,
+    config: &DashboardConfig,
+    width: usize,
+) -> String {
+    if !config.interactive {
+        return frame_text(title, width);
+    }
+    let (long, compact) = if config.status == Some(DashboardStatus::Refreshing) {
+        ("refreshing".into(), "↻".into())
+    } else if let Some(report) = report {
+        let (long_age, compact_age) = age_text(&report.generated_at);
+        if config.status.is_some_and(DashboardStatus::is_failure) {
+            (format!("last {long_age}"), format!("last {compact_age}"))
+        } else {
+            (long_age, compact_age)
+        }
+    } else {
+        ("not updated".into(), "never".into())
+    };
+    for shown_title in [title, "Herdr Quota"] {
+        for activity in [&long, &compact] {
+            let title_width = UnicodeWidthStr::width(shown_title);
+            let activity_width = UnicodeWidthStr::width(activity.as_str());
+            if title_width + 1 + activity_width <= width {
+                let gap = width - title_width - activity_width;
+                return format!("{shown_title}{}{activity}", " ".repeat(gap));
+            }
+        }
+    }
+    frame_text(title, width)
+}
+
+fn retry_text(config: &DashboardConfig) -> String {
+    config
+        .retry_minutes
+        .filter(|minutes| *minutes > 0)
+        .map(|minutes| format!("{minutes}m"))
+        .unwrap_or_else(|| "soon".into())
+}
+
+fn failure_line(config: &DashboardConfig, width: usize) -> Option<String> {
+    let status = config.status.filter(|status| status.is_failure())?;
+    let retry = retry_text(config);
+    let labels = match status {
+        DashboardStatus::Timeout => vec![
+            format!("? Quota check timed out · retry {retry}"),
+            format!("Timeout · retry {retry}"),
+            format!("Timeout · {retry}"),
+        ],
+        DashboardStatus::MissingExecutable => vec![
+            format!("? quota-axi missing · retry {retry}"),
+            format!("Missing · retry {retry}"),
+            format!("Missing · {retry}"),
+        ],
+        DashboardStatus::IncompatibleOutput => vec![
+            format!("? Incompatible output · retry {retry}"),
+            format!("Schema · retry {retry}"),
+            format!("Schema · {retry}"),
+        ],
+        DashboardStatus::NetworkProcess => vec![
+            format!("? Network/process failed · retry {retry}"),
+            format!("Failed · retry {retry}"),
+            format!("Failed · {retry}"),
+        ],
+        DashboardStatus::Refreshing => return None,
+    };
+    Some(fitting(labels, width))
+}
+
 fn render_frame(
-    report: &QuotaReport,
+    report: Option<&QuotaReport>,
     width: u16,
     height: u16,
     config: &DashboardConfig,
@@ -1099,18 +1209,44 @@ fn render_frame(
     if config.view == DashboardView::Preferences {
         return render_preferences(width, height, config);
     }
-    let mut rows = match config.view {
-        DashboardView::Overview | DashboardView::Details => {
-            semantic_rows(report, config, width as u16)
+    let no_report = report.is_none();
+    let empty = empty_report();
+    let report_value = report.unwrap_or(&empty);
+    let rows = if no_report {
+        vec![
+            SemanticRow {
+                text: "No quota readings".into(),
+                style: RowStyle::Warning,
+            },
+            SemanticRow {
+                text: if config.status == Some(DashboardStatus::Refreshing) {
+                    fitting(
+                        ["Collection in progress".into(), "Collecting quota".into()],
+                        width,
+                    )
+                } else {
+                    fitting(
+                        ["Press r to retry now".into(), "Press r to retry".into()],
+                        width,
+                    )
+                },
+                style: RowStyle::Normal,
+            },
+        ]
+    } else {
+        match config.view {
+            DashboardView::Overview | DashboardView::Details => {
+                semantic_rows(report_value, config, width as u16)
+            }
+            DashboardView::TransitionReview => vec![SemanticRow {
+                text: "No new transition events".into(),
+                style: RowStyle::Normal,
+            }],
+            DashboardView::Preferences => unreachable!("handled above"),
         }
-        DashboardView::TransitionReview => vec![SemanticRow {
-            text: "No new transition events".into(),
-            style: RowStyle::Normal,
-        }],
-        DashboardView::Preferences => unreachable!("handled above"),
     };
     let title = if config.view == DashboardView::Details {
-        let model = visible_model(report, config);
+        let model = visible_model(report_value, config);
         model
             .providers
             .get(
@@ -1133,15 +1269,25 @@ fn render_frame(
     } else {
         "Herdr Quota".into()
     };
-    let (attention, attention_style) = attention(report, config, width);
-    let controls = match (config.view, width >= 30) {
-        (DashboardView::Overview, true) => "j/k · enter details · p · q",
-        (DashboardView::Overview, false) => "j/k enter p q",
-        (DashboardView::Details, true) => "j/k · esc overview · q",
-        (DashboardView::Details, false) => "j/k esc q",
-        (DashboardView::TransitionReview, true) => "a/enter acknowledge · esc",
-        (DashboardView::TransitionReview, false) => "a/enter ack · esc",
-        (DashboardView::Preferences, _) => unreachable!("handled above"),
+    let (attention, attention_style) = if let Some(failure) = failure_line(config, width) {
+        (failure, RowStyle::Warning)
+    } else if no_report {
+        ("? Waiting for quota".into(), RowStyle::Warning)
+    } else {
+        attention(report_value, config, width)
+    };
+    let controls = match (config.view, width >= 30, config.interactive) {
+        (DashboardView::Overview, true, true) => "j/k · enter details · p · r · q",
+        (DashboardView::Overview, false, true) => "j/k enter p r q",
+        (DashboardView::Details, true, true) => "j/k · esc overview · r · q",
+        (DashboardView::Details, false, true) => "j/k esc r q",
+        (DashboardView::Overview, true, false) => "j/k · enter details · p · q",
+        (DashboardView::Overview, false, false) => "j/k enter p q",
+        (DashboardView::Details, true, false) => "j/k · esc overview · q",
+        (DashboardView::Details, false, false) => "j/k esc q",
+        (DashboardView::TransitionReview, true, _) => "a/enter acknowledge · esc",
+        (DashboardView::TransitionReview, false, _) => "a/enter ack · esc",
+        (DashboardView::Preferences, _, _) => unreachable!("handled above"),
     };
     let body_start = if config.view == DashboardView::Details && height >= 5 {
         3
@@ -1151,14 +1297,6 @@ fn render_frame(
     let footer = height.saturating_sub(1);
     let body_end = footer.max(body_start);
     let viewport = body_end.saturating_sub(body_start);
-    if config.view == DashboardView::Overview {
-        let spare = viewport.saturating_sub(rows.len());
-        rows.extend(
-            overview_evidence_rows(report, config, width as u16)
-                .into_iter()
-                .take(spare),
-        );
-    }
     let scroll = if config.view == DashboardView::Overview {
         config
             .selected_provider
@@ -1176,7 +1314,7 @@ fn render_frame(
         height
     ];
     output[0] = SemanticRow {
-        text: frame_text(&title, width),
+        text: title_with_activity(&title, report, config, width),
         style: RowStyle::Heading,
     };
     if height > 1 {
@@ -1314,7 +1452,7 @@ pub(super) fn clamp_scroll(
 
 pub(super) fn draw_dashboard(
     frame: &mut Frame<'_>,
-    report: &QuotaReport,
+    report: Option<&QuotaReport>,
     config: &DashboardConfig,
 ) {
     let area = frame.area();
@@ -1345,6 +1483,24 @@ impl Widget for Dashboard<'_> {
 /// Render once through Ratatui to a fixed buffer. Useful to callers that need a frame, not ANSI.
 pub fn render_buffer(
     report: &QuotaReport,
+    width: u16,
+    height: u16,
+    config: &DashboardConfig,
+) -> Buffer {
+    let rows = render_frame(Some(report), width, height, config);
+    let area = Rect::new(0, 0, width.max(1), height.max(1));
+    let mut buffer = Buffer::empty(area);
+    Dashboard {
+        rows: &rows,
+        config,
+    }
+    .render(area, &mut buffer);
+    buffer
+}
+
+/// Render one live dashboard state through Ratatui to a fixed buffer.
+pub fn render_dashboard_buffer(
+    report: Option<&QuotaReport>,
     width: u16,
     height: u16,
     config: &DashboardConfig,
@@ -1729,6 +1885,138 @@ mod tests {
             let lines = render_lines(&report, columns, rows, &DashboardConfig::default());
             assert_eq!(lines.last().unwrap().trim_end(), controls);
             assert!(lines.iter().all(|line| !line.contains(" · r")));
+        }
+    }
+
+    fn live_config(status: Option<DashboardStatus>, view: DashboardView) -> DashboardConfig {
+        DashboardConfig {
+            interactive: true,
+            status,
+            retry_minutes: status
+                .is_some_and(DashboardStatus::is_failure)
+                .then_some(10),
+            view,
+            ..DashboardConfig::default()
+        }
+    }
+
+    #[test]
+    fn refresh_changes_only_the_existing_activity_slot_at_every_supported_size() {
+        let report = report(vec![
+            provider("claude", Some(50.0), ProviderStatus::Fresh),
+            provider("codex", Some(60.0), ProviderStatus::Fresh),
+            provider("cursor", Some(70.0), ProviderStatus::Fresh),
+            provider("kimi", Some(80.0), ProviderStatus::Fresh),
+        ]);
+        for (columns, rows) in [(36, 23), (36, 12), (24, 8), (20, 12), (16, 12)] {
+            for view in [DashboardView::Overview, DashboardView::Details] {
+                let idle = live_config(None, view);
+                let refreshing = live_config(Some(DashboardStatus::Refreshing), view);
+                let before = render_dashboard_lines(Some(&report), columns, rows, &idle);
+                let during = render_dashboard_lines(Some(&report), columns, rows, &refreshing);
+
+                assert_eq!(before.len(), rows as usize);
+                assert!(before.iter().all(|line| width(line) == columns as usize));
+                assert_ne!(before[0], during[0]);
+                assert_eq!(before[1..], during[1..], "{columns}x{rows}");
+                assert!(before[0].starts_with("Herdr Quota"));
+                assert!(during[0].starts_with("Herdr Quota"));
+                assert!(
+                    during[0].contains("refreshing") || during[0].contains('↻'),
+                    "{columns}x{rows}"
+                );
+                assert!(during.last().expect("footer").contains('r'));
+            }
+        }
+    }
+
+    #[test]
+    fn refreshed_values_keep_the_fixed_decision_provider_position_and_footer_slots() {
+        let first = report(vec![provider("claude", Some(50.0), ProviderStatus::Fresh)]);
+        let second = report(vec![provider("claude", Some(40.0), ProviderStatus::Fresh)]);
+
+        for columns in [36, 20] {
+            let overview = live_config(None, DashboardView::Overview);
+            let first_overview = render_dashboard_lines(Some(&first), columns, 12, &overview);
+            let second_overview = render_dashboard_lines(Some(&second), columns, 12, &overview);
+            assert!(first_overview[1].starts_with("= Limits on pace"));
+            assert!(first_overview[2].starts_with(">=Claude"));
+            assert!(second_overview[2].starts_with(">=Claude"));
+            assert!(first_overview[2].contains("50%"));
+            assert!(second_overview[2].contains("40%"));
+
+            let details = render_dashboard_lines(
+                Some(&second),
+                columns,
+                12,
+                &live_config(None, DashboardView::Details),
+            );
+            assert!(details[2].starts_with("Rows "));
+            assert!(details[3].starts_with("> Claude"));
+            assert!(details.last().expect("footer").contains('r'));
+        }
+    }
+
+    #[test]
+    fn first_load_failures_are_actionable_and_last_good_failures_stay_identifiably_old() {
+        let cases = [
+            (DashboardStatus::Timeout, "Quota check timed out"),
+            (DashboardStatus::MissingExecutable, "quota-axi missing"),
+            (DashboardStatus::IncompatibleOutput, "Incompatible output"),
+            (DashboardStatus::NetworkProcess, "Network/process failed"),
+        ];
+
+        for (status, expected) in cases {
+            let failed = live_config(Some(status), DashboardView::Overview);
+            let first = render_dashboard_lines(None, 36, 12, &failed);
+            assert!(first[0].contains("not updated"));
+            assert!(first[1].contains(expected));
+            assert!(first[1].contains("retry 10m"));
+            assert_eq!(first[2].trim_end(), "No quota readings");
+            assert_eq!(first[3].trim_end(), "Press r to retry now");
+            assert!(first.last().expect("footer").contains('r'));
+
+            let last_report = report(vec![provider("claude", Some(50.0), ProviderStatus::Fresh)]);
+            let last = render_dashboard_lines(Some(&last_report), 36, 12, &failed);
+            let idle = render_dashboard_lines(
+                Some(&last_report),
+                36,
+                12,
+                &live_config(None, DashboardView::Overview),
+            );
+            assert!(last[0].contains("last "));
+            assert!(last[1].contains(expected));
+            assert!(last[2].starts_with(">=Claude"));
+            assert!(last[2].contains("50%"));
+            assert_eq!(last[2..], idle[2..]);
+            assert!(last.iter().all(|line| !line.contains("No quota readings")));
+        }
+
+        let narrow = render_dashboard_lines(
+            None,
+            20,
+            12,
+            &live_config(Some(DashboardStatus::Timeout), DashboardView::Overview),
+        );
+        assert_eq!(narrow[1].trim_end(), "Timeout · retry 10m");
+        assert_eq!(narrow[2].trim_end(), "No quota readings");
+        assert_eq!(narrow[3].trim_end(), "Press r to retry now");
+    }
+
+    #[test]
+    fn dynamic_no_color_keeps_every_cell_on_the_terminal_default_palette() {
+        let report = report(vec![provider("claude", Some(9.0), ProviderStatus::Fresh)]);
+        let config = live_config(Some(DashboardStatus::Refreshing), DashboardView::Overview);
+        for (columns, rows) in [(36, 12), (20, 12)] {
+            let buffer = render_dashboard_buffer(Some(&report), columns, rows, &config);
+            assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
+            assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
+            assert!(
+                buffer
+                    .content
+                    .iter()
+                    .all(|cell| cell.modifier == Modifier::empty())
+            );
         }
     }
 
@@ -2292,86 +2580,6 @@ mod tests {
             assert!(lines.iter().all(|line| !line.contains("Codex reset")));
             assert!(lines.iter().all(|line| !line.contains("Codex on pace")));
         }
-    }
-
-    #[test]
-    fn overview_secondary_evidence_only_uses_space_after_the_roster() {
-        let report = crate::domain::schema::parse_quota_response(include_str!(
-            "../../../../test/fixtures/complete.json"
-        ))
-        .expect("complete fixture");
-
-        for columns in [36, 20] {
-            let config = DashboardConfig::default();
-            let model = visible_model(&report, &config);
-            let lines = render_lines(&report, columns, 12, &config);
-            let provider_rows: Vec<_> = model
-                .providers
-                .iter()
-                .filter_map(|section| {
-                    let name = compact_provider_name(section.provider);
-                    lines.iter().position(|line| line.contains(name))
-                })
-                .collect();
-            assert_eq!(
-                provider_rows.len(),
-                model.providers.len(),
-                "{columns}: {lines:?}"
-            );
-            assert!(
-                provider_rows.windows(2).all(|pair| pair[0] < pair[1]),
-                "{columns}: {lines:?}"
-            );
-            let last_provider = *provider_rows.last().expect("provider roster");
-            assert!(
-                lines[2..=last_provider]
-                    .iter()
-                    .all(|line| !line.contains(" reset ") && !line.contains(" through reset")),
-                "{columns}: {lines:?}"
-            );
-            assert!(lines.iter().all(|line| !line.contains("Claude reset")));
-            assert_eq!(
-                lines[11].trim_end(),
-                if columns == 36 {
-                    "j/k · enter details · p · q"
-                } else {
-                    "j/k enter p q"
-                }
-            );
-        }
-    }
-
-    #[test]
-    fn overview_evidence_excludes_selected_and_decision_providers() {
-        let mut claude = provider("claude", Some(40.0), ProviderStatus::Fresh);
-        claude.windows[0].resets_at = Some("2026-09-05T12:00:00Z".into());
-        claude.effective[0].runway = Some(Runway {
-            status: RunwayStatus::ProjectedExhaustion,
-            usable_runway_seconds: Some(86_400.0),
-            projected_exhausted_at: Some("2026-09-03T12:00:00Z".into()),
-            limiting_window_id: Some("main".into()),
-            projection_confidence: Some(ProjectionConfidence::Established),
-            unmeasurable_window_ids: vec![],
-        });
-        let mut kimi = provider("kimi", Some(80.0), ProviderStatus::Fresh);
-        kimi.windows[0].resets_at = Some("2026-09-06T12:00:00Z".into());
-        let report = report(vec![claude, kimi]);
-        let config = DashboardConfig {
-            selected_provider: 1,
-            ..DashboardConfig::default()
-        };
-
-        let lines = render_lines(&report, 36, 12, &config);
-
-        assert!(lines[1].contains("out 09/03 12:00"), "{lines:?}");
-        assert!(lines[2].starts_with(" !Claude"), "{lines:?}");
-        assert!(lines[3].starts_with(">=Kimi"), "{lines:?}");
-        assert!(
-            lines[4..11]
-                .iter()
-                .all(|line| !line.contains("Claude") && !line.contains("Kimi")),
-            "{lines:?}"
-        );
     }
 
     #[test]
