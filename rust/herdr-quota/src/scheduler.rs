@@ -47,7 +47,10 @@ impl RefreshAttempt {
     /// Publish a state change if this attempt still owns the current generation.
     pub fn publish<R>(&self, publication: impl FnOnce() -> R) -> Option<R> {
         let state = self.publication_state.lock().expect("publication lock");
-        if state.closed || state.generation != self.generation {
+        if self.closed.load(Ordering::Acquire)
+            || state.closed
+            || state.generation != self.generation
+        {
             return None;
         }
         Some(publication())
@@ -493,6 +496,27 @@ mod tests {
         for _ in 0..8 {
             tokio::task::yield_now().await;
         }
+    }
+
+    #[test]
+    fn publish_rejects_an_attempt_as_soon_as_close_is_signaled() {
+        let closed = std::sync::Arc::new(super::AtomicBool::new(true));
+        let attempt = RefreshAttempt {
+            generation: 1,
+            current_generation: std::sync::Arc::new(super::AtomicU64::new(1)),
+            closed,
+            publication_state: std::sync::Arc::new(std::sync::Mutex::new(PublicationState {
+                generation: 1,
+                closed: false,
+            })),
+        };
+        let published = AtomicUsize::new(0);
+
+        assert_eq!(
+            attempt.publish(|| published.fetch_add(1, Ordering::SeqCst)),
+            None
+        );
+        assert_eq!(published.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
