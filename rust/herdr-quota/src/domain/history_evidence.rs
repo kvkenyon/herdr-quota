@@ -228,8 +228,7 @@ pub(crate) fn timestamp_millis(value: &str) -> Option<i128> {
 }
 
 pub(crate) fn canonical_history_timestamp(now: SystemTime) -> Option<String> {
-    OffsetDateTime::try_from(now)
-        .ok()?
+    OffsetDateTime::from(now)
         .to_offset(UtcOffset::UTC)
         .format(HISTORY_TIMESTAMP_FORMAT)
         .ok()
