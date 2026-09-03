@@ -23,7 +23,7 @@ use ratatui::{
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::domain::{
-    provider::{MarketedProvider, PaceStatus, ProviderQuota, ProviderStatus},
+    provider::{MarketedProvider, PaceStatus, ProviderQuota, ProviderStatus, SemanticsStatus},
     schema::QuotaReport,
 };
 
@@ -97,6 +97,12 @@ fn provider_state(provider: &ProviderQuota) -> Option<&'static str> {
 
 fn has_current_quota(provider: &ProviderQuota) -> bool {
     provider.state.status == ProviderStatus::Fresh && !provider.state.stale
+}
+
+fn has_trustworthy_quota(provider: &ProviderQuota) -> bool {
+    has_current_quota(provider)
+        && provider.semantics_status == Some(SemanticsStatus::Known)
+        && !provider.windows.is_empty()
 }
 
 fn percent(value: Option<f64>) -> String {
@@ -228,18 +234,23 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
     if visible.is_empty() {
         return ("? No providers shown".into(), RowStyle::Warning);
     }
+    if visible.iter().any(|provider| !has_current_quota(provider)) {
+        return ("? Limits non-current".into(), RowStyle::Warning);
+    }
+    if visible
+        .iter()
+        .any(|provider| !has_trustworthy_quota(provider))
+    {
+        return ("? Quota data partial".into(), RowStyle::Warning);
+    }
     if let Some((provider, remaining)) = visible
         .iter()
         .flat_map(|provider| {
-            provider
-                .windows
-                .iter()
-                .filter(move |_| has_current_quota(provider))
-                .filter_map(move |window| {
-                    window
-                        .percent_remaining
-                        .map(|remaining| (provider, remaining))
-                })
+            provider.windows.iter().filter_map(move |window| {
+                window
+                    .percent_remaining
+                    .map(|remaining| (provider, remaining))
+            })
         })
         .min_by(|(_, left), (_, right)| left.total_cmp(right))
     {
@@ -262,9 +273,6 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
                 .any(|window| window.percent_remaining.is_none())
     }) {
         return ("? Some limits unknown".into(), RowStyle::Warning);
-    }
-    if visible.iter().any(|provider| !has_current_quota(provider)) {
-        return ("? Limits non-current".into(), RowStyle::Warning);
     }
     let current_windows: Vec<_> = visible
         .iter()
@@ -572,7 +580,7 @@ mod tests {
                 pace: None,
             }],
             effective: vec![],
-            semantics_status: None,
+            semantics_status: Some(SemanticsStatus::Known),
             credits: None,
             state: ProviderState {
                 status,
@@ -822,6 +830,14 @@ mod tests {
         let base = report(vec![provider("claude", Some(50.0), ProviderStatus::Fresh)]);
         let mut no_windows = base.clone();
         no_windows.providers[0].windows.clear();
+        let mut unknown_semantics = base.clone();
+        unknown_semantics.providers[0].semantics_status = Some(SemanticsStatus::Unknown);
+        let mut partial_semantics = base.clone();
+        partial_semantics.providers[0].semantics_status = Some(SemanticsStatus::Partial);
+        let mut incomplete_siblings = base.clone();
+        let mut sibling = provider("codex", Some(50.0), ProviderStatus::Fresh);
+        sibling.windows.clear();
+        incomplete_siblings.providers.push(sibling);
 
         let with_pace = |status| {
             let mut report = base.clone();
@@ -837,6 +853,9 @@ mod tests {
 
         for (report, expected) in [
             (no_windows, "? Quota data partial"),
+            (unknown_semantics, "? Quota data partial"),
+            (partial_semantics, "? Quota data partial"),
+            (incomplete_siblings, "? Quota data partial"),
             (with_pace(PaceStatus::Ahead), "? Pace needs review"),
             (with_pace(PaceStatus::Mixed), "? Pace needs review"),
             (with_pace(PaceStatus::Behind), "= Limits on pace"),
