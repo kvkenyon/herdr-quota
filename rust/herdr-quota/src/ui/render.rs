@@ -296,6 +296,22 @@ fn fitting(candidates: impl IntoIterator<Item = String>, width: usize) -> String
         .unwrap_or_default()
 }
 
+fn whole_token_prefix(value: &str, width: usize) -> String {
+    let mut result = String::new();
+    for token in value.split_whitespace() {
+        let candidate = if result.is_empty() {
+            token.to_owned()
+        } else {
+            format!("{result} {token}")
+        };
+        if UnicodeWidthStr::width(candidate.as_str()) > width {
+            break;
+        }
+        result = candidate;
+    }
+    result
+}
+
 fn hidden_sibling_unsafe(
     section: &crate::ui::model::ProviderSection,
     provider: &ProviderQuota,
@@ -645,36 +661,55 @@ fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Ve
         });
         match &section.detail {
             ProviderDetail::Recovery { instruction } => rows.push(SemanticRow {
-                text: format!("  ? {instruction}"),
+                text: fitting(
+                    [format!("  ? {instruction}"), "  ? sign in".into()],
+                    width as usize,
+                ),
                 style: RowStyle::Warning,
             }),
-            ProviderDetail::Message { message } => rows.push(SemanticRow {
-                text: format!("  ? {message}"),
-                style: RowStyle::Warning,
-            }),
+            ProviderDetail::Message { message } => {
+                let compact = whole_token_prefix(message, width.saturating_sub(4) as usize);
+                let compact = if compact.is_empty() {
+                    "  ? unavailable".into()
+                } else {
+                    format!("  ? {compact}")
+                };
+                rows.push(SemanticRow {
+                    text: fitting(
+                        [
+                            format!("  ? {message}"),
+                            compact,
+                            "  ? unavailable".into(),
+                        ],
+                        width as usize,
+                    ),
+                    style: RowStyle::Warning,
+                })
+            }
             ProviderDetail::Tiers(tiers) => {
                 for tier in tiers {
+                    let percent = percent(tier.percent_remaining);
+                    let label_source = if width >= 30 {
+                        &tier.label
+                    } else {
+                        &tier.compact_label
+                    };
+                    let label_limit = if width >= 30 { 15 } else { 9 };
+                    let label = whole_token_prefix(label_source, label_limit);
                     if !current {
                         rows.push(SemanticRow {
-                            text: format!(
-                                " ~ last known {} {}",
-                                tier.compact_label,
-                                percent(tier.percent_remaining)
+                            text: fitting(
+                                [
+                                    format!(" ~ last known {label} {percent}"),
+                                    format!(" ~ {label} {percent}"),
+                                    format!(" ~ {percent}"),
+                                ],
+                                width as usize,
                             ),
                             style: RowStyle::Warning,
                         });
                         continue;
                     }
-                    let label_budget = if width >= 30 { 15 } else { 9 };
-                    let label = truncate(
-                        if width >= 30 {
-                            &tier.label
-                        } else {
-                            &tier.compact_label
-                        },
-                        label_budget,
-                    );
-                    let percent = percent(tier.percent_remaining);
                     let candidate_conclusion = match tier.conclusion {
                         TierConclusion::NotReported => " · not reported",
                         TierConclusion::OnPace => " · on pace",
@@ -682,21 +717,6 @@ fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Ve
                         TierConclusion::Spend { .. } => " · spend",
                         TierConclusion::Unknown => "",
                     };
-                    let base_width = 2 + label_budget + 1 + UnicodeWidthStr::width(&*percent);
-                    let conclusion = if base_width + UnicodeWidthStr::width(candidate_conclusion)
-                        <= width as usize
-                    {
-                        candidate_conclusion
-                    } else {
-                        ""
-                    };
-                    let meter =
-                        if conclusion.is_empty() && width >= 30 && tier.displayed_percent.is_some()
-                        {
-                            format!(" [{}]", gauge(tier.displayed_percent, 6))
-                        } else {
-                            String::new()
-                        };
                     let critical = tier.percent_remaining.is_some_and(|value| value <= 10.0);
                     let warning = matches!(tier.conclusion, TierConclusion::NotReported);
                     let marker = if critical {
@@ -706,9 +726,27 @@ fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Ve
                     } else {
                         " "
                     };
+                    let label_budget = if width >= 30 { 15 } else { 9 };
+                    let aligned = format!(" {marker}{label:<label_budget$} {percent}");
+                    let compact = if label.is_empty() {
+                        format!(" {marker}{percent}")
+                    } else {
+                        format!(" {marker}{label} {percent}")
+                    };
+                    let meter = (width >= 30 && tier.displayed_percent.is_some())
+                        .then(|| format!(" [{}]", gauge(tier.displayed_percent, 6)))
+                        .unwrap_or_default();
                     rows.push(SemanticRow {
-                        text: format!(
-                            " {marker}{label:<label_budget$} {percent}{meter}{conclusion}"
+                        text: fitting(
+                            [
+                                format!("{aligned}{candidate_conclusion}"),
+                                format!("{aligned}{meter}"),
+                                aligned,
+                                format!("{compact}{candidate_conclusion}"),
+                                compact,
+                                format!(" {marker}{percent}"),
+                            ],
+                            width as usize,
                         ),
                         style: if critical {
                             RowStyle::Critical
@@ -1903,6 +1941,40 @@ mod tests {
             );
             assert_eq!(lines[0].trim_end(), "Herdr Quota");
         }
+    }
+
+    #[test]
+    fn narrow_detail_rows_elide_only_whole_tokens() {
+        let details = DashboardConfig {
+            view: DashboardView::Details,
+            ..DashboardConfig::default()
+        };
+        let mut long_tier = provider("claude", Some(50.0), ProviderStatus::Fresh);
+        long_tier.windows[0].id = "extension-tier".into();
+        long_tier.windows[0].label = "Long model".into();
+        let lines = render_lines(&report(vec![long_tier]), 20, 12, &details);
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Long") && line.contains("50%"))
+        );
+        assert!(lines.iter().all(|line| !line.contains("Long mode")));
+
+        let mut unknown_tier = provider("claude", Some(50.0), ProviderStatus::Fresh);
+        unknown_tier.windows[0].id = "extension-tier".into();
+        unknown_tier.windows[0].label = "Long model".into();
+        unknown_tier.windows[0].percent_remaining = None;
+        let lines = render_lines(&report(vec![unknown_tier]), 16, 12, &details);
+        assert!(lines.iter().any(|line| line.contains("--")));
+
+        let signed_out = provider("copilot", Some(50.0), ProviderStatus::AuthRequired);
+        let lines = render_lines(&report(vec![signed_out]), 16, 12, &details);
+        assert!(lines.iter().any(|line| line.trim() == "? sign in"));
+
+        let mut approval = provider("claude", Some(50.0), ProviderStatus::Fresh);
+        approval.state.reason = Some("keychain_access_required".into());
+        let lines = render_lines(&report(vec![approval]), 16, 12, &details);
+        assert!(lines.iter().any(|line| line.trim() == "? Keychain"));
     }
 
     #[test]
