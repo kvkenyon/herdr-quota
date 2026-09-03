@@ -18,7 +18,7 @@ size before launch:
 
 | Run    | PTY size             | Required checks                                              |
 | ------ | -------------------- | ------------------------------------------------------------ |
-| Wide   | 36 columns × 23 rows | Open, first render, feature path, navigation, and quit       |
+| Wide   | 36 columns × 12 rows | Open, first render, feature path, navigation, and quit       |
 | Narrow | 20 columns × 12 rows | Open, first render, feature path, row reachability, and quit |
 
 For both runs, check these points that apply to the shipped feature:
@@ -55,7 +55,7 @@ In that guarded lab, verify this sequence:
    residue remains.
 
 The lab proves lifecycle behavior only. It does not prove display width: run
-the direct PTY checks at 36 × 23 and 20 × 12 as well. Do not run server-global
+the direct PTY checks at 36 × 12 and 20 × 12 as well. Do not run server-global
 Herdr lifecycle commands, and do not add a lifecycle command to an unguarded
 brief.
 

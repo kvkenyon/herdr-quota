@@ -705,11 +705,7 @@ fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Ve
                 };
                 rows.push(SemanticRow {
                     text: fitting(
-                        [
-                            format!("  ? {message}"),
-                            compact,
-                            "  ? unavailable".into(),
-                        ],
+                        [format!("  ? {message}"), compact, "  ? unavailable".into()],
                         width as usize,
                     ),
                     style: RowStyle::Warning,
@@ -1934,7 +1930,7 @@ mod tests {
             projected("codex", 80.0, "2026-09-02T13:00:00Z"),
         ]);
         let lines = render_lines(&projections, 36, 23, &DashboardConfig::default());
-        assert!(lines[1].starts_with("! out 09/02 13:00"));
+        assert!(lines[1].starts_with("! out 09/02 17:00"));
 
         let mut exhausted_soon = provider("claude", Some(0.0), ProviderStatus::Fresh);
         exhausted_soon.windows[0].resets_at = Some("2026-09-02T13:00:00Z".into());
@@ -1946,7 +1942,7 @@ mod tests {
             23,
             &DashboardConfig::default(),
         );
-        assert!(lines[1].starts_with("! out now · reset 09/02 17:00"));
+        assert!(lines[1].starts_with("! out now · reset 09/02 13:00"));
 
         let mut labeled = projected("claude", 80.0, "2026-09-02T13:00:00Z");
         let mut pace_window = labeled.windows[0].clone();
@@ -1978,7 +1974,11 @@ mod tests {
 
         for columns in 16..=23 {
             let lines = render_lines(&exhausted, columns, 12, &DashboardConfig::default());
-            assert!(lines[1].starts_with("! out now"), "{columns}: {:?}", lines[1]);
+            assert!(
+                lines[1].starts_with("! out now"),
+                "{columns}: {:?}",
+                lines[1]
+            );
         }
 
         let details = DashboardConfig {
@@ -1987,7 +1987,11 @@ mod tests {
         };
         for provider_id in ["claude", "copilot"] {
             let lines = render_lines(
-                &report(vec![provider(provider_id, Some(50.0), ProviderStatus::Fresh)]),
+                &report(vec![provider(
+                    provider_id,
+                    Some(50.0),
+                    ProviderStatus::Fresh,
+                )]),
                 16,
                 12,
                 &details,
@@ -2254,7 +2258,7 @@ mod tests {
         let lines = render_lines(&report, 36, 12, &DashboardConfig::default());
 
         assert_eq!(lines[0].trim_end(), "Herdr Quota");
-        assert!(lines[1].starts_with("= Limits on pace"));
+        assert!(lines[1].starts_with("? Quota data partial"));
         assert!(lines[2].starts_with(">=Claude"));
         assert!(lines[3].starts_with(" ?Codex ? partial"));
         assert!(lines[4].starts_with(" =Cursor"));
