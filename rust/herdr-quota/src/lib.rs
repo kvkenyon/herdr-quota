@@ -8,8 +8,8 @@ pub mod collector;
 pub mod domain;
 pub mod sanitize;
 pub mod store;
-mod unix_signal;
 pub mod ui;
+mod unix_signal;
 
 /// The commands that this foundation supports.
 #[derive(Debug, PartialEq, Eq)]
