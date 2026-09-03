@@ -968,6 +968,7 @@ fn semantic_rows_with_history(
     }
 }
 
+#[cfg(test)]
 fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
     semantic_rows_with_history(report, None, config, width)
 }
