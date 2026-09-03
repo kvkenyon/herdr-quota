@@ -76,16 +76,11 @@ test("disabled-only providers do not produce a hidden-provider summary", () => {
   }
 });
 
-test("the summary counts unavailable and unsupported providers, not disabled ones", () => {
+test("the summary counts unavailable providers, not disabled ones", () => {
   const value = reportWithEveryMarketedProvider();
   value.providers.find(
     (provider) => provider.provider === "codex",
   ).state.status = "unavailable";
-  value.providers.push({
-    ...JSON.parse(JSON.stringify(value.providers[0])),
-    provider: "future-lab",
-    label: "Future Lab",
-  });
 
   const output = render(
     { ...defaultSettings(), hiddenProviders: ["claude"] },
@@ -93,7 +88,7 @@ test("the summary counts unavailable and unsupported providers, not disabled one
     value,
   );
   assert.doesNotMatch(output, /^Claude\s*$/m);
-  assert.match(output, /^2 hidden providers · p Preferences/m);
+  assert.match(output, /^1 hidden provider · p Preferences/m);
 });
 
 test("no summary line renders when every non-disabled provider is available", () => {

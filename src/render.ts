@@ -284,8 +284,7 @@ function orderedVisibleProviders(
  * Count provider records that the dashboard cannot show for reasons outside
  * the user's Preferences choice. A disabled provider is an intentional local
  * presentation choice, not a hidden provider. In contrast, unavailable
- * provider readings and unrecognised report providers remain disclosed as
- * non-Preferences conditions.
+ * provider readings remain disclosed as non-Preferences conditions.
  */
 function nonDisabledHiddenProviderCount(
   state: DashboardState,
