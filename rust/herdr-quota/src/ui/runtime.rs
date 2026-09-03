@@ -176,12 +176,7 @@ impl RefreshWorker for DashboardWorker {
             .publish(|| {
                 let mut state = lock(&state);
                 let history_view = state.history.record(&report);
-                state.history_matches_report = !matches!(
-                    history_view.availability,
-                    HistoryAvailability::Incompatible
-                        | HistoryAvailability::Unavailable
-                        | HistoryAvailability::NoUsableData
-                );
+                state.history_matches_report = state.history.represents(&report);
                 let history = state.history.current().cloned();
                 let settings = transition_settings(&state.settings);
                 state.transitions = match (
