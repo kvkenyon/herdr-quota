@@ -627,8 +627,24 @@ fn overview_evidence_rows(
                 .min(model.providers.len().saturating_sub(1)),
         )
         .map(|section| section.provider);
+    let trustworthy: Vec<_> = model
+        .providers
+        .iter()
+        .filter_map(|section| {
+            report
+                .providers
+                .iter()
+                .find(|provider| provider_id(provider) == Some(section.provider))
+                .filter(|provider| has_decision_safe_quota(section, provider))
+        })
+        .collect();
+    let decision_provider =
+        decision_constraint(&trustworthy).and_then(|(provider, _)| provider_id(provider));
     let mut rows = Vec::new();
     for section in &model.providers {
+        if selected == Some(section.provider) || decision_provider == Some(section.provider) {
+            continue;
+        }
         let Some(provider) = report
             .providers
             .iter()
@@ -671,8 +687,7 @@ fn overview_evidence_rows(
         if runway.is_some_and(|runway| {
             runway.status == RunwayStatus::ProjectedExhaustion
                 && runway.projection_confidence == Some(ProjectionConfidence::Established)
-        }) && selected != Some(section.provider)
-        {
+        }) {
             let when = moment(
                 runway.and_then(|runway| runway.projected_exhausted_at.as_deref()),
                 compact,
@@ -856,29 +871,10 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
     }
 }
 
-fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (String, RowStyle) {
-    let model = visible_model(report, config);
-    let visible: Vec<_> = model
-        .providers
-        .iter()
-        .filter_map(|section| {
-            report
-                .providers
-                .iter()
-                .find(|provider| provider_id(provider) == Some(section.provider))
-                .map(|provider| (section, provider))
-        })
-        .collect();
-    if visible.is_empty() {
-        return ("? No providers shown".into(), RowStyle::Warning);
-    }
-    let trustworthy: Vec<_> = visible
-        .iter()
-        .filter_map(|(section, provider)| {
-            has_decision_safe_quota(section, provider).then_some(*provider)
-        })
-        .collect();
-    let constraints = trustworthy
+fn decision_constraint<'a>(
+    trustworthy: &[&'a ProviderQuota],
+) -> Option<(&'a ProviderQuota, &'a EffectiveAvailability)> {
+    trustworthy
         .iter()
         .enumerate()
         .flat_map(|(provider_order, provider)| {
@@ -915,7 +911,7 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
                         effective.effective_percent_remaining.unwrap_or(101.0),
                         provider_order,
                         effective_order,
-                        provider,
+                        *provider,
                         effective,
                     ))
                 })
@@ -936,8 +932,33 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
                 })
                 .then_with(|| left.3.cmp(&right.3))
                 .then_with(|| left.4.cmp(&right.4))
-        });
-    if let Some((_, _, _, _, _, provider, effective)) = constraints {
+        })
+        .map(|(_, _, _, _, _, provider, effective)| (provider, effective))
+}
+
+fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (String, RowStyle) {
+    let model = visible_model(report, config);
+    let visible: Vec<_> = model
+        .providers
+        .iter()
+        .filter_map(|section| {
+            report
+                .providers
+                .iter()
+                .find(|provider| provider_id(provider) == Some(section.provider))
+                .map(|provider| (section, provider))
+        })
+        .collect();
+    if visible.is_empty() {
+        return ("? No providers shown".into(), RowStyle::Warning);
+    }
+    let trustworthy: Vec<_> = visible
+        .iter()
+        .filter_map(|(section, provider)| {
+            has_decision_safe_quota(section, provider).then_some(*provider)
+        })
+        .collect();
+    if let Some((provider, effective)) = decision_constraint(&trustworthy) {
         let limiting_id = limiting_window_id(effective);
         let runway = effective
             .runway
@@ -2580,6 +2601,39 @@ mod tests {
             assert!(lines.iter().all(|line| !line.contains("Codex reset")));
             assert!(lines.iter().all(|line| !line.contains("Codex on pace")));
         }
+    }
+
+    #[test]
+    fn overview_evidence_excludes_selected_and_decision_providers() {
+        let mut claude = provider("claude", Some(40.0), ProviderStatus::Fresh);
+        claude.windows[0].resets_at = Some("2026-09-05T12:00:00Z".into());
+        claude.effective[0].runway = Some(Runway {
+            status: RunwayStatus::ProjectedExhaustion,
+            usable_runway_seconds: Some(86_400.0),
+            projected_exhausted_at: Some("2026-09-03T12:00:00Z".into()),
+            limiting_window_id: Some("main".into()),
+            projection_confidence: Some(ProjectionConfidence::Established),
+            unmeasurable_window_ids: vec![],
+        });
+        let mut kimi = provider("kimi", Some(80.0), ProviderStatus::Fresh);
+        kimi.windows[0].resets_at = Some("2026-09-06T12:00:00Z".into());
+        let report = report(vec![claude, kimi]);
+        let config = DashboardConfig {
+            selected_provider: 1,
+            ..DashboardConfig::default()
+        };
+
+        let lines = render_lines(&report, 36, 12, &config);
+
+        assert!(lines[1].contains("out 09/03 12:00"), "{lines:?}");
+        assert!(lines[2].starts_with(" !Claude"), "{lines:?}");
+        assert!(lines[3].starts_with(">=Kimi"), "{lines:?}");
+        assert!(
+            lines[4..11]
+                .iter()
+                .all(|line| !line.contains("Claude") && !line.contains("Kimi")),
+            "{lines:?}"
+        );
     }
 
     #[test]
