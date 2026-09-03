@@ -12,7 +12,6 @@ pub mod scheduler;
 pub mod store;
 pub mod ui;
 mod unix_signal;
-pub mod ui;
 
 /// The commands that this foundation supports.
 #[derive(Debug, PartialEq, Eq)]
