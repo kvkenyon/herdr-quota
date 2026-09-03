@@ -312,6 +312,14 @@ fn whole_token_prefix(value: &str, width: usize) -> String {
     result
 }
 
+fn frame_text(value: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(value) <= width {
+        value.to_owned()
+    } else {
+        whole_token_prefix(value, width)
+    }
+}
+
 fn hidden_sibling_unsafe(
     section: &crate::ui::model::ProviderSection,
     provider: &ProviderQuota,
@@ -651,7 +659,15 @@ fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Ve
         let annotation = section.annotation.as_ref().map(|value| value.text);
         rows.push(SemanticRow {
             text: annotation
-                .map(|value| format!("> {} · {value}", section.label))
+                .map(|value| {
+                    fitting(
+                        [
+                            format!("> {} · {value}", section.label),
+                            format!("> {}", section.label),
+                        ],
+                        width as usize,
+                    )
+                })
                 .unwrap_or_else(|| format!("> {}", section.label)),
             style: if annotation.is_some() {
                 RowStyle::Warning
@@ -917,19 +933,37 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
             .as_ref()
             .is_some_and(|pace| matches!(pace.status, PaceStatus::Ahead | PaceStatus::Mixed))
     }) {
-        return ("? Pace needs review".into(), RowStyle::Warning);
+        return (
+            fitting(
+                ["? Pace needs review".into(), "? Pace review".into()],
+                width,
+            ),
+            RowStyle::Warning,
+        );
     }
     if visible
         .iter()
         .any(|(_, provider)| !has_current_quota(provider))
     {
-        return ("? Limits non-current".into(), RowStyle::Warning);
+        return (
+            fitting(
+                ["? Limits non-current".into(), "? Non-current".into()],
+                width,
+            ),
+            RowStyle::Warning,
+        );
     }
     if visible
         .iter()
         .any(|(section, provider)| !has_decision_safe_quota(section, provider))
     {
-        return ("? Quota data partial".into(), RowStyle::Warning);
+        return (
+            fitting(
+                ["? Quota data partial".into(), "? Data partial".into()],
+                width,
+            ),
+            RowStyle::Warning,
+        );
     }
     if !current_effective.is_empty()
         && current_effective.iter().all(|effective| {
@@ -944,7 +978,13 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
     {
         return ("= Limits on pace".into(), RowStyle::Normal);
     }
-    ("? Quota data partial".into(), RowStyle::Warning)
+    (
+        fitting(
+            ["? Quota data partial".into(), "? Data partial".into()],
+            width,
+        ),
+        RowStyle::Warning,
+    )
 }
 
 fn position(scroll: usize, total: usize, viewport: usize) -> String {
@@ -1049,32 +1089,32 @@ fn render_frame(
         height
     ];
     output[0] = SemanticRow {
-        text: truncate(&title, width),
+        text: frame_text(&title, width),
         style: RowStyle::Heading,
     };
     if height > 1 {
         output[1] = SemanticRow {
-            text: truncate(&attention, width),
+            text: frame_text(&attention, width),
             style: attention_style,
         };
     }
     if height > 2 && config.view == DashboardView::Details {
-        output[2].text = truncate(&position(scroll, rows.len(), viewport), width);
+        output[2].text = frame_text(&position(scroll, rows.len(), viewport), width);
     }
     if rows.is_empty() && viewport > 0 {
         output[body_start] = SemanticRow {
-            text: truncate("? No providers shown", width),
+            text: frame_text("? No providers shown", width),
             style: RowStyle::Warning,
         };
     }
     for (index, row) in rows.iter().skip(scroll).take(viewport).enumerate() {
         output[body_start + index] = SemanticRow {
-            text: truncate(&row.text, width),
+            text: frame_text(&row.text, width),
             style: row.style,
         };
     }
     if height > 1 {
-        output[footer].text = truncate(controls, width);
+        output[footer].text = frame_text(controls, width);
     }
     output
         .into_iter()
@@ -1975,6 +2015,24 @@ mod tests {
         approval.state.reason = Some("keychain_access_required".into());
         let lines = render_lines(&report(vec![approval]), 16, 12, &details);
         assert!(lines.iter().any(|line| line.trim() == "? Keychain"));
+    }
+
+    #[test]
+    fn narrow_frame_preserves_complete_decision_and_heading_tokens() {
+        let mut partial = provider("claude", Some(50.0), ProviderStatus::Fresh);
+        partial.semantics_status = Some(SemanticsStatus::Partial);
+        let lines = render_lines(
+            &report(vec![partial]),
+            16,
+            12,
+            &DashboardConfig {
+                view: DashboardView::Details,
+                ..DashboardConfig::default()
+            },
+        );
+
+        assert_eq!(lines[1].trim_end(), "? Data partial");
+        assert_eq!(lines[3].trim_end(), "> Claude");
     }
 
     #[test]
