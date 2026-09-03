@@ -8,8 +8,8 @@ them as a Rust oracle.
 
 Do not build a TypeScript parity oracle, golden-output or snapshot harness, or
 side-by-side or differential verification layer. Ship one feature at a time
-with ordinary Rust unit tests and a manual dashboard smoke check, then keep
-moving.
+with ordinary Rust unit tests. Once a feature is reachable through the Rust
+dashboard, also run the applicable manual dashboard smoke checks.
 
 ## Persistence preparation
 
@@ -22,8 +22,9 @@ new version.
 Herdr Quota 0.3.x sees these documents as future versions. It preserves the
 file bytes. The file paths do not change.
 
-Each later Rust ship brief must include this rule in substance. It must also
-state the manual smoke evidence for its feature.
+Each later Rust ship brief must include this rule in substance. Once its
+feature is reachable through the Rust dashboard, it must also state the
+applicable manual smoke evidence.
 
 ## Feature inventory owners
 
