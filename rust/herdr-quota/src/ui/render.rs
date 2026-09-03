@@ -1826,7 +1826,7 @@ mod tests {
                         scope: "All models".into(),
                         limit: Some("Week".into()),
                         remaining,
-                        reset_at: None,
+                        reset_at: Some("2026-09-08T12:00:00.000Z".into()),
                         pace: None,
                         runway: None,
                     }],
