@@ -280,9 +280,9 @@ fn render_frame(
     let title = "Herdr Quota";
     let (attention, attention_style) = attention(report, config);
     let controls = if width >= 30 {
-        "j/k · PgUp/PgDn · r · q"
+        "j/k · PgUp/PgDn · q"
     } else {
-        "j/k · r · q"
+        "j/k · q"
     };
     let body_start = if height >= 5 { 3 } else { 2.min(height) };
     let footer = height.saturating_sub(1);
@@ -423,7 +423,7 @@ pub fn preview_svg(lines: &[String], width: u16, height: u16) -> String {
     )
 }
 
-/// Drive the interactive Crossterm dashboard. `j`/`k`, Page keys, `r`, `q`, and Escape are local.
+/// Drive the interactive Crossterm dashboard. `j`/`k`, Page keys, `q`, and Escape are local.
 pub fn dashboard(report: &QuotaReport) -> io::Result<()> {
     enable_raw_mode()?;
     let mut session = TerminalSession {
@@ -495,7 +495,6 @@ fn dashboard_loop(stdout: &mut Stdout, report: &QuotaReport) -> io::Result<()> {
                 KeyCode::Char('k') | KeyCode::Up => config.scroll = config.scroll.saturating_sub(1),
                 KeyCode::PageDown => config.scroll = config.scroll.saturating_add(8),
                 KeyCode::PageUp => config.scroll = config.scroll.saturating_sub(8),
-                KeyCode::Char('r') => {}
                 _ => {}
             }
         }
@@ -627,7 +626,7 @@ mod tests {
         assert!(output.contains("? Some limits unknown"));
         assert!(output.contains(" --"));
         assert!(output.contains("Rows "));
-        assert!(output.contains("j/k · PgUp/PgDn · r · q"));
+        assert!(output.contains("j/k · PgUp/PgDn · q"));
     }
 
     #[test]
@@ -640,6 +639,16 @@ mod tests {
         );
         assert!(lines.iter().all(|line| !line.contains("prefs")));
         assert!(lines.iter().all(|line| !line.contains("Press p")));
+    }
+
+    #[test]
+    fn static_dashboard_does_not_advertise_refresh() {
+        let report = report(vec![provider("claude", Some(50.0), ProviderStatus::Fresh)]);
+        for (columns, rows, controls) in [(36, 23, "j/k · PgUp/PgDn · q"), (20, 12, "j/k · q")] {
+            let lines = render_lines(&report, columns, rows, &DashboardConfig::default());
+            assert_eq!(lines.last().unwrap().trim_end(), controls);
+            assert!(lines.iter().all(|line| !line.contains(" · r")));
+        }
     }
 
     #[test]
