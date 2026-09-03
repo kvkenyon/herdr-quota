@@ -20,10 +20,8 @@ async fn main() -> ExitCode {
             svg,
         }) => match load_report(&fixture) {
             Ok(report) => {
-                let config = DashboardConfig {
-                    color: std::env::var_os("NO_COLOR").is_none(),
-                    ..DashboardConfig::default()
-                };
+                let mut config = DashboardConfig::default();
+                config.color = std::env::var_os("NO_COLOR").is_none();
                 let lines = render_lines(&report, width, height, &config);
                 println!("{}", lines.join("\n"));
                 if let Some(path) = svg {

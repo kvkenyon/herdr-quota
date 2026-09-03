@@ -6,8 +6,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
 use chrono::{DateTime, Utc};
+use crossterm::event::KeyCode;
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line, widgets::Paragraph};
 use tokio::sync::mpsc;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app_state::{self, AppAction, AppState, CollectorFailureKind};
 use crate::collector::{Collector, CollectorFailure};
@@ -22,7 +24,7 @@ use crate::store::{
     history::LocalHistory,
     settings::{
         DashboardSettings, MeterMode as SettingsMeterMode, RemainingThreshold as SettingsThreshold,
-        SettingsAvailability, SettingsStore, SupportedProvider,
+        SettingsAvailability, SettingsStore, StartupView, SupportedProvider,
     },
     transitions::{
         self, HistoryDataHealth, HistoryFact, HistoryProjectionConfidence, HistoryProviderSnapshot,
@@ -38,7 +40,10 @@ use crate::ui::{
         self, PreferenceAction, PreferenceCommand, PreferenceFocus, PreferenceNotice,
         PreferencesState,
     },
-    render::{DashboardConfig, DashboardStatus, clamp_scroll, draw_dashboard},
+    render::{
+        DashboardConfig, DashboardStatus, DashboardView, InputAction, clamp_scroll, draw_dashboard,
+        handle_key, visible_provider_count,
+    },
     terminal::{RawInput, TerminalGuard},
 };
 
@@ -52,8 +57,17 @@ struct RuntimeState {
     transitions: TransitionView,
     preferences: Option<PreferencesState>,
     transition_review: bool,
+    view: DashboardView,
+    selected_provider: usize,
     scroll: usize,
     terminal_height: u16,
+}
+
+fn startup_dashboard_view(startup_view: StartupView) -> DashboardView {
+    match startup_view {
+        StartupView::Overview => DashboardView::Overview,
+        StartupView::Details => DashboardView::Details,
+    }
 }
 
 impl RuntimeState {
@@ -77,6 +91,7 @@ impl RuntimeState {
             (None, _) => empty_transitions(TransitionAvailability::Unavailable),
             (_, None) => empty_transitions(TransitionAvailability::FirstRun),
         };
+        let view = startup_dashboard_view(loaded.settings.startup_view);
         Self {
             app: AppState::default(),
             settings: loaded.settings,
@@ -87,6 +102,8 @@ impl RuntimeState {
             transitions,
             preferences: None,
             transition_review: false,
+            view,
+            selected_provider: 0,
             scroll: 0,
             terminal_height: 24,
         }
@@ -502,7 +519,6 @@ async fn handle_actions(
             continue;
         }
         match action {
-            DashboardAction::Escape => return Ok(true),
             DashboardAction::Refresh => refresh.manual().await,
             DashboardAction::Preferences => {
                 let mut state = lock(shared);
@@ -514,21 +530,44 @@ async fn handle_actions(
                     state.transition_review = true;
                 }
             }
-            DashboardAction::ScrollDown => {
+            DashboardAction::Escape
+            | DashboardAction::ScrollDown
+            | DashboardAction::ScrollUp
+            | DashboardAction::PageDown
+            | DashboardAction::PageUp
+            | DashboardAction::Activate
+            | DashboardAction::SelectProvider(_) => {
                 let mut state = lock(shared);
-                state.scroll = state.scroll.saturating_add(1);
-            }
-            DashboardAction::ScrollUp => {
-                let mut state = lock(shared);
-                state.scroll = state.scroll.saturating_sub(1);
-            }
-            DashboardAction::PageDown => {
-                let mut state = lock(shared);
-                state.scroll = state.scroll.saturating_add(8);
-            }
-            DashboardAction::PageUp => {
-                let mut state = lock(shared);
-                state.scroll = state.scroll.saturating_sub(8);
+                let mut config = dashboard_config(&state);
+                let Some(provider_count) = state
+                    .app
+                    .report
+                    .as_ref()
+                    .map(|report| visible_provider_count(report, &config))
+                else {
+                    if action == DashboardAction::Escape {
+                        return Ok(true);
+                    }
+                    continue;
+                };
+                let key = match action {
+                    DashboardAction::Escape => KeyCode::Esc,
+                    DashboardAction::ScrollDown => KeyCode::Down,
+                    DashboardAction::ScrollUp => KeyCode::Up,
+                    DashboardAction::PageDown => KeyCode::PageDown,
+                    DashboardAction::PageUp => KeyCode::PageUp,
+                    DashboardAction::Activate => KeyCode::Enter,
+                    DashboardAction::SelectProvider(index) => {
+                        KeyCode::Char(char::from_digit((index + 1) as u32, 10).unwrap())
+                    }
+                    _ => unreachable!(),
+                };
+                if handle_key(&mut config, key, provider_count) == InputAction::Quit {
+                    return Ok(true);
+                }
+                state.view = config.view;
+                state.selected_provider = config.selected_provider;
+                state.scroll = config.scroll;
             }
             _ => {}
         }
@@ -715,17 +754,28 @@ fn draw<W: io::Write>(
     let area = terminal.size()?;
     let mut state = lock(shared);
     state.terminal_height = area.height;
-    if state.preferences.is_none()
-        && !state.transition_review
-        && let Some(report) = state.app.report.as_ref()
-    {
+    if state.preferences.is_none() && !state.transition_review {
         let config = dashboard_config(&state);
-        state.scroll = clamp_scroll(report, area.width, area.height, &config);
+        if let Some((provider_count, scroll)) = state.app.report.as_ref().map(|report| {
+            (
+                visible_provider_count(report, &config),
+                clamp_scroll(report, area.width, area.height, &config),
+            )
+        }) {
+            state.selected_provider = state
+                .selected_provider
+                .min(provider_count.saturating_sub(1));
+            state.scroll = scroll;
+        }
     }
     terminal.draw(|frame| {
         if let Some(preferences) = state.preferences.as_ref() {
             frame.render_widget(
-                Paragraph::new(preference_lines(preferences, frame.area().height)),
+                Paragraph::new(preference_lines(
+                    preferences,
+                    frame.area().width,
+                    frame.area().height,
+                )),
                 frame.area(),
             );
         } else if state.transition_review {
@@ -782,35 +832,56 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
         interactive: true,
         transition_count: state.transitions.events.len(),
         status: dashboard_status(&state.app),
+        view: state.view,
+        selected_provider: state.selected_provider,
+        startup_view: state.settings.startup_view,
+        ..DashboardConfig::default()
     }
 }
 
-fn preference_lines(state: &PreferencesState, height: u16) -> Vec<Line<'static>> {
+fn preference_lines(state: &PreferencesState, width: u16, height: u16) -> Vec<Line<'static>> {
     let dirty = if preferences::settings_changed(state) {
         " *"
     } else {
         ""
     };
     if state.confirm_transition_clear {
-        return vec![
-            Line::from("Clear transition history?"),
-            Line::from("Quota history and settings stay."),
-            Line::from("y clear · n/esc back"),
-        ];
+        return if width >= 32 {
+            vec![
+                Line::from("Clear transition history?"),
+                Line::from("Quota history and settings stay."),
+                Line::from("y clear · n/esc back"),
+            ]
+        } else {
+            vec![
+                Line::from("Clear history?"),
+                Line::from("Quota stays"),
+                Line::from("Prefs stay"),
+                Line::from("y clear n/esc"),
+            ]
+        };
     }
     if state.confirm_reset {
-        return vec![
-            Line::from("Reset Preferences draft?"),
-            Line::from("Nothing changes until save."),
-            Line::from("y reset · n/esc back"),
-        ];
+        return if width >= 27 {
+            vec![
+                Line::from("Reset Preferences draft?"),
+                Line::from("Nothing changes until save."),
+                Line::from("y reset · n/esc back"),
+            ]
+        } else {
+            vec![
+                Line::from("Reset draft?"),
+                Line::from("Save applies it"),
+                Line::from("y reset n/esc"),
+            ]
+        };
     }
     let order = preferences::focus_order(&state.draft);
     let mut rows = order
         .iter()
         .map(|focus| {
             let marker = if *focus == state.focus { ">" } else { " " };
-            format!("{marker} {}", preference_label(*focus, &state.draft))
+            format!("{marker} {}", preference_label(*focus, &state.draft, width))
         })
         .collect::<Vec<_>>();
     let body = usize::from(height).saturating_sub(3).max(1);
@@ -825,9 +896,15 @@ fn preference_lines(state: &PreferencesState, height: u16) -> Vec<Line<'static>>
     let notice = match state.notice {
         Some(PreferenceNotice::SaveFailed) => "? save failed",
         Some(PreferenceNotice::TransitionClearFailed) => "? clear failed",
-        Some(PreferenceNotice::TransitionHistoryCleared) => "= transition history cleared",
+        Some(PreferenceNotice::TransitionHistoryCleared) if width >= 28 => {
+            "= transition history cleared"
+        }
+        Some(PreferenceNotice::TransitionHistoryCleared) if width >= 17 => "= history cleared",
+        Some(PreferenceNotice::TransitionHistoryCleared) => "= cleared",
         None if state.saving => "~ saving",
-        None => "j/k navigate · space change",
+        None if width >= 27 => "j/k navigate · space change",
+        None if width >= 18 => "j/k · space change",
+        None => "j/k space",
     };
     std::iter::once(Line::from(format!("Preferences{dirty}")))
         .chain(std::iter::once(Line::from(format!(
@@ -840,26 +917,54 @@ fn preference_lines(state: &PreferencesState, height: u16) -> Vec<Line<'static>>
         .collect()
 }
 
-fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings) -> String {
+fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings, width: u16) -> String {
     match focus {
-        PreferenceFocus::Provider(provider) => format!(
-            "[{}] {}",
-            if settings.hidden_providers.contains(&provider) {
-                " "
+        PreferenceFocus::Provider(provider) => {
+            let full = marketed(provider).label();
+            let compact = match provider {
+                SupportedProvider::Codex => "Codex",
+                SupportedProvider::Copilot => "GitHub",
+                _ => full,
+            };
+            let name = if 6 + UnicodeWidthStr::width(full) <= usize::from(width) {
+                full
             } else {
-                "x"
-            },
-            marketed(provider).label()
-        ),
+                compact
+            };
+            format!(
+                "[{}] {name}",
+                if settings.hidden_providers.contains(&provider) {
+                    " "
+                } else {
+                    "x"
+                }
+            )
+        }
         PreferenceFocus::Meter => format!(
             "Meter: {}",
             match settings.meter_mode {
+                SettingsMeterMode::Remaining if width < 18 => "left",
                 SettingsMeterMode::Remaining => "remaining",
                 SettingsMeterMode::Used => "used",
             }
         ),
+        PreferenceFocus::StartupView => format!(
+            "{}: {}",
+            if width >= 24 {
+                "Startup view"
+            } else if width >= 19 {
+                "Startup"
+            } else {
+                "View"
+            },
+            match settings.startup_view {
+                StartupView::Overview => "overview",
+                StartupView::Details => "details",
+            }
+        ),
         PreferenceFocus::Threshold => format!(
-            "Remaining cue: {}",
+            "{}: {}",
+            if width >= 20 { "Remaining cue" } else { "Cue" },
             match settings.remaining_threshold {
                 SettingsThreshold::Off => "off",
                 SettingsThreshold::Percent25 => "25%",
@@ -868,7 +973,12 @@ fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings) -> Str
             }
         ),
         PreferenceFocus::Forecast => format!(
-            "Forecast cue: {}",
+            "{}: {}",
+            if width >= 19 {
+                "Forecast cue"
+            } else {
+                "Forecast"
+            },
             if settings.forecast_before_reset {
                 "on"
             } else {
@@ -877,7 +987,9 @@ fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings) -> Str
         ),
         PreferenceFocus::Save => "Save (s)".into(),
         PreferenceFocus::Cancel => "Cancel (c)".into(),
+        PreferenceFocus::Reset if width < 17 => "Reset (x)".into(),
         PreferenceFocus::Reset => "Reset draft (x)".into(),
+        PreferenceFocus::ClearTransitions if width < 26 => "Clear history".into(),
         PreferenceFocus::ClearTransitions => "Clear transition history".into(),
     }
 }
@@ -950,11 +1062,75 @@ mod tests {
     fn preference_view_keeps_focused_action_reachable_at_narrow_height() {
         let mut state = preferences::open(&DashboardSettings::default());
         state.focus = PreferenceFocus::ClearTransitions;
-        let text = preference_lines(&state, 8)
+        let text = preference_lines(&state, 36, 8)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
         assert!(text.contains("> Clear transition history"));
+    }
+
+    #[test]
+    fn startup_view_projects_into_the_live_dashboard_and_preferences() {
+        assert_eq!(
+            startup_dashboard_view(StartupView::Overview),
+            DashboardView::Overview
+        );
+        assert_eq!(
+            startup_dashboard_view(StartupView::Details),
+            DashboardView::Details
+        );
+        let mut preferences = preferences::open(&DashboardSettings::default());
+        preferences.focus = PreferenceFocus::StartupView;
+        let text = preference_lines(&preferences, 36, 12)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("> Startup view: overview"));
+
+        for width in 16..=36 {
+            for focus in preferences::focus_order(&preferences.draft) {
+                preferences.focus = focus;
+                let lines = preference_lines(&preferences, width, 12);
+                assert!(
+                    lines.iter().all(|line| {
+                        UnicodeWidthStr::width(line.to_string().as_str()) <= usize::from(width)
+                    }),
+                    "{width} columns at {focus:?}: {lines:?}"
+                );
+            }
+            for variant in [
+                PreferencesState {
+                    confirm_reset: true,
+                    ..preferences.clone()
+                },
+                PreferencesState {
+                    confirm_transition_clear: true,
+                    ..preferences.clone()
+                },
+                PreferencesState {
+                    notice: Some(PreferenceNotice::TransitionHistoryCleared),
+                    ..preferences.clone()
+                },
+            ] {
+                let lines = preference_lines(&variant, width, 12);
+                assert!(
+                    lines.iter().all(|line| {
+                        UnicodeWidthStr::width(line.to_string().as_str()) <= usize::from(width)
+                    }),
+                    "{width} columns: {lines:?}"
+                );
+            }
+            preferences.focus = PreferenceFocus::StartupView;
+            let lines = preference_lines(&preferences, width, 12);
+            let text = lines
+                .into_iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("overview"));
+            assert!(!text.contains(" over\n"));
+        }
     }
 }

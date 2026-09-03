@@ -18,7 +18,7 @@ size before launch:
 
 | Run    | PTY size             | Required checks                                              |
 | ------ | -------------------- | ------------------------------------------------------------ |
-| Wide   | 36 columns × 23 rows | Open, first render, feature path, navigation, and quit       |
+| Wide   | 36 columns × 12 rows | Open, first render, feature path, navigation, and quit       |
 | Narrow | 20 columns × 12 rows | Open, first render, feature path, row reachability, and quit |
 
 For both runs, check these points that apply to the shipped feature:
@@ -55,7 +55,7 @@ In that guarded lab, verify this sequence:
    residue remains.
 
 The lab proves lifecycle behavior only. It does not prove display width: run
-the direct PTY checks at 36 × 23 and 20 × 12 as well. Do not run server-global
+the direct PTY checks at 36 × 12 and 20 × 12 as well. Do not run server-global
 Herdr lifecycle commands, and do not add a lifecycle command to an unguarded
 brief.
 
@@ -96,3 +96,41 @@ plugin-local schema-v5 collector.
 The run used no Herdr lifecycle command. The same paths are covered by the
 ordinary Rust POSIX-PTY integration test with a bounded fake collector so rapid
 refresh and teardown remain deterministic in the test suite.
+
+## PR 20 overview/detail record
+
+### Design rationale
+
+Pass one treated the terminal's default foreground as the palette for all
+content, with semantic roles assigned by structure: the decision line is fixed
+above provider rows, provider identity and the stable `>` roster cursor lead
+each summary, data uses compact meters or exact text states, and utility
+controls stay fixed in the footer. At 36 × 12 the layout reserves decision,
+four or more one-row provider summaries, provenance, and controls; at 20 × 12
+it drops meters and compacts dates before sacrificing marker, provider, or
+percentage/state. Reset and runway evidence may use only rows left after the
+complete visible roster and provenance.
+
+The first pass still resembled a generic dense TUI because evidence rows could
+compete with the roster and repeat the selected or decision provider. The
+revision makes the moving provider cursor the single flight-deck signature,
+keeps decision and controls stationary, and admits evidence for neither the
+selected nor decision provider, and then only into spare rows. Weight, markers,
+spacing, and wording carry severity and selection, so terminal colors remain
+optional decoration under both normal and `NO_COLOR` rendering.
+
+Date: 2026-09-03. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
+`herdr-quota` rebased onto `a693509` plus this overview/detail worktree, run
+through the production pane-owned runtime in an exact-size PTY with `NO_COLOR`
+and a bounded fake collector returning the sanitized `complete.json` schema-v5
+fixture.
+
+| PTY size | Steps                                                                                                                                                                                                         | Result                                                                                                                                                                             |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 36 × 12  | Opened overview, moved the provider cursor, entered and escaped detail, changed the startup-view preference in an isolated config directory, relaunched into detail, returned to overview, then quit with `q` | Four provider summaries, decision, evidence, and controls remained visible; saved startup detail loaded through the production runtime; the dashboard exited and restored the PTY. |
+| 20 × 12  | Opened overview, selected provider 4, entered and escaped detail, focused the compact startup-view preference, cancelled Preferences, then quit with `q`                                                      | Bars dropped while markers, providers, percentages/states, compact dates, and the complete `Startup: overview` state remained readable; the dashboard exited and restored the PTY. |
+
+The fake collector is confined to this direct-runtime smoke. The
+provider-number/detail two-key reachability matrix, narrow Preferences labels,
+and transition-review Enter locality are covered by ordinary Rust unit tests.
+No Herdr lifecycle behavior was driven.
