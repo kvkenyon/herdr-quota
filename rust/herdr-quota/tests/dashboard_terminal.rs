@@ -223,8 +223,10 @@ fn set_nonblocking(file: &File) {
 #[test]
 fn pty_journey_handles_resize_fragmented_escape_modals_refresh_and_quit() {
     let directory = TempDir::new().expect("temporary directory");
-    let mut dashboard = DashboardChild::spawn(&directory, 36, 23);
+    let mut dashboard = DashboardChild::spawn(&directory, 36, 12);
     dashboard.wait_for("terminal enter", b"\x1b[?25l");
+    dashboard.send(b"rrr");
+    dashboard.wait_for("wide in-place refresh", b"refreshing");
     dashboard.send(b"p");
     dashboard.wait_for("Preferences", b"Preferences");
     dashboard.send(b"\x1b");
@@ -234,6 +236,7 @@ fn pty_journey_handles_resize_fragmented_escape_modals_refresh_and_quit() {
     dashboard.send(b"c");
     dashboard.resize(20, 12);
     dashboard.send(b"rrr");
+    dashboard.wait_for("narrow in-place refresh", "↻".as_bytes());
     dashboard.send(b"pjjjjjjjjjjjj\r");
     thread::sleep(Duration::from_millis(150));
     dashboard.drain();

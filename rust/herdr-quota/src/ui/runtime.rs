@@ -266,6 +266,15 @@ fn dashboard_status(app: &AppState) -> Option<DashboardStatus> {
     })
 }
 
+fn retry_minutes(app: &AppState) -> Option<u64> {
+    app.failure.as_ref()?.retry_at.map(|retry_at| {
+        retry_at
+            .saturating_duration_since(Instant::now())
+            .as_secs()
+            .div_ceil(60)
+    })
+}
+
 fn transition_settings(settings: &DashboardSettings) -> TransitionSettings {
     TransitionSettings {
         hidden_providers: settings
@@ -783,27 +792,9 @@ fn draw<W: io::Write>(
                 Paragraph::new(transition_lines(&state.transitions)),
                 frame.area(),
             );
-        } else if let Some(report) = state.app.report.as_ref() {
-            let config = dashboard_config(&state);
-            draw_dashboard(frame, report, &config);
         } else {
-            let status = match dashboard_status(&state.app) {
-                Some(DashboardStatus::Refreshing) => "~ Refreshing quota data",
-                Some(DashboardStatus::Timeout) => "? Quota check timed out",
-                Some(DashboardStatus::MissingExecutable) => "? quota-axi executable is missing",
-                Some(DashboardStatus::IncompatibleOutput) => "? quota-axi output is incompatible",
-                Some(DashboardStatus::NetworkProcess) => "? Quota network/process check failed",
-                None => "? Quota data unavailable",
-            };
-            frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from("Herdr Quota"),
-                    Line::from(status),
-                    Line::from(""),
-                    Line::from("r refresh · p Preferences · q quit"),
-                ]),
-                frame.area(),
-            );
+            let config = dashboard_config(&state);
+            draw_dashboard(frame, state.app.report.as_ref(), &config);
         }
     })?;
     Ok(())
@@ -832,6 +823,7 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
         interactive: true,
         transition_count: state.transitions.events.len(),
         status: dashboard_status(&state.app),
+        retry_minutes: retry_minutes(&state.app),
         view: state.view,
         selected_provider: state.selected_provider,
         startup_view: state.settings.startup_view,
@@ -1132,5 +1124,19 @@ mod tests {
             assert!(text.contains("overview"));
             assert!(!text.contains(" over\n"));
         }
+    }
+
+    #[test]
+    fn runtime_projects_failure_kind_and_retry_without_raw_collector_data() {
+        let app = AppState {
+            loading: false,
+            failure: Some(crate::app_state::CollectorFailure {
+                kind: CollectorFailureKind::Timeout,
+                retry_at: Some(Instant::now() + Duration::from_secs(10 * 60)),
+            }),
+            ..AppState::default()
+        };
+        assert_eq!(dashboard_status(&app), Some(DashboardStatus::Timeout));
+        assert_eq!(retry_minutes(&app), Some(10));
     }
 }

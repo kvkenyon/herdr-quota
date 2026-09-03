@@ -134,3 +134,21 @@ The fake collector is confined to this direct-runtime smoke. The
 provider-number/detail two-key reachability matrix, narrow Preferences labels,
 and transition-review Enter locality are covered by ordinary Rust unit tests.
 No Herdr lifecycle behavior was driven.
+
+## PR 21 in-place refresh record
+
+Date: 2026-09-03. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
+`herdr-quota` on merged PR 20 base `16fadf3` plus this refresh/freshness worktree,
+run directly in an exact-size POSIX PTY with `NO_COLOR` and a bounded fake
+plugin-local schema-v5 collector.
+
+| PTY size | Steps                                                                                          | Result                                                                                                                                                     |
+| -------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 36 × 12  | Opened overview, pressed `r` repeatedly, moved selection, opened detail, repeated `r`, escaped | `refreshing` replaced age in the title slot; decision, provider/detail rows, and full refresh footer stayed fixed; quit restored the terminal.             |
+| 20 × 12  | Opened overview, pressed `r` repeatedly, selected provider 4, opened detail, repeated `r`      | `↻` replaced age in the compact title slot; whole-token provider/detail evidence and compact refresh controls stayed readable; quit restored the terminal. |
+
+The direct runner invokes the fake collector through the landed scheduler, so
+these runs exercise manual refresh without provider credentials or Herdr
+lifecycle behavior. Ordinary Rust tests cover bounded manual restart,
+failure/backoff state, every supported geometry, retained last-good evidence,
+first-load recovery copy, and `NO_COLOR`.
