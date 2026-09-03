@@ -12,7 +12,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
 use tokio::time::{Instant, Sleep};
 
@@ -34,6 +34,7 @@ pub struct RefreshAttempt {
     generation: u64,
     current_generation: Arc<AtomicU64>,
     closed: Arc<AtomicBool>,
+    publication_state: Arc<std::sync::Mutex<PublicationState>>,
 }
 
 impl RefreshAttempt {
@@ -42,14 +43,23 @@ impl RefreshAttempt {
         !self.closed.load(Ordering::Acquire)
             && self.current_generation.load(Ordering::Acquire) == self.generation
     }
+
+    /// Publish a state change if this attempt still owns the current generation.
+    pub fn publish<R>(&self, publication: impl FnOnce() -> R) -> Option<R> {
+        let state = self.publication_state.lock().expect("publication lock");
+        if state.closed || state.generation != self.generation {
+            return None;
+        }
+        Some(publication())
+    }
 }
 
 /// The collector-facing refresh interface.
 ///
 /// `on_success` is intentionally synchronous: use it for immediately visible
 /// live data. `after_success` is serialized across attempts and must complete
-/// before the next normal five-minute timer is armed. It receives the same
-/// attempt fence for late-result protection.
+/// before the next normal five-minute timer is armed. It must wrap persistent
+/// state mutation in [`RefreshAttempt::publish`] for late-result protection.
 pub trait RefreshWorker: Send + Sync + 'static {
     type Value: Send + 'static;
     type Error: Send + 'static;
@@ -124,6 +134,7 @@ enum Event<W: RefreshWorker> {
     },
 }
 
+#[derive(Debug)]
 struct PublicationState {
     generation: u64,
     closed: bool,
@@ -162,17 +173,11 @@ async fn run_post_collections<W>(
     worker: Arc<W>,
     events: mpsc::UnboundedSender<Event<W>>,
     mut post_collections: mpsc::UnboundedReceiver<PostCollection<W>>,
-    publication_state: Arc<Mutex<PublicationState>>,
 ) where
     W: RefreshWorker,
 {
     while let Some(work) = post_collections.recv().await {
-        let state = publication_state.lock().await;
-        if state.closed || state.generation != work.generation {
-            continue;
-        }
         let result = worker.after_success(work.value, work.attempt).await;
-        drop(state);
         let _ = events.send(Event::PostCollectionFinished {
             generation: work.generation,
             result,
@@ -191,7 +196,7 @@ where
     let (event_sender, mut events) = mpsc::unbounded_channel();
     let current_generation = Arc::new(AtomicU64::new(0));
     let closed = Arc::new(AtomicBool::new(false));
-    let publication_state = Arc::new(Mutex::new(PublicationState {
+    let publication_state = Arc::new(std::sync::Mutex::new(PublicationState {
         generation: 0,
         closed: false,
     }));
@@ -206,11 +211,10 @@ where
         Arc::clone(&worker),
         event_sender.clone(),
         post_collection_receiver,
-        Arc::clone(&publication_state),
     ));
 
     {
-        let mut state = publication_state.lock().await;
+        let mut state = publication_state.lock().expect("publication lock");
         begin_collection(
             Arc::clone(&worker),
             event_sender.clone(),
@@ -228,7 +232,7 @@ where
                     failures = 0;
                     drop(timer.take());
                     worker.cancel_active();
-                    let mut state = publication_state.lock().await;
+                    let mut state = publication_state.lock().expect("publication lock");
                     begin_collection(
                             Arc::clone(&worker),
                             event_sender.clone(),
@@ -242,7 +246,7 @@ where
                 Some(Command::Close(acknowledged)) => {
                     closed.store(true, Ordering::Release);
                     tasks.abort_all();
-                    let mut state = publication_state.lock().await;
+                    let mut state = publication_state.lock().expect("publication lock");
                     state.closed = true;
                     generation = generation.saturating_add(1);
                     state.generation = generation;
@@ -254,7 +258,7 @@ where
                 None => {
                     closed.store(true, Ordering::Release);
                     tasks.abort_all();
-                    let mut state = publication_state.lock().await;
+                    let mut state = publication_state.lock().expect("publication lock");
                     state.closed = true;
                     return;
                 }
@@ -271,6 +275,7 @@ where
                                     generation: result_generation,
                                     current_generation: Arc::clone(&current_generation),
                                     closed: Arc::clone(&closed),
+                                    publication_state: Arc::clone(&publication_state),
                                 };
                                 worker.on_success(&value, &attempt);
                                 let _ = post_collection_sender.send(PostCollection {
@@ -315,7 +320,7 @@ where
                 }
             } => {
                 timer = None;
-                let mut state = publication_state.lock().await;
+                let mut state = publication_state.lock().expect("publication lock");
                 begin_collection(
                     Arc::clone(&worker),
                     event_sender.clone(),
@@ -373,6 +378,7 @@ mod tests {
         cancellations: AtomicUsize,
         successes: Mutex<Vec<&'static str>>,
         post_started: Mutex<Vec<&'static str>>,
+        published: Mutex<Vec<&'static str>>,
         failures: Mutex<Vec<&'static str>>,
         scheduled: Mutex<Vec<(Duration, bool)>>,
         settled: AtomicUsize,
@@ -388,6 +394,7 @@ mod tests {
                 cancellations: AtomicUsize::new(0),
                 successes: Mutex::new(Vec::new()),
                 post_started: Mutex::new(Vec::new()),
+                published: Mutex::new(Vec::new()),
                 failures: Mutex::new(Vec::new()),
                 scheduled: Mutex::new(Vec::new()),
                 settled: AtomicUsize::new(0),
@@ -438,7 +445,7 @@ mod tests {
         fn after_success(
             &self,
             value: &'static str,
-            _attempt: RefreshAttempt,
+            attempt: RefreshAttempt,
         ) -> impl Future<Output = PostOutcome> + Send {
             self.post_started.lock().expect("lock").push(value);
             let receive = self
@@ -447,11 +454,14 @@ mod tests {
                 .expect("lock")
                 .pop_front()
                 .expect("a post-collection outcome must be queued before success");
+            let worker = std::sync::Arc::clone(self);
             async move {
-                receive
-                    .await
-                    .expect("scheduler must keep the task alive")
-                    .map(|_| ())
+                let result = receive.await.expect("scheduler must keep the task alive");
+                result.map(|_| {
+                    attempt.publish(|| {
+                        worker.published.lock().expect("lock").push(value);
+                    });
+                })
             }
         }
 
@@ -496,11 +506,11 @@ mod tests {
             generation: 1,
             current_generation,
             closed,
+            publication_state: std::sync::Arc::new(std::sync::Mutex::new(PublicationState {
+                generation: 1,
+                closed: false,
+            })),
         };
-        let publication_state = std::sync::Arc::new(tokio::sync::Mutex::new(PublicationState {
-            generation: 1,
-            closed: false,
-        }));
         let (events, mut event_receiver) =
             tokio::sync::mpsc::unbounded_channel::<super::Event<std::sync::Arc<TestWorker>>>();
         let (sender, receiver) =
@@ -509,7 +519,6 @@ mod tests {
             std::sync::Arc::new(std::sync::Arc::clone(&worker)),
             events,
             receiver,
-            publication_state,
         ));
 
         sender
@@ -545,7 +554,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_refresh_cannot_advance_generation_during_publication() {
+    async fn manual_refresh_preempts_post_collection_and_fences_its_publication() {
         let worker = std::sync::Arc::new(TestWorker::new());
         let first = worker.collect_next();
         let publication = worker.post_next();
@@ -563,11 +572,13 @@ mod tests {
         let manual_handle = handle.clone();
         let manual = tokio::spawn(async move { manual_handle.manual().await });
         flush().await;
-        assert_eq!(worker.starts.load(Ordering::SeqCst), 1);
+        assert_eq!(worker.starts.load(Ordering::SeqCst), 2);
 
         publication.send(Ok("saved")).expect("receiver");
         manual.await.expect("manual task");
         assert_eq!(worker.starts.load(Ordering::SeqCst), 2);
+        flush().await;
+        assert!(worker.published.lock().expect("lock").is_empty());
         handle.close().await;
         drop(second);
     }
