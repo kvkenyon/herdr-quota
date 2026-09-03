@@ -23,7 +23,7 @@ use ratatui::{
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::domain::{
-    provider::{MarketedProvider, ProviderQuota, ProviderStatus},
+    provider::{MarketedProvider, PaceStatus, ProviderQuota, ProviderStatus},
     schema::QuotaReport,
 };
 
@@ -266,7 +266,29 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
     if visible.iter().any(|provider| !has_current_quota(provider)) {
         return ("? Limits non-current".into(), RowStyle::Warning);
     }
-    ("= All known limits on pace".into(), RowStyle::Normal)
+    let current_windows: Vec<_> = visible
+        .iter()
+        .flat_map(|provider| provider.windows.iter())
+        .collect();
+    if current_windows.iter().any(|window| {
+        window
+            .pace
+            .as_ref()
+            .is_some_and(|pace| matches!(pace.status, PaceStatus::Behind | PaceStatus::Mixed))
+    }) {
+        return ("? Pace needs review".into(), RowStyle::Warning);
+    }
+    if !current_windows.is_empty()
+        && current_windows.iter().all(|window| {
+            window
+                .pace
+                .as_ref()
+                .is_some_and(|pace| matches!(pace.status, PaceStatus::Ahead | PaceStatus::OnPace))
+        })
+    {
+        return ("= Limits on pace".into(), RowStyle::Normal);
+    }
+    ("? Quota data partial".into(), RowStyle::Warning)
 }
 
 fn position(scroll: usize, total: usize, viewport: usize) -> String {
@@ -527,7 +549,7 @@ fn dashboard_loop(stdout: &mut Stdout, report: &QuotaReport) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::provider::{ProviderState, QuotaWindow};
+    use crate::domain::provider::{ProviderState, QuotaWindow, WindowPace};
 
     fn provider(id: &str, remaining: Option<f64>, status: ProviderStatus) -> ProviderQuota {
         ProviderQuota {
@@ -793,6 +815,47 @@ mod tests {
         );
         assert_eq!(lines[1].trim_end(), "? Limits non-current");
         assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
+    }
+
+    #[test]
+    fn attention_requires_explicit_current_pace_evidence() {
+        let base = report(vec![provider("claude", Some(50.0), ProviderStatus::Fresh)]);
+        let mut no_windows = base.clone();
+        no_windows.providers[0].windows.clear();
+
+        let mut behind = base.clone();
+        behind.providers[0].windows[0].pace = Some(WindowPace {
+            status: PaceStatus::Behind,
+            reserve_percent_points: None,
+            burn_multiple: None,
+            projected_exhausted_at: None,
+            projection_confidence: None,
+        });
+        let mut healthy = base;
+        healthy.providers[0].windows[0].pace = Some(WindowPace {
+            status: PaceStatus::OnPace,
+            reserve_percent_points: None,
+            burn_multiple: None,
+            projected_exhausted_at: None,
+            projection_confidence: None,
+        });
+
+        for (report, expected) in [
+            (no_windows, "? Quota data partial"),
+            (behind, "? Pace needs review"),
+            (healthy, "= Limits on pace"),
+        ] {
+            for (columns, rows) in [(36, 23), (20, 12)] {
+                let plain = DashboardConfig::default();
+                let colored = DashboardConfig {
+                    color: true,
+                    ..DashboardConfig::default()
+                };
+                let lines = render_lines(&report, columns, rows, &plain);
+                assert_eq!(lines[1].trim_end(), expected);
+                assert_eq!(lines, render_lines(&report, columns, rows, &colored));
+            }
+        }
     }
 
     #[test]
