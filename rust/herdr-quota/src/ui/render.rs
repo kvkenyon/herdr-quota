@@ -14,7 +14,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
-    Terminal,
+    Frame, Terminal,
     backend::CrosstermBackend,
     buffer::Buffer,
     layout::Rect,
@@ -48,7 +48,7 @@ pub enum DashboardView {
 }
 
 /// Local rendering inputs; collection and quota semantics do not depend on them.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct DashboardConfig {
     /// IDs explicitly hidden by the user. They never inflate availability summary text.
     pub user_hidden: BTreeSet<String>,
@@ -56,15 +56,55 @@ pub struct DashboardConfig {
     pub scroll: usize,
     /// Whether optional Ratatui colour may reinforce the textual markers.
     pub color: bool,
+    /// Saved provider order. An empty value preserves report order for previews.
+    pub provider_order: Vec<String>,
+    /// The locally selected meter interpretation.
+    pub meter_mode: MeterMode,
+    /// Whether controls that require the live runtime may be advertised.
+    pub interactive: bool,
+    /// Number of in-pane transition cues available for review.
+    pub transition_count: usize,
+    /// Current bounded collector state, when visible.
+    pub status: Option<DashboardStatus>,
     /// The current finite dashboard surface.
     pub view: DashboardView,
     /// The stable cursor into the visible provider roster.
     pub selected_provider: usize,
     /// The editable startup preference shown by Preferences.
     pub startup_view: StartupView,
-    saved_startup_view: StartupView,
-    return_view: DashboardView,
-    save_failed: bool,
+    pub(super) saved_startup_view: StartupView,
+    pub(super) return_view: DashboardView,
+    pub(super) save_failed: bool,
+}
+
+impl Default for DashboardConfig {
+    fn default() -> Self {
+        Self {
+            user_hidden: BTreeSet::new(),
+            scroll: 0,
+            color: false,
+            provider_order: Vec::new(),
+            meter_mode: MeterMode::Remaining,
+            interactive: false,
+            transition_count: 0,
+            status: None,
+            view: DashboardView::Overview,
+            selected_provider: 0,
+            startup_view: StartupView::Overview,
+            saved_startup_view: StartupView::Overview,
+            return_view: DashboardView::Overview,
+            save_failed: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DashboardStatus {
+    Refreshing,
+    Timeout,
+    MissingExecutable,
+    IncompatibleOutput,
+    NetworkProcess,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,7 +233,17 @@ fn visible_model(
         .filter_map(|id| MarketedProvider::from_id(id))
         .map(|provider| (provider, ProviderVisibility::UserDisabled))
         .collect::<ProviderVisibilityMap>();
-    dashboard_model(report, MeterMode::Remaining, &visibility)
+    let mut model = dashboard_model(report, config.meter_mode, &visibility);
+    if !config.provider_order.is_empty() {
+        model.providers.sort_by_key(|section| {
+            config
+                .provider_order
+                .iter()
+                .position(|id| id == section.provider.id())
+                .unwrap_or(usize::MAX)
+        });
+    }
+    model
 }
 
 fn compact_provider_name(provider: MarketedProvider) -> &'static str {
@@ -1215,6 +1265,39 @@ fn pad_cells(value: &str, width: usize) -> String {
 struct Dashboard<'a> {
     rows: &'a [SemanticRow],
     config: &'a DashboardConfig,
+}
+
+pub(super) fn clamp_scroll(
+    report: &QuotaReport,
+    width: u16,
+    height: u16,
+    config: &DashboardConfig,
+) -> usize {
+    let rows = semantic_rows(report, config, width.max(1)).len();
+    let height = usize::from(height.max(1));
+    let body_start = if config.view == DashboardView::Details && height >= 5 {
+        3
+    } else {
+        2.min(height)
+    };
+    let viewport = height.saturating_sub(1).saturating_sub(body_start);
+    config.scroll.min(rows.saturating_sub(viewport))
+}
+
+pub(super) fn draw_dashboard(
+    frame: &mut Frame<'_>,
+    report: &QuotaReport,
+    config: &DashboardConfig,
+) {
+    let area = frame.area();
+    let rows = render_frame(report, area.width, area.height, config);
+    frame.render_widget(
+        Dashboard {
+            rows: &rows,
+            config,
+        },
+        area,
+    );
 }
 
 impl Widget for Dashboard<'_> {
