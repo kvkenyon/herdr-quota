@@ -784,9 +784,11 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
 }
 
 fn preference_lines(state: &PreferencesState, height: u16) -> Vec<Line<'static>> {
-    let dirty = preferences::settings_changed(state)
-        .then_some(" *")
-        .unwrap_or("");
+    let dirty = if preferences::settings_changed(state) {
+        " *"
+    } else {
+        ""
+    };
     if state.confirm_transition_clear {
         return vec![
             Line::from("Clear transition history?"),
