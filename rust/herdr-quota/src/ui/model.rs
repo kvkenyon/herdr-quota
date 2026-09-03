@@ -113,10 +113,10 @@ pub fn dashboard_model(
     let hidden_count = report
         .providers
         .iter()
-        .filter_map(|quota| {
-            let provider = MarketedProvider::from_id(&quota.provider.to_ascii_lowercase())?;
-            (visibility_for(visibility, provider) == ProviderVisibility::HiddenElsewhere)
-                .then_some(())
+        .filter(|quota| {
+            MarketedProvider::from_id(&quota.provider.to_ascii_lowercase()).map_or(true, |provider| {
+                visibility_for(visibility, provider) == ProviderVisibility::HiddenElsewhere
+            })
         })
         .count();
     let sections = providers
@@ -223,6 +223,20 @@ mod tests {
         assert_eq!(
             dashboard_model(&report, MeterMode::Remaining, &visibility).hidden_summary,
             None
+        );
+    }
+
+    #[test]
+    fn unrecognized_provider_records_are_disclosed_as_hidden_elsewhere() {
+        let model = dashboard_model(
+            &report(vec![quota("provider-1", None)]),
+            MeterMode::Remaining,
+            &ProviderVisibilityMap::new(),
+        );
+        assert!(model.providers.is_empty());
+        assert_eq!(
+            model.hidden_summary,
+            Some(HiddenProviderSummary { count: 1 })
         );
     }
 
