@@ -219,10 +219,7 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
         })
         .collect();
     if visible.is_empty() {
-        return (
-            "? No providers shown · Press p for prefs".into(),
-            RowStyle::Warning,
-        );
+        return ("? No providers shown".into(), RowStyle::Warning);
     }
     if let Some((provider, remaining)) = visible
         .iter()
@@ -322,7 +319,7 @@ fn render_frame(
     }
     if rows.is_empty() && viewport > 0 {
         output[body_start] = SemanticRow {
-            text: truncate("? No providers shown · Press p for prefs", width),
+            text: truncate("? No providers shown", width),
             style: RowStyle::Warning,
         };
     }
@@ -639,6 +636,18 @@ mod tests {
         assert!(output.contains(" --"));
         assert!(output.contains("Rows "));
         assert!(output.contains("j/k · PgUp/PgDn · r · q"));
+    }
+
+    #[test]
+    fn empty_state_only_advertises_available_controls() {
+        let lines = render_lines(&report(vec![]), 36, 12, &DashboardConfig::default());
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.trim_end() == "? No providers shown")
+        );
+        assert!(lines.iter().all(|line| !line.contains("prefs")));
+        assert!(lines.iter().all(|line| !line.contains("Press p")));
     }
 
     #[test]
