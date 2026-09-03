@@ -599,7 +599,6 @@ fn overview_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
             style: RowStyle::Warning,
         });
     }
-    rows.extend(overview_evidence_rows(report, config, width));
     rows
 }
 
@@ -619,6 +618,9 @@ fn overview_evidence_rows(
         .map(|section| section.provider);
     let mut rows = Vec::new();
     for section in &model.providers {
+        if selected == Some(section.provider) {
+            continue;
+        }
         let Some(provider) = report
             .providers
             .iter()
@@ -661,8 +663,7 @@ fn overview_evidence_rows(
         if runway.is_some_and(|runway| {
             runway.status == RunwayStatus::ProjectedExhaustion
                 && runway.projection_confidence == Some(ProjectionConfidence::Established)
-        }) && selected != Some(section.provider)
-        {
+        }) {
             let when = moment(
                 runway.and_then(|runway| runway.projected_exhausted_at.as_deref()),
                 compact,
@@ -1079,7 +1080,7 @@ fn render_frame(
     if config.view == DashboardView::Preferences {
         return render_preferences(width, height, config);
     }
-    let rows = match config.view {
+    let mut rows = match config.view {
         DashboardView::Overview | DashboardView::Details => {
             semantic_rows(report, config, width as u16)
         }
@@ -1131,6 +1132,14 @@ fn render_frame(
     let footer = height.saturating_sub(1);
     let body_end = footer.max(body_start);
     let viewport = body_end.saturating_sub(body_start);
+    if config.view == DashboardView::Overview {
+        let spare = viewport.saturating_sub(rows.len());
+        rows.extend(
+            overview_evidence_rows(report, config, width as u16)
+                .into_iter()
+                .take(spare),
+        );
+    }
     let scroll = if config.view == DashboardView::Overview {
         config
             .selected_provider
@@ -2263,6 +2272,49 @@ mod tests {
             assert!(!lines[1].contains("Claude"));
             assert!(lines.iter().all(|line| !line.contains("Codex reset")));
             assert!(lines.iter().all(|line| !line.contains("Codex on pace")));
+        }
+    }
+
+    #[test]
+    fn overview_secondary_evidence_only_uses_space_after_the_roster() {
+        let report = crate::domain::schema::parse_quota_response(include_str!(
+            "../../../../test/fixtures/complete.json"
+        ))
+        .expect("complete fixture");
+
+        for columns in [36, 20] {
+            let config = DashboardConfig::default();
+            let model = visible_model(&report, &config);
+            let lines = render_lines(&report, columns, 12, &config);
+            let provider_rows: Vec<_> = model
+                .providers
+                .iter()
+                .filter_map(|section| {
+                    let name = compact_provider_name(section.provider);
+                    lines.iter().position(|line| line.contains(name))
+                })
+                .collect();
+            assert_eq!(provider_rows.len(), model.providers.len(), "{columns}: {lines:?}");
+            assert!(
+                provider_rows.windows(2).all(|pair| pair[0] < pair[1]),
+                "{columns}: {lines:?}"
+            );
+            let last_provider = *provider_rows.last().expect("provider roster");
+            assert!(
+                lines[2..=last_provider]
+                    .iter()
+                    .all(|line| !line.contains(" reset ") && !line.contains(" through reset")),
+                "{columns}: {lines:?}"
+            );
+            assert!(lines.iter().all(|line| !line.contains("Claude reset")));
+            assert_eq!(
+                lines[11].trim_end(),
+                if columns == 36 {
+                    "j/k · enter details · p · q"
+                } else {
+                    "j/k enter p q"
+                }
+            );
         }
     }
 

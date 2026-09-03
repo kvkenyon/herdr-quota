@@ -99,6 +99,26 @@ refresh and teardown remain deterministic in the test suite.
 
 ## PR 20 overview/detail record
 
+### Design rationale
+
+Pass one treated the terminal's default foreground as the palette for all
+content, with semantic roles assigned by structure: the decision line is fixed
+above provider rows, provider identity and the stable `>` roster cursor lead
+each summary, data uses compact meters or exact text states, and utility
+controls stay fixed in the footer. At 36 × 12 the layout reserves decision,
+four or more one-row provider summaries, provenance, and controls; at 20 × 12
+it drops meters and compacts dates before sacrificing marker, provider, or
+percentage/state. Reset and runway evidence may use only rows left after the
+complete visible roster and provenance.
+
+The first pass still resembled a generic dense TUI because evidence rows could
+compete with the roster and repeat the selected provider. The revision makes
+the moving provider cursor the single flight-deck signature, keeps decision and
+controls stationary, and admits non-selected-provider evidence only into spare
+rows. Weight, markers, spacing, and wording carry severity and selection, so
+terminal colors remain optional decoration under both normal and `NO_COLOR`
+rendering.
+
 Date: 2026-09-03. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
 `herdr-quota` rebased onto `a693509` plus this overview/detail worktree, run
 through the production pane-owned runtime in an exact-size PTY with `NO_COLOR`
