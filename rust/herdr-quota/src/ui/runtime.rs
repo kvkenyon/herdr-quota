@@ -1234,6 +1234,9 @@ mod tests {
         report
             .providers
             .retain(|provider| provider.provider != "copilot");
+        let mut future = report.providers[0].clone();
+        future.provider = "future-lab".into();
+        report.providers.push(future);
 
         let mut preferences = preferences::open(&DashboardSettings::default());
         let cases = [
@@ -1257,6 +1260,7 @@ mod tests {
                 assert!(!text.contains("Users"));
                 assert!(!text.contains("account"));
                 assert!(!text.contains("auth.json"));
+                assert!(!text.contains("future-lab"));
             }
         }
     }

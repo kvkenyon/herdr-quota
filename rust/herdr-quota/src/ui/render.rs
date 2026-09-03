@@ -31,7 +31,7 @@ use crate::store::settings::StartupView;
 use crate::ui::{
     bar::MeterMode,
     model::{ProviderDetail, ProviderVisibility, ProviderVisibilityMap, dashboard_model},
-    readiness::{ProviderReadiness, provider_readiness, readiness_line},
+    readiness::{ProviderReadiness, decision_grade, provider_readiness, readiness_line},
 };
 
 /// The finite dashboard surface currently shown in the terminal.
@@ -168,19 +168,6 @@ fn has_trustworthy_quota(provider: &ProviderQuota) -> bool {
         && provider.effective.iter().any(decision_grade)
 }
 
-fn decision_grade(effective: &EffectiveAvailability) -> bool {
-    effective.status == EffectiveStatus::Known
-        && (effective.effective_percent_remaining.is_some()
-            || effective
-                .runway
-                .as_ref()
-                .is_some_and(|runway| runway.status != RunwayStatus::Unknown)
-            || effective
-                .pace
-                .as_ref()
-                .is_some_and(|pace| pace.status != PaceStatus::Unknown))
-}
-
 fn limiting_window_id(effective: &EffectiveAvailability) -> Option<&str> {
     effective
         .runway
@@ -218,14 +205,6 @@ fn gauge(value: Option<f64>, cells: usize) -> String {
         "#".repeat(fill),
         "-".repeat(cells.saturating_sub(fill))
     )
-}
-
-fn hidden_unavailable_count(report: &QuotaReport) -> usize {
-    report
-        .providers
-        .iter()
-        .filter(|provider| provider_id(provider).is_none())
-        .count()
 }
 
 fn visible_marketed(config: &DashboardConfig) -> Vec<MarketedProvider> {
@@ -656,25 +635,6 @@ fn overview_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
                 index == selected,
                 width as usize,
             ),
-        });
-    }
-    let hidden_unavailable = hidden_unavailable_count(report);
-    if hidden_unavailable > 0 {
-        let noun = if hidden_unavailable == 1 {
-            "provider"
-        } else {
-            "providers"
-        };
-        rows.push(SemanticRow {
-            text: fitting(
-                [
-                    format!("? {hidden_unavailable} unavailable {noun} hidden"),
-                    format!("? {hidden_unavailable} unavailable hidden"),
-                    format!("? {hidden_unavailable} unavailable"),
-                ],
-                width as usize,
-            ),
-            style: RowStyle::Warning,
         });
     }
     rows
@@ -2140,12 +2100,12 @@ mod tests {
     }
 
     #[test]
-    fn includes_required_text_markers_and_unknown_is_not_zero() {
+    fn includes_required_text_markers_and_valueless_quota_is_unavailable() {
         let report = report(vec![provider("claude", None, ProviderStatus::Fresh)]);
         let output = render_lines(&report, 36, 12, &DashboardConfig::default()).join("\n");
         assert!(output.contains("Herdr Quota"));
-        assert!(output.contains("? Quota data partial"));
-        assert!(output.contains("? unknown"));
+        assert!(output.contains("? Limits non-current"));
+        assert!(output.contains("Claude · quota unavailable"));
         assert!(output.contains("j/k · enter details · p · q"));
     }
 
@@ -2790,7 +2750,8 @@ mod tests {
         future.provider = "future-lab".into();
         let output =
             render_lines(&report(vec![future]), 36, 23, &DashboardConfig::default()).join("\n");
-        assert!(output.contains("1 unavailable provider hidden"));
+        assert!(!output.contains("future-lab"));
+        assert!(!output.contains("provider hidden"));
     }
 
     #[test]

@@ -3,7 +3,10 @@
 use chrono::DateTime;
 
 use crate::domain::{
-    provider::{EffectiveStatus, MarketedProvider, ProviderQuota, ProviderStatus, SemanticsStatus},
+    provider::{
+        EffectiveAvailability, EffectiveStatus, MarketedProvider, PaceStatus, ProviderQuota,
+        ProviderStatus, RunwayStatus, SemanticsStatus,
+    },
     schema::QuotaReport,
     tiers::provider_needs_sign_in,
 };
@@ -74,6 +77,19 @@ fn evidence_is_partial(provider: &ProviderQuota, marketed: MarketedProvider) -> 
                 .any(|window| window.id.starts_with("code_review_")))
 }
 
+pub(crate) fn decision_grade(effective: &EffectiveAvailability) -> bool {
+    effective.status == EffectiveStatus::Known
+        && (effective.effective_percent_remaining.is_some()
+            || effective
+                .runway
+                .as_ref()
+                .is_some_and(|runway| runway.status != RunwayStatus::Unknown)
+            || effective
+                .pace
+                .as_ref()
+                .is_some_and(|pace| pace.status != PaceStatus::Unknown))
+}
+
 /// Classify one marketed provider without forwarding source, account, or error text.
 pub fn provider_readiness(report: &QuotaReport, marketed: MarketedProvider) -> ProviderReadiness {
     let Some(provider) = report
@@ -97,6 +113,9 @@ pub fn provider_readiness(report: &QuotaReport, marketed: MarketedProvider) -> P
     }
     if evidence_is_partial(provider, marketed) {
         return ProviderReadiness::Partial;
+    }
+    if !provider.effective.iter().any(decision_grade) {
+        return ProviderReadiness::QuotaUnavailable;
     }
     ProviderReadiness::Live
 }
@@ -242,5 +261,25 @@ mod tests {
             provider("copilot", ProviderStatus::AuthRequired),
         ]);
         assert_eq!(readiness_line(&report), "4 ready · 2 sign-in");
+    }
+
+    #[test]
+    fn fresh_known_provider_requires_decision_grade_effective_quota() {
+        let mut empty = provider("claude", ProviderStatus::Fresh);
+        empty.effective.clear();
+        let mut valueless = provider("cursor", ProviderStatus::Fresh);
+        valueless.effective[0].effective_percent_remaining = None;
+
+        let report = report(vec![empty, valueless]);
+
+        assert_eq!(
+            provider_readiness(&report, MarketedProvider::Claude),
+            ProviderReadiness::QuotaUnavailable
+        );
+        assert_eq!(
+            provider_readiness(&report, MarketedProvider::Cursor),
+            ProviderReadiness::QuotaUnavailable
+        );
+        assert_eq!(readiness_line(&report), "0 ready · 0 sign-in");
     }
 }
