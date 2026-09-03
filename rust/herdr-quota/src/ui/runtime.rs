@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line, widgets::Paragraph};
 use tokio::sync::mpsc;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app_state::{self, AppAction, AppState, CollectorFailureKind};
 use crate::collector::{Collector, CollectorFailure};
@@ -770,7 +771,11 @@ fn draw<W: io::Write>(
     terminal.draw(|frame| {
         if let Some(preferences) = state.preferences.as_ref() {
             frame.render_widget(
-                Paragraph::new(preference_lines(preferences, frame.area().height)),
+                Paragraph::new(preference_lines(
+                    preferences,
+                    frame.area().width,
+                    frame.area().height,
+                )),
                 frame.area(),
             );
         } else if state.transition_review {
@@ -834,32 +839,49 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
     }
 }
 
-fn preference_lines(state: &PreferencesState, height: u16) -> Vec<Line<'static>> {
+fn preference_lines(state: &PreferencesState, width: u16, height: u16) -> Vec<Line<'static>> {
     let dirty = if preferences::settings_changed(state) {
         " *"
     } else {
         ""
     };
     if state.confirm_transition_clear {
-        return vec![
-            Line::from("Clear transition history?"),
-            Line::from("Quota history and settings stay."),
-            Line::from("y clear · n/esc back"),
-        ];
+        return if width >= 32 {
+            vec![
+                Line::from("Clear transition history?"),
+                Line::from("Quota history and settings stay."),
+                Line::from("y clear · n/esc back"),
+            ]
+        } else {
+            vec![
+                Line::from("Clear history?"),
+                Line::from("Quota stays"),
+                Line::from("Prefs stay"),
+                Line::from("y clear n/esc"),
+            ]
+        };
     }
     if state.confirm_reset {
-        return vec![
-            Line::from("Reset Preferences draft?"),
-            Line::from("Nothing changes until save."),
-            Line::from("y reset · n/esc back"),
-        ];
+        return if width >= 27 {
+            vec![
+                Line::from("Reset Preferences draft?"),
+                Line::from("Nothing changes until save."),
+                Line::from("y reset · n/esc back"),
+            ]
+        } else {
+            vec![
+                Line::from("Reset draft?"),
+                Line::from("Save applies it"),
+                Line::from("y reset n/esc"),
+            ]
+        };
     }
     let order = preferences::focus_order(&state.draft);
     let mut rows = order
         .iter()
         .map(|focus| {
             let marker = if *focus == state.focus { ">" } else { " " };
-            format!("{marker} {}", preference_label(*focus, &state.draft))
+            format!("{marker} {}", preference_label(*focus, &state.draft, width))
         })
         .collect::<Vec<_>>();
     let body = usize::from(height).saturating_sub(3).max(1);
@@ -874,9 +896,15 @@ fn preference_lines(state: &PreferencesState, height: u16) -> Vec<Line<'static>>
     let notice = match state.notice {
         Some(PreferenceNotice::SaveFailed) => "? save failed",
         Some(PreferenceNotice::TransitionClearFailed) => "? clear failed",
-        Some(PreferenceNotice::TransitionHistoryCleared) => "= transition history cleared",
+        Some(PreferenceNotice::TransitionHistoryCleared) if width >= 28 => {
+            "= transition history cleared"
+        }
+        Some(PreferenceNotice::TransitionHistoryCleared) if width >= 17 => "= history cleared",
+        Some(PreferenceNotice::TransitionHistoryCleared) => "= cleared",
         None if state.saving => "~ saving",
-        None => "j/k navigate · space change",
+        None if width >= 27 => "j/k navigate · space change",
+        None if width >= 18 => "j/k · space change",
+        None => "j/k space",
     };
     std::iter::once(Line::from(format!("Preferences{dirty}")))
         .chain(std::iter::once(Line::from(format!(
@@ -889,33 +917,54 @@ fn preference_lines(state: &PreferencesState, height: u16) -> Vec<Line<'static>>
         .collect()
 }
 
-fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings) -> String {
+fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings, width: u16) -> String {
     match focus {
-        PreferenceFocus::Provider(provider) => format!(
-            "[{}] {}",
-            if settings.hidden_providers.contains(&provider) {
-                " "
+        PreferenceFocus::Provider(provider) => {
+            let full = marketed(provider).label();
+            let compact = match provider {
+                SupportedProvider::Codex => "Codex",
+                SupportedProvider::Copilot => "GitHub",
+                _ => full,
+            };
+            let name = if 6 + UnicodeWidthStr::width(full) <= usize::from(width) {
+                full
             } else {
-                "x"
-            },
-            marketed(provider).label()
-        ),
+                compact
+            };
+            format!(
+                "[{}] {name}",
+                if settings.hidden_providers.contains(&provider) {
+                    " "
+                } else {
+                    "x"
+                }
+            )
+        }
         PreferenceFocus::Meter => format!(
             "Meter: {}",
             match settings.meter_mode {
+                SettingsMeterMode::Remaining if width < 18 => "left",
                 SettingsMeterMode::Remaining => "remaining",
                 SettingsMeterMode::Used => "used",
             }
         ),
         PreferenceFocus::StartupView => format!(
-            "Startup view: {}",
+            "{}: {}",
+            if width >= 24 {
+                "Startup view"
+            } else if width >= 19 {
+                "Startup"
+            } else {
+                "View"
+            },
             match settings.startup_view {
                 StartupView::Overview => "overview",
                 StartupView::Details => "details",
             }
         ),
         PreferenceFocus::Threshold => format!(
-            "Remaining cue: {}",
+            "{}: {}",
+            if width >= 20 { "Remaining cue" } else { "Cue" },
             match settings.remaining_threshold {
                 SettingsThreshold::Off => "off",
                 SettingsThreshold::Percent25 => "25%",
@@ -924,7 +973,12 @@ fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings) -> Str
             }
         ),
         PreferenceFocus::Forecast => format!(
-            "Forecast cue: {}",
+            "{}: {}",
+            if width >= 19 {
+                "Forecast cue"
+            } else {
+                "Forecast"
+            },
             if settings.forecast_before_reset {
                 "on"
             } else {
@@ -933,7 +987,9 @@ fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings) -> Str
         ),
         PreferenceFocus::Save => "Save (s)".into(),
         PreferenceFocus::Cancel => "Cancel (c)".into(),
+        PreferenceFocus::Reset if width < 17 => "Reset (x)".into(),
         PreferenceFocus::Reset => "Reset draft (x)".into(),
+        PreferenceFocus::ClearTransitions if width < 26 => "Clear history".into(),
         PreferenceFocus::ClearTransitions => "Clear transition history".into(),
     }
 }
@@ -1006,7 +1062,7 @@ mod tests {
     fn preference_view_keeps_focused_action_reachable_at_narrow_height() {
         let mut state = preferences::open(&DashboardSettings::default());
         state.focus = PreferenceFocus::ClearTransitions;
-        let text = preference_lines(&state, 8)
+        let text = preference_lines(&state, 36, 8)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
@@ -1026,11 +1082,55 @@ mod tests {
         );
         let mut preferences = preferences::open(&DashboardSettings::default());
         preferences.focus = PreferenceFocus::StartupView;
-        let text = preference_lines(&preferences, 12)
+        let text = preference_lines(&preferences, 36, 12)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
         assert!(text.contains("> Startup view: overview"));
+
+        for width in 16..=36 {
+            for focus in preferences::focus_order(&preferences.draft) {
+                preferences.focus = focus;
+                let lines = preference_lines(&preferences, width, 12);
+                assert!(
+                    lines.iter().all(|line| {
+                        UnicodeWidthStr::width(line.to_string().as_str()) <= usize::from(width)
+                    }),
+                    "{width} columns at {focus:?}: {lines:?}"
+                );
+            }
+            for variant in [
+                PreferencesState {
+                    confirm_reset: true,
+                    ..preferences.clone()
+                },
+                PreferencesState {
+                    confirm_transition_clear: true,
+                    ..preferences.clone()
+                },
+                PreferencesState {
+                    notice: Some(PreferenceNotice::TransitionHistoryCleared),
+                    ..preferences.clone()
+                },
+            ] {
+                let lines = preference_lines(&variant, width, 12);
+                assert!(
+                    lines.iter().all(|line| {
+                        UnicodeWidthStr::width(line.to_string().as_str()) <= usize::from(width)
+                    }),
+                    "{width} columns: {lines:?}"
+                );
+            }
+            preferences.focus = PreferenceFocus::StartupView;
+            let lines = preference_lines(&preferences, width, 12);
+            let text = lines
+                .into_iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("overview"));
+            assert!(!text.contains(" over\n"));
+        }
     }
 }

@@ -99,17 +99,18 @@ refresh and teardown remain deterministic in the test suite.
 
 ## PR 20 overview/detail record
 
-Date: 2026-09-02. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
-`herdr-quota` at `8b2c762` plus this overview/detail worktree, run directly in
-an exact-size PTY with `NO_COLOR` and the sanitized `complete.json` schema-v5
+Date: 2026-09-03. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
+`herdr-quota` rebased onto `a693509` plus this overview/detail worktree, run
+through the production pane-owned runtime in an exact-size PTY with `NO_COLOR`
+and a bounded fake collector returning the sanitized `complete.json` schema-v5
 fixture.
 
-| PTY size | Steps                                                                                                                                                           | Result                                                                                                                                                        |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 36 × 12  | Opened overview, moved the provider cursor, entered and escaped detail, changed the startup-view preference in an isolated config directory, then quit with `q` | Four provider summaries, decision, evidence, and controls remained visible; detail and Preferences opened locally; the dashboard exited and restored the PTY. |
-| 20 × 12  | Opened overview, selected provider 4, entered and escaped detail, opened and cancelled Preferences, then quit with `q`                                          | Bars dropped while markers, providers, percentages/states, compact dates, and controls remained readable; the dashboard exited and restored the PTY.          |
+| PTY size | Steps                                                                                                                                                                                                         | Result                                                                                                                                                                             |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 36 × 12  | Opened overview, moved the provider cursor, entered and escaped detail, changed the startup-view preference in an isolated config directory, relaunched into detail, returned to overview, then quit with `q` | Four provider summaries, decision, evidence, and controls remained visible; saved startup detail loaded through the production runtime; the dashboard exited and restored the PTY. |
+| 20 × 12  | Opened overview, selected provider 4, entered and escaped detail, focused the compact startup-view preference, cancelled Preferences, then quit with `q`                                                      | Bars dropped while markers, providers, percentages/states, compact dates, and the complete `Startup: overview` state remained readable; the dashboard exited and restored the PTY. |
 
-The static fixture has no collector, so refresh is intentionally unavailable.
-The provider-number/detail two-key reachability matrix and transition-review
-Enter locality are covered by ordinary Rust unit tests. No Herdr lifecycle
-behavior was driven.
+The fake collector is confined to this direct-runtime smoke. The
+provider-number/detail two-key reachability matrix, narrow Preferences labels,
+and transition-review Enter locality are covered by ordinary Rust unit tests.
+No Herdr lifecycle behavior was driven.
