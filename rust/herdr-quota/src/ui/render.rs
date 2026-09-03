@@ -23,7 +23,10 @@ use ratatui::{
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::domain::{
-    provider::{MarketedProvider, PaceStatus, ProviderQuota, ProviderStatus, SemanticsStatus},
+    provider::{
+        EffectiveAvailability, EffectiveStatus, MarketedProvider, PaceStatus, ProjectionConfidence,
+        ProviderQuota, ProviderStatus, RunwayStatus, SemanticsStatus,
+    },
     schema::QuotaReport,
 };
 
@@ -113,7 +116,20 @@ fn has_current_quota(provider: &ProviderQuota) -> bool {
 fn has_trustworthy_quota(provider: &ProviderQuota) -> bool {
     has_current_quota(provider)
         && provider.semantics_status == Some(SemanticsStatus::Known)
-        && !provider.windows.is_empty()
+        && provider.effective.iter().any(decision_grade)
+}
+
+fn decision_grade(effective: &EffectiveAvailability) -> bool {
+    effective.status == EffectiveStatus::Known
+        && (effective.effective_percent_remaining.is_some()
+            || effective
+                .runway
+                .as_ref()
+                .is_some_and(|runway| runway.status != RunwayStatus::Unknown)
+            || effective
+                .pace
+                .as_ref()
+                .is_some_and(|pace| pace.status != PaceStatus::Unknown))
 }
 
 fn percent(value: Option<f64>) -> String {
@@ -250,34 +266,74 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
         .copied()
         .filter(|provider| has_trustworthy_quota(provider))
         .collect();
-    if let Some((provider, remaining)) = trustworthy
+    let constraints = trustworthy
         .iter()
         .flat_map(|provider| {
-            provider.windows.iter().filter_map(move |window| {
-                window
-                    .percent_remaining
-                    .map(|remaining| (provider, remaining))
+            provider.effective.iter().filter_map(move |effective| {
+                if !decision_grade(effective) {
+                    return None;
+                }
+                let runway = effective.runway.as_ref()?;
+                let rank = match runway.status {
+                    RunwayStatus::ExhaustedNow => 0,
+                    RunwayStatus::ProjectedExhaustion
+                        if runway.projection_confidence
+                            == Some(ProjectionConfidence::Established) =>
+                    {
+                        1
+                    }
+                    _ => return None,
+                };
+                Some((rank, provider, effective))
             })
         })
-        .min_by(|(_, left), (_, right)| left.total_cmp(right))
-    {
-        if remaining <= 25.0 {
-            return (
-                format!("! {} · {}% left", display_name(provider), remaining.round()),
-                if remaining <= 10.0 {
-                    RowStyle::Critical
-                } else {
-                    RowStyle::Warning
-                },
-            );
-        }
+        .min_by(|(left_rank, _, left), (right_rank, _, right)| {
+            left_rank.cmp(right_rank).then_with(|| {
+                left.effective_percent_remaining
+                    .unwrap_or(101.0)
+                    .total_cmp(&right.effective_percent_remaining.unwrap_or(101.0))
+            })
+        });
+    if let Some((_, provider, effective)) = constraints {
+        let limiting_id = effective
+            .runway
+            .as_ref()
+            .and_then(|runway| runway.limiting_window_id.as_deref())
+            .or_else(|| effective.limiting_window_ids.first().map(String::as_str))
+            .or_else(|| {
+                effective
+                    .pace
+                    .as_ref()
+                    .and_then(|pace| pace.worst_reserve_window_id.as_deref())
+            });
+        let tier = limiting_id.and_then(|id| {
+            provider
+                .windows
+                .iter()
+                .find(|window| window.id == id)
+                .map(|window| window.label.as_str())
+        });
+        let remaining = effective
+            .effective_percent_remaining
+            .map(|value| format!(" · {}%", value.round()))
+            .unwrap_or_default();
+        let tier = tier.map(|label| format!(" · {label}")).unwrap_or_default();
+        return (
+            format!("! {}{remaining}{tier}", display_name(provider)),
+            RowStyle::Critical,
+        );
     }
-    let current_windows: Vec<_> = trustworthy
+    let current_effective: Vec<_> = trustworthy
         .iter()
-        .flat_map(|provider| provider.windows.iter())
+        .flat_map(|provider| {
+            provider
+                .effective
+                .iter()
+                .filter(|item| decision_grade(item))
+        })
         .collect();
-    if current_windows.iter().any(|window| {
-        window
+    if current_effective.iter().any(|effective| {
+        effective
             .pace
             .as_ref()
             .is_some_and(|pace| matches!(pace.status, PaceStatus::Ahead | PaceStatus::Mixed))
@@ -293,18 +349,15 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
     {
         return ("? Quota data partial".into(), RowStyle::Warning);
     }
-    if current_windows
-        .iter()
-        .any(|window| window.percent_remaining.is_none())
-    {
-        return ("? Some limits unknown".into(), RowStyle::Warning);
-    }
-    if !current_windows.is_empty()
-        && current_windows.iter().all(|window| {
-            window
-                .pace
+    if !current_effective.is_empty()
+        && current_effective.iter().all(|effective| {
+            effective
+                .runway
                 .as_ref()
-                .is_some_and(|pace| matches!(pace.status, PaceStatus::Behind | PaceStatus::OnPace))
+                .is_some_and(|runway| runway.status == RunwayStatus::ThroughReset)
+                || effective.pace.as_ref().is_some_and(|pace| {
+                    matches!(pace.status, PaceStatus::Behind | PaceStatus::OnPace)
+                })
         })
     {
         return ("= Limits on pace".into(), RowStyle::Normal);
@@ -570,7 +623,9 @@ fn dashboard_loop(stdout: &mut Stdout, report: &QuotaReport) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::provider::{ProviderState, QuotaWindow, WindowPace};
+    use crate::domain::provider::{
+        EffectiveAvailability, EffectivePace, ProviderState, QuotaWindow, Runway,
+    };
 
     fn provider(id: &str, remaining: Option<f64>, status: ProviderStatus) -> ProviderQuota {
         ProviderQuota {
@@ -592,7 +647,29 @@ mod tests {
                 limit_usd: None,
                 pace: None,
             }],
-            effective: vec![],
+            effective: remaining
+                .map(|remaining| EffectiveAvailability {
+                    scope: "all".into(),
+                    status: EffectiveStatus::Known,
+                    effective_percent_remaining: Some(remaining),
+                    bounded_by: vec![],
+                    limiting_window_ids: vec!["main".into()],
+                    pace: None,
+                    runway: Some(Runway {
+                        status: if remaining <= 10.0 {
+                            RunwayStatus::ExhaustedNow
+                        } else {
+                            RunwayStatus::ThroughReset
+                        },
+                        usable_runway_seconds: None,
+                        projected_exhausted_at: None,
+                        limiting_window_id: Some("main".into()),
+                        projection_confidence: None,
+                        unmeasurable_window_ids: vec![],
+                    }),
+                })
+                .into_iter()
+                .collect(),
             semantics_status: Some(SemanticsStatus::Known),
             credits: None,
             state: ProviderState {
@@ -689,7 +766,7 @@ mod tests {
         let report = report(vec![provider("claude", None, ProviderStatus::Fresh)]);
         let output = render_lines(&report, 36, 12, &DashboardConfig::default()).join("\n");
         assert!(output.contains("Herdr Quota"));
-        assert!(output.contains("? Some limits unknown"));
+        assert!(output.contains("? Quota data partial"));
         assert!(output.contains(" --"));
         assert!(output.contains("Rows "));
         assert!(output.contains("j/k · PgUp/PgDn · q"));
@@ -876,7 +953,44 @@ mod tests {
             ]);
             for (columns, rows) in [(36, 23), (20, 12)] {
                 let lines = render_lines(&mixed, columns, rows, &DashboardConfig::default());
-                assert_eq!(lines[1].trim_end(), "! claude · 7% left");
+                assert!(lines[1].starts_with("! claude · 7%"));
+            }
+        }
+    }
+
+    #[test]
+    fn attention_uses_effective_availability_not_raw_window_percentages() {
+        let mut healthy = provider("claude", Some(5.0), ProviderStatus::Fresh);
+        healthy.effective[0].effective_percent_remaining = Some(80.0);
+        healthy.effective[0].runway.as_mut().unwrap().status = RunwayStatus::ThroughReset;
+
+        let mut projected = provider("codex", Some(80.0), ProviderStatus::Fresh);
+        projected.effective[0].effective_percent_remaining = Some(80.0);
+        let runway = projected.effective[0].runway.as_mut().unwrap();
+        runway.status = RunwayStatus::ProjectedExhaustion;
+        runway.projection_confidence = Some(ProjectionConfidence::Established);
+
+        for (report, expected) in [
+            (report(vec![healthy]), "= Limits on pace"),
+            (report(vec![projected]), "! codex · 80% · primary tier"),
+        ] {
+            for (columns, rows) in [(36, 23), (20, 12)] {
+                let plain = DashboardConfig::default();
+                let colored = DashboardConfig {
+                    color: true,
+                    ..DashboardConfig::default()
+                };
+                let lines = render_lines(&report, columns, rows, &plain);
+                assert!(expected.starts_with(lines[1].trim_end()));
+                assert_eq!(lines, render_lines(&report, columns, rows, &colored));
+                let buffer = render_buffer(&report, columns, rows, &plain);
+                assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .all(|cell| cell.modifier == Modifier::empty())
+                );
             }
         }
     }
@@ -886,6 +1000,7 @@ mod tests {
         let base = report(vec![provider("claude", Some(50.0), ProviderStatus::Fresh)]);
         let mut no_windows = base.clone();
         no_windows.providers[0].windows.clear();
+        no_windows.providers[0].effective.clear();
         let mut unknown_semantics = base.clone();
         unknown_semantics.providers[0].semantics_status = Some(SemanticsStatus::Unknown);
         let mut partial_semantics = base.clone();
@@ -893,16 +1008,17 @@ mod tests {
         let mut incomplete_siblings = base.clone();
         let mut sibling = provider("codex", Some(50.0), ProviderStatus::Fresh);
         sibling.windows.clear();
+        sibling.effective.clear();
         incomplete_siblings.providers.push(sibling);
 
         let with_pace = |status| {
             let mut report = base.clone();
-            report.providers[0].windows[0].pace = Some(WindowPace {
+            report.providers[0].effective[0].runway = None;
+            report.providers[0].effective[0].pace = Some(EffectivePace {
                 status,
-                reserve_percent_points: None,
-                burn_multiple: None,
-                projected_exhausted_at: None,
-                projection_confidence: None,
+                worst_reserve_percent_points: None,
+                worst_reserve_window_id: Some("main".into()),
+                unknown_window_ids: vec![],
             });
             report
         };
