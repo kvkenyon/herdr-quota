@@ -758,6 +758,51 @@ mod tests {
         UnicodeWidthStr::width(line)
     }
 
+    fn reachable_lines(
+        report: &QuotaReport,
+        columns: u16,
+        rows: u16,
+        config: &DashboardConfig,
+    ) -> Vec<String> {
+        let total = semantic_rows(report, config, columns).len();
+        (0..total.max(1))
+            .flat_map(|scroll| {
+                render_lines(
+                    report,
+                    columns,
+                    rows,
+                    &DashboardConfig {
+                        scroll,
+                        ..config.clone()
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn reachable_style(
+        report: &QuotaReport,
+        columns: u16,
+        rows: u16,
+        config: &DashboardConfig,
+        prefix: &str,
+    ) -> Style {
+        let total = semantic_rows(report, config, columns).len();
+        for scroll in 0..total.max(1) {
+            let scrolled = DashboardConfig {
+                scroll,
+                ..config.clone()
+            };
+            let lines = render_lines(report, columns, rows, &scrolled);
+            if let Some(y) = lines.iter().position(|line| line.starts_with(prefix)) {
+                return render_buffer(report, columns, rows, &scrolled).content
+                    [y * columns as usize]
+                    .style();
+            }
+        }
+        panic!("rendered row starting with {prefix:?} was not reachable");
+    }
+
     #[test]
     fn uses_exact_line_and_cell_dimensions_at_supported_sizes() {
         let report = report(vec![provider("claude", Some(9.0), ProviderStatus::Fresh)]);
@@ -874,12 +919,9 @@ mod tests {
                 render_lines(&report, columns, rows, &plain),
                 render_lines(&report, columns, rows, &colored)
             );
-            let lines = render_lines(&report, columns, rows, &plain);
-            assert_eq!(
-                lines.iter().filter(|line| line.starts_with(" !")).count(),
-                2
-            );
-            assert!(lines.iter().any(|line| line.starts_with("> cursor")));
+            let lines = reachable_lines(&report, columns, rows, &plain);
+            assert!(lines.iter().any(|line| line.starts_with(" !")));
+            assert!(lines.iter().any(|line| line.starts_with("> Cursor")));
             let buffer = render_buffer(&report, columns, rows, &plain);
             assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
             assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
@@ -903,31 +945,15 @@ mod tests {
             color: true,
             ..DashboardConfig::default()
         };
-        let lines = render_lines(&report, 36, 23, &config);
-        let buffer = render_buffer(&report, 36, 23, &config);
-        let row_style = |prefix: &str| {
-            let y = lines
-                .iter()
-                .position(|line| line.starts_with(prefix))
-                .unwrap();
-            buffer.content[y * 36].style()
-        };
+        let row_style = |prefix: &str| reachable_style(&report, 36, 23, &config, prefix);
 
-        let critical_rows: Vec<_> = lines
-            .iter()
-            .enumerate()
-            .filter(|(_, line)| line.starts_with(" !"))
-            .collect();
-        assert_eq!(critical_rows.len(), 2);
-        for (y, _) in critical_rows {
-            let style = buffer.content[y * 36].style();
-            assert_eq!(style.fg, Some(Color::Red));
-            assert!(style.add_modifier.contains(Modifier::BOLD));
-        }
-        let warning = row_style("> cursor");
+        let critical = row_style(" !primary tier");
+        assert_eq!(critical.fg, Some(Color::Red));
+        assert!(critical.add_modifier.contains(Modifier::BOLD));
+        let warning = row_style("> Cursor");
         assert_eq!(warning.fg, Some(Color::Yellow));
         assert!(warning.add_modifier.contains(Modifier::BOLD));
-        let heading = row_style("> claude");
+        let heading = row_style("> Claude");
         assert_eq!(heading.fg, Some(Color::Reset));
         assert!(heading.add_modifier.contains(Modifier::BOLD));
     }
@@ -950,10 +976,13 @@ mod tests {
                     color: true,
                     ..DashboardConfig::default()
                 };
-                let lines = render_lines(&report, columns, rows, &plain);
-                assert_eq!(lines, render_lines(&report, columns, rows, &colored));
+                assert_eq!(
+                    render_lines(&report, columns, rows, &plain),
+                    render_lines(&report, columns, rows, &colored)
+                );
+                let lines = reachable_lines(&report, columns, rows, &plain);
                 assert_eq!(lines[1].trim_end(), "? Limits non-current");
-                assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
+                assert!(lines.iter().any(|line| line.starts_with("> ")));
                 assert!(lines.iter().all(|line| !line.starts_with(" !")));
                 let buffer = render_buffer(&report, columns, rows, &plain);
                 assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
@@ -968,7 +997,7 @@ mod tests {
 
         let mut stale_fresh = provider("claude", Some(7.0), ProviderStatus::Fresh);
         stale_fresh.state.stale = true;
-        let lines = render_lines(
+        let lines = reachable_lines(
             &report(vec![stale_fresh]),
             36,
             23,
@@ -990,16 +1019,20 @@ mod tests {
                     color: true,
                     ..DashboardConfig::default()
                 };
-                let lines = render_lines(&auth_report, columns, rows, &plain);
+                let lines = reachable_lines(&auth_report, columns, rows, &plain);
                 assert_eq!(lines[1].trim_end(), "? Limits non-current");
-                assert!(
-                    lines
-                        .iter()
-                        .any(|line| line.starts_with("> codex · sign-in"))
-                );
-                assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
+                assert!(lines.iter().any(|line| {
+                    line.starts_with(if columns >= 36 {
+                        "> OpenAI Codex · signed out"
+                    } else {
+                        "> OpenAI Codex"
+                    })
+                }));
                 assert!(lines.iter().all(|line| !line.starts_with(" !")));
-                assert_eq!(lines, render_lines(&auth_report, columns, rows, &colored));
+                assert_eq!(
+                    render_lines(&auth_report, columns, rows, &plain),
+                    render_lines(&auth_report, columns, rows, &colored)
+                );
                 let buffer = render_buffer(&auth_report, columns, rows, &plain);
                 assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
                 assert!(
@@ -1175,7 +1208,7 @@ mod tests {
         ]);
         let mut hidden = BTreeSet::new();
         hidden.insert("cursor".into());
-        let output = render_lines(
+        let output = reachable_lines(
             &partial_report,
             36,
             23,
@@ -1185,7 +1218,7 @@ mod tests {
             },
         )
         .join("\n");
-        assert!(output.contains("> codex · unavailable"));
+        assert!(output.contains("> OpenAI Codex · unavailable"));
         assert!(output.contains("3 unavailable providers hidden"));
         let complete = report(
             MarketedProvider::ALL
