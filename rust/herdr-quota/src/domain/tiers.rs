@@ -143,7 +143,8 @@ fn codex_label(window: &QuotaWindow) -> (String, String) {
                         || duration
                             .strip_prefix(&format!("{candidate}_"))
                             .is_some_and(|suffix| {
-                                !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+                                !suffix.is_empty()
+                                    && suffix.bytes().all(|byte| byte.is_ascii_digit())
                             })
                 })
             });
