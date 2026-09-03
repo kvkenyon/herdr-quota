@@ -7,6 +7,10 @@ use std::path::PathBuf;
 pub mod collector;
 pub mod domain;
 pub mod sanitize;
+pub mod store {
+    pub(crate) mod atomic;
+    pub mod settings;
+}
 mod unix_signal;
 
 /// The commands that this foundation supports.
