@@ -146,7 +146,7 @@ test("Preferences saves immediately, persists across reopen, and never overlaps 
     { text: "p" },
     { text: "jjjjjj" },
     { text: " " },
-    { text: "s" },
+    { text: "s", expect: "Quota · used" },
     { text: "q" },
   ]);
   try {

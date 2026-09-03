@@ -59,6 +59,12 @@ def latest_screen(raw: bytes) -> str:
     return screen.decode("utf8", errors="replace")
 
 
+def read_until_screen(fd: int, raw: bytearray, expected: str, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while expected not in latest_screen(bytes(raw)) and time.monotonic() < deadline:
+        raw.extend(read_available(fd, min(0.5, deadline - time.monotonic())))
+
+
 def child_status(pid: int) -> int | None:
     result, status = os.waitpid(pid, os.WNOHANG)
     return None if result == 0 else os.waitstatus_to_exitcode(status)
@@ -111,6 +117,8 @@ def main() -> int:
             time.sleep(delay)
         if step.get("settle", True):
             raw.extend(read_available(master, 2.0))
+            if "expect" in step:
+                read_until_screen(master, raw, step["expect"], 2.0)
             screens.append(latest_screen(bytes(raw)))
 
     status = child_status(pid)
