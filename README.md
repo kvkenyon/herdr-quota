@@ -116,6 +116,10 @@ The optional second content line compares only consecutive, trustworthy samples 
 
 Exact unchanged samples, ordinary same-cycle drift, and values that differ underneath but round to the same displayed integer leave this prime line empty. The pane never shows a confusing `N→N%`. Meaningful capacity drops or gains require at least 10 percentage points; pace reserve changes require at least 10 points; exhaustion projections must move by at least two hours. Material same-cycle gain, replenishment after a reset, authoritative pace improvement, and materially later exhaustion remain positive evidence. These thresholds avoid fabricating precision from routine refresh noise while preserving actionable drop, gain, reset, pace, forecast, and gap semantics.
 
+### Reading the selected-provider trend
+
+Provider detail can add one compact 6–8-cell trace before its tier rows when retained history contains a material change for the selected provider. The cells show allow-listed remaining-capacity samples from the current reset cycle, followed by a concise material consequence such as `↓ 18pp/5m` or `↘ out 3h sooner`. Unsafe, missing, or different-cycle samples appear as `·` gaps rather than being joined or estimated. A single sample, an unknown reset cycle, unsafe or non-current live state, and history that does not yet represent the displayed refresh suppress the trace. Panes narrower than 30 columns elide it before decision or tier text.
+
 ### Reading the gauges
 
 By default each tier draws a small gauge of what is **still remaining**, exactly as v0.2.0 did. In Preferences, `used` changes only this presentation: for a known bounded percentage it shows `100 - remaining`, clamped to 0–100. The title adds `· used` so a screenshot and no-color output cannot be misread. Unknown, unavailable, stale, signed-out, error, and non-percentage evidence never turn into zero or 100, and reset, pace, runway, history, and attention calculations continue using the original upstream data.

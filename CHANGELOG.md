@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Selected-provider detail can show one bounded NO_COLOR-safe history trace with concise material consequence text. Only current, same-reset-cycle allow-listed facts participate; unsafe samples break the trace visibly, and narrow panes elide it before decision or tier text.
+
 ### Changed
 
 - The Rust overview/detail dashboard now refreshes in place: age changes to

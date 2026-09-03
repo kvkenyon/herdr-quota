@@ -679,6 +679,16 @@ struct HistoryStore<F> {
 }
 
 impl<F: HistoryFileOperations> HistoryStore<F> {
+    fn represents_at(&self, report: &QuotaReport, now: SystemTime) -> bool {
+        let Some(snapshot) = normalize_history_snapshot(report, now) else {
+            return false;
+        };
+        self.document
+            .as_ref()
+            .and_then(|document| document.snapshots.last())
+            .is_some_and(|retained| retained.providers == snapshot.providers)
+    }
+
     fn retained(&mut self) -> Option<&HistoryDocument> {
         self.document = match load_history(&self.operations, &self.path) {
             LoadResult::Ready(document)
@@ -779,6 +789,10 @@ impl LocalHistory {
     /// Record a usable report at an explicit time for deterministic callers/tests.
     pub fn record_at(&mut self, report: &QuotaReport, now: SystemTime) -> HistoryView {
         self.inner.record_at(report, now)
+    }
+
+    pub fn represents(&self, report: &QuotaReport) -> bool {
+        self.inner.represents_at(report, SystemTime::now())
     }
 }
 
@@ -1167,6 +1181,27 @@ mod tests {
         let view = store.record_at(&report(50.0), time("2026-09-02T12:00:00.000Z"));
         assert_eq!(view.availability, HistoryAvailability::ClockSkew);
         assert_eq!(store.document.unwrap().snapshots.len(), 1);
+    }
+
+    #[test]
+    fn clock_rejection_represents_only_equivalent_reports() {
+        let operations = FakeOperations::default();
+        let retained = normalize_history_snapshot(&report(60.0), time("2026-09-02T12:01:00.000Z"))
+            .expect("report is usable history");
+        operations.0.borrow_mut().target =
+            Some(serde_json::to_string(&document(vec![retained])).unwrap());
+        let mut store = HistoryStore {
+            path: PathBuf::from("state/history-v1.json"),
+            operations,
+            document: None,
+        };
+        let now = time("2026-09-02T12:00:00.000Z");
+
+        store.record_at(&report(20.0), now);
+        assert!(!store.represents_at(&report(20.0), now));
+
+        store.record_at(&report(60.0), now);
+        assert!(store.represents_at(&report(60.0), now));
     }
 
     #[cfg(unix)]

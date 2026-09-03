@@ -152,3 +152,22 @@ these runs exercise manual refresh without provider credentials or Herdr
 lifecycle behavior. Ordinary Rust tests cover bounded manual restart,
 failure/backoff state, every supported geometry, retained last-good evidence,
 first-load recovery copy, and `NO_COLOR`.
+
+## PR 22 selected-provider trend record
+
+Date: 2026-09-03. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
+`herdr-quota` on merged-main base `16fadf39c77bc6ebcf7e0a3bea0dbf6dabd1620c`
+plus this restacked selected-provider trend worktree, run directly in an exact-size PTY
+with `NO_COLOR`, isolated config/state directories, and the sanitized
+`complete.json` schema-v5 fixture.
+
+| PTY size | Steps                                                                                                 | Result                                                                                                                                     |
+| -------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 36 × 12  | Opened overview, moved selection, entered and escaped provider detail, then quit with `q`             | Decision, provider rows, detail tiers, and controls stayed readable; the dashboard exited and restored the PTY.                            |
+| 20 × 12  | Selected provider 4, entered and escaped detail, opened and cancelled Preferences, then quit with `q` | The optional trend stayed elided before decision/tier text; compact detail and controls remained readable; the dashboard restored the PTY. |
+
+The static fixture establishes only one safe history sample during the smoke,
+so trend evidence is intentionally absent there. Ordinary Rust tests cover the
+bounded trace, material consequence, same-cycle eligibility, visible gaps,
+NO_COLOR text, and unsafe/narrow suppression. No Herdr lifecycle behavior was
+driven.
