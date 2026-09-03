@@ -212,6 +212,7 @@ version = "0.3.0"
 dependencies = [
  "chrono",
  "crossterm",
+ "getrandom",
  "libc",
  "ratatui",
  "regex",
