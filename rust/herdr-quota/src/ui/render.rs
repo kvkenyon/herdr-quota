@@ -132,6 +132,27 @@ fn decision_grade(effective: &EffectiveAvailability) -> bool {
                 .is_some_and(|pace| pace.status != PaceStatus::Unknown))
 }
 
+fn limiting_window_id(effective: &EffectiveAvailability) -> Option<&str> {
+    effective
+        .runway
+        .as_ref()
+        .and_then(|runway| runway.limiting_window_id.as_deref())
+        .or_else(|| {
+            effective
+                .pace
+                .as_ref()
+                .and_then(|pace| pace.worst_reserve_window_id.as_deref())
+        })
+        .or_else(|| effective.limiting_window_ids.first().map(String::as_str))
+}
+
+fn timestamp(value: Option<&str>) -> i64 {
+    value
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp_millis())
+        .unwrap_or(i64::MAX)
+}
+
 fn percent(value: Option<f64>) -> String {
     value
         .map(|value| format!("{:>3}%", value.round() as i64))
@@ -268,44 +289,65 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
         .collect();
     let constraints = trustworthy
         .iter()
-        .flat_map(|provider| {
-            provider.effective.iter().filter_map(move |effective| {
-                if !decision_grade(effective) {
-                    return None;
-                }
-                let runway = effective.runway.as_ref()?;
-                let rank = match runway.status {
-                    RunwayStatus::ExhaustedNow => 0,
-                    RunwayStatus::ProjectedExhaustion
-                        if runway.projection_confidence
-                            == Some(ProjectionConfidence::Established) =>
-                    {
-                        1
+        .enumerate()
+        .flat_map(|(provider_order, provider)| {
+            provider
+                .effective
+                .iter()
+                .enumerate()
+                .filter_map(move |(effective_order, effective)| {
+                    if !decision_grade(effective) {
+                        return None;
                     }
-                    _ => return None,
-                };
-                Some((rank, provider, effective))
-            })
+                    let runway = effective.runway.as_ref()?;
+                    let rank = match runway.status {
+                        RunwayStatus::ExhaustedNow => 0,
+                        RunwayStatus::ProjectedExhaustion
+                            if runway.projection_confidence
+                                == Some(ProjectionConfidence::Established) =>
+                        {
+                            1
+                        }
+                        _ => return None,
+                    };
+                    let time = if rank == 1 {
+                        timestamp(runway.projected_exhausted_at.as_deref())
+                    } else {
+                        limiting_window_id(effective)
+                            .and_then(|id| provider.windows.iter().find(|window| window.id == id))
+                            .map(|window| timestamp(window.resets_at.as_deref()))
+                            .unwrap_or(i64::MAX)
+                    };
+                    Some((
+                        rank,
+                        time,
+                        effective.effective_percent_remaining.unwrap_or(101.0),
+                        provider_order,
+                        effective_order,
+                        provider,
+                        effective,
+                    ))
+                })
         })
-        .min_by(|(left_rank, _, left), (right_rank, _, right)| {
-            left_rank.cmp(right_rank).then_with(|| {
-                left.effective_percent_remaining
-                    .unwrap_or(101.0)
-                    .total_cmp(&right.effective_percent_remaining.unwrap_or(101.0))
-            })
+        .min_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| {
+                    if left.0 == 1 {
+                        left.1
+                            .cmp(&right.1)
+                            .then_with(|| left.2.total_cmp(&right.2))
+                    } else {
+                        left.2
+                            .total_cmp(&right.2)
+                            .then_with(|| right.1.cmp(&left.1))
+                    }
+                })
+                .then_with(|| left.3.cmp(&right.3))
+                .then_with(|| left.4.cmp(&right.4))
         });
-    if let Some((_, provider, effective)) = constraints {
-        let limiting_id = effective
-            .runway
-            .as_ref()
-            .and_then(|runway| runway.limiting_window_id.as_deref())
-            .or_else(|| effective.limiting_window_ids.first().map(String::as_str))
-            .or_else(|| {
-                effective
-                    .pace
-                    .as_ref()
-                    .and_then(|pace| pace.worst_reserve_window_id.as_deref())
-            });
+    if let Some((_, _, _, _, _, provider, effective)) = constraints {
+        let limiting_id = limiting_window_id(effective);
         let tier = limiting_id.and_then(|id| {
             provider
                 .windows
@@ -993,6 +1035,56 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn effective_constraints_rank_by_time_and_use_pace_limiting_tier() {
+        let projected = |id: &str, remaining: f64, exhausted_at: &str| {
+            let mut provider = provider(id, Some(remaining), ProviderStatus::Fresh);
+            let runway = provider.effective[0].runway.as_mut().unwrap();
+            runway.status = RunwayStatus::ProjectedExhaustion;
+            runway.projected_exhausted_at = Some(exhausted_at.into());
+            runway.projection_confidence = Some(ProjectionConfidence::Established);
+            provider
+        };
+        let projections = report(vec![
+            projected("claude", 10.0, "2026-09-02T17:00:00Z"),
+            projected("codex", 80.0, "2026-09-02T13:00:00Z"),
+        ]);
+        let lines = render_lines(&projections, 36, 23, &DashboardConfig::default());
+        assert!(lines[1].starts_with("! codex · 80%"));
+
+        let mut exhausted_soon = provider("claude", Some(0.0), ProviderStatus::Fresh);
+        exhausted_soon.windows[0].resets_at = Some("2026-09-02T13:00:00Z".into());
+        let mut exhausted_later = provider("codex", Some(0.0), ProviderStatus::Fresh);
+        exhausted_later.windows[0].resets_at = Some("2026-09-02T17:00:00Z".into());
+        let lines = render_lines(
+            &report(vec![exhausted_soon, exhausted_later]),
+            36,
+            23,
+            &DashboardConfig::default(),
+        );
+        assert!(lines[1].starts_with("! codex · 0%"));
+
+        let mut labeled = projected("claude", 80.0, "2026-09-02T13:00:00Z");
+        let mut pace_window = labeled.windows[0].clone();
+        pace_window.id = "pace".into();
+        pace_window.label = "pace tier".into();
+        labeled.windows.push(pace_window);
+        labeled.effective[0]
+            .runway
+            .as_mut()
+            .unwrap()
+            .limiting_window_id = None;
+        labeled.effective[0].limiting_window_ids = vec!["main".into()];
+        labeled.effective[0].pace = Some(EffectivePace {
+            status: PaceStatus::Ahead,
+            worst_reserve_percent_points: None,
+            worst_reserve_window_id: Some("pace".into()),
+            unknown_window_ids: vec![],
+        });
+        let lines = render_lines(&report(vec![labeled]), 36, 23, &DashboardConfig::default());
+        assert!(lines[1].starts_with("! claude · 80% · pace tier"));
     }
 
     #[test]
