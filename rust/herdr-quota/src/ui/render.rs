@@ -820,24 +820,47 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
             .runway
             .as_ref()
             .expect("constraint requires runway");
-        let consequence = match runway.status {
+        let consequences = match runway.status {
             RunwayStatus::ProjectedExhaustion => {
                 moment(runway.projected_exhausted_at.as_deref(), width <= 23)
-                    .map(|when| format!("out {when}"))
-                    .unwrap_or_else(|| "out before reset".into())
+                    .map(|when| {
+                        vec![
+                            format!("out {when}"),
+                            format!(
+                                "out {}",
+                                when.split_once(' ').map_or(when.as_str(), |(date, _)| date)
+                            ),
+                            "out before reset".into(),
+                        ]
+                    })
+                    .unwrap_or_else(|| vec!["out before reset".into()])
             }
             RunwayStatus::ExhaustedNow => {
                 let reset = limiting_id
                     .and_then(|id| provider.windows.iter().find(|window| window.id == id))
                     .and_then(|window| moment(window.resets_at.as_deref(), width <= 23));
                 reset
-                    .map(|when| format!("out now · reset {when}"))
-                    .unwrap_or_else(|| "out now".into())
+                    .map(|when| {
+                        vec![
+                            format!("out now · reset {when}"),
+                            format!(
+                                "out now · reset {}",
+                                when.split_once(' ').map_or(when.as_str(), |(date, _)| date)
+                            ),
+                            "out now".into(),
+                        ]
+                    })
+                    .unwrap_or_else(|| vec!["out now".into()])
             }
-            RunwayStatus::ThroughReset | RunwayStatus::Unknown => "needs review".into(),
+            RunwayStatus::ThroughReset | RunwayStatus::Unknown => vec!["needs review".into()],
         };
         return (
-            fitting([format!("! {consequence}")], width),
+            fitting(
+                consequences
+                    .into_iter()
+                    .map(|consequence| format!("! {consequence}")),
+                width,
+            ),
             RowStyle::Critical,
         );
     }
@@ -938,7 +961,15 @@ fn render_frame(
                     .selected_provider
                     .min(model.providers.len().saturating_sub(1)),
             )
-            .map(|section| format!("Herdr Quota · {}", compact_provider_name(section.provider)))
+            .map(|section| {
+                fitting(
+                    [
+                        format!("Herdr Quota · {}", compact_provider_name(section.provider)),
+                        "Herdr Quota".into(),
+                    ],
+                    width,
+                )
+            })
             .unwrap_or_else(|| "Herdr Quota".into())
     } else if config.view == DashboardView::TransitionReview {
         "Transition review".into()
@@ -1846,6 +1877,32 @@ mod tests {
         let lines = render_lines(&report(vec![labeled]), 36, 23, &DashboardConfig::default());
         assert!(lines[1].starts_with("! out 09/02 13:00"));
         assert!(lines.iter().any(|line| line.contains("80% pace tier")));
+    }
+
+    #[test]
+    fn narrow_titles_and_exhaustion_consequences_elide_whole_tokens() {
+        let mut exhausted = provider("claude", Some(0.0), ProviderStatus::Fresh);
+        exhausted.windows[0].resets_at = Some("2026-09-02T13:00:00Z".into());
+        let exhausted = report(vec![exhausted]);
+
+        for columns in 16..=23 {
+            let lines = render_lines(&exhausted, columns, 12, &DashboardConfig::default());
+            assert!(lines[1].starts_with("! out now"), "{columns}: {:?}", lines[1]);
+        }
+
+        let details = DashboardConfig {
+            view: DashboardView::Details,
+            ..DashboardConfig::default()
+        };
+        for provider_id in ["claude", "copilot"] {
+            let lines = render_lines(
+                &report(vec![provider(provider_id, Some(50.0), ProviderStatus::Fresh)]),
+                16,
+                12,
+                &details,
+            );
+            assert_eq!(lines[0].trim_end(), "Herdr Quota");
+        }
     }
 
     #[test]
