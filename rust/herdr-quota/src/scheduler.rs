@@ -294,6 +294,7 @@ where
                 worker.on_age_tick();
                 age_timer.as_mut().reset(Instant::now() + AGE_TICK);
             },
+            _ = tasks.join_next(), if !tasks.is_empty() => {},
         }
     }
 }
