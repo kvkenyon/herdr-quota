@@ -627,8 +627,8 @@ fn overview_evidence_rows(
                 .filter(|provider| has_decision_safe_quota(section, provider))
         })
         .collect();
-    let decision_provider = decision_constraint(&trustworthy)
-        .and_then(|(provider, _)| provider_id(provider));
+    let decision_provider =
+        decision_constraint(&trustworthy).and_then(|(provider, _)| provider_id(provider));
     let mut rows = Vec::new();
     for section in &model.providers {
         if selected == Some(section.provider) || decision_provider == Some(section.provider) {
@@ -2313,7 +2313,11 @@ mod tests {
                     lines.iter().position(|line| line.contains(name))
                 })
                 .collect();
-            assert_eq!(provider_rows.len(), model.providers.len(), "{columns}: {lines:?}");
+            assert_eq!(
+                provider_rows.len(),
+                model.providers.len(),
+                "{columns}: {lines:?}"
+            );
             assert!(
                 provider_rows.windows(2).all(|pair| pair[0] < pair[1]),
                 "{columns}: {lines:?}"

@@ -112,12 +112,12 @@ percentage/state. Reset and runway evidence may use only rows left after the
 complete visible roster and provenance.
 
 The first pass still resembled a generic dense TUI because evidence rows could
-compete with the roster and repeat the selected provider. The revision makes
-the moving provider cursor the single flight-deck signature, keeps decision and
-controls stationary, and admits non-selected-provider evidence only into spare
-rows. Weight, markers, spacing, and wording carry severity and selection, so
-terminal colors remain optional decoration under both normal and `NO_COLOR`
-rendering.
+compete with the roster and repeat the selected or decision provider. The
+revision makes the moving provider cursor the single flight-deck signature,
+keeps decision and controls stationary, and admits evidence for neither the
+selected nor decision provider, and then only into spare rows. Weight, markers,
+spacing, and wording carry severity and selection, so terminal colors remain
+optional decoration under both normal and `NO_COLOR` rendering.
 
 Date: 2026-09-03. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
 `herdr-quota` rebased onto `a693509` plus this overview/detail worktree, run
