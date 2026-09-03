@@ -64,6 +64,8 @@ pub struct DashboardConfig {
     pub status: Option<DashboardStatus>,
     /// Rounded-up minutes until the scheduled retry for a collector failure.
     pub retry_minutes: Option<u64>,
+    /// Retained schema-v2 safe history used only for selected-provider detail.
+    pub history: Option<HistoryDocument>,
     /// The current finite dashboard surface.
     pub view: DashboardView,
     /// The stable cursor into the visible provider roster.
@@ -87,6 +89,7 @@ impl Default for DashboardConfig {
             transition_count: 0,
             status: None,
             retry_minutes: None,
+            history: None,
             view: DashboardView::Overview,
             selected_provider: 0,
             startup_view: StartupView::Overview,
@@ -1563,7 +1566,8 @@ pub(super) fn clamp_scroll(
     height: u16,
     config: &DashboardConfig,
 ) -> usize {
-    let rows = semantic_rows(report, config, width.max(1)).len();
+    let rows =
+        semantic_rows_with_history(report, config.history.as_ref(), config, width.max(1)).len();
     let height = usize::from(height.max(1));
     let body_start = if config.view == DashboardView::Details && height >= 5 {
         3
@@ -1580,7 +1584,13 @@ pub(super) fn draw_dashboard(
     config: &DashboardConfig,
 ) {
     let area = frame.area();
-    let rows = render_frame(report, None, area.width, area.height, config);
+    let rows = render_frame(
+        report,
+        config.history.as_ref(),
+        area.width,
+        area.height,
+        config,
+    );
     frame.render_widget(
         Dashboard {
             rows: &rows,
@@ -1611,7 +1621,7 @@ pub fn render_buffer(
     height: u16,
     config: &DashboardConfig,
 ) -> Buffer {
-    let rows = render_frame(Some(report), None, width, height, config);
+    let rows = render_frame(Some(report), config.history.as_ref(), width, height, config);
     let area = Rect::new(0, 0, width.max(1), height.max(1));
     let mut buffer = Buffer::empty(area);
     Dashboard {
@@ -1629,7 +1639,7 @@ pub fn render_dashboard_buffer(
     height: u16,
     config: &DashboardConfig,
 ) -> Buffer {
-    let rows = render_frame(report, None, width, height, config);
+    let rows = render_frame(report, config.history.as_ref(), width, height, config);
     let area = Rect::new(0, 0, width.max(1), height.max(1));
     let mut buffer = Buffer::empty(area);
     Dashboard {

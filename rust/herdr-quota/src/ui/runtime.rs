@@ -824,6 +824,7 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
         transition_count: state.transitions.events.len(),
         status: dashboard_status(&state.app),
         retry_minutes: retry_minutes(&state.app),
+        history: state.history.current().cloned(),
         view: state.view,
         selected_provider: state.selected_provider,
         startup_view: state.settings.startup_view,
