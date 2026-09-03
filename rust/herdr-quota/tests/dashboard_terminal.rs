@@ -160,6 +160,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+#[allow(clippy::unnecessary_mut_passed)] // macOS openpty requires a mutable winsize pointer.
 fn open_pty(width: u16, height: u16) -> (File, File) {
     let mut master = -1;
     let mut slave = -1;
