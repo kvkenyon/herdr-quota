@@ -16,9 +16,20 @@ function report() {
   return adaptQuotaResponse(JSON.parse(JSON.stringify(rawFixture)));
 }
 
-function render(settings = defaultSettings(), options = {}) {
+function reportWithEveryMarketedProvider() {
+  const value = report();
+  for (const provider of ["grok", "copilot"])
+    value.providers.push({
+      ...JSON.parse(JSON.stringify(value.providers[0])),
+      provider,
+      label: provider === "grok" ? "Grok" : "GitHub Copilot",
+    });
+  return value;
+}
+
+function render(settings = defaultSettings(), options = {}, value = report()) {
   return renderPlain(
-    { report: report(), settings, loading: false, scroll: 0 },
+    { report: value, settings, loading: false, scroll: 0 },
     { width: 36, height: 23, now: NOW, ...options },
   );
 }
@@ -42,7 +53,7 @@ test("explicit defaults preserve v0.2.0 provider, attention, and remaining seman
   assert.doesNotMatch(explicit.split("\n")[0], /used/i);
 });
 
-test("every provider can be hidden individually with an explicit hidden count", () => {
+test("disabled-only providers do not produce a hidden-provider summary", () => {
   const labels = new Map([
     ["claude", /^Claude\s*$/m],
     ["codex", /^OpenAI Codex\s*$/m],
@@ -52,13 +63,41 @@ test("every provider can be hidden individually with an explicit hidden count", 
     ["copilot", /^GitHub Copilot\s*$/m],
   ]);
   for (const [provider, pattern] of labels) {
-    const output = render({
-      ...defaultSettings(),
-      hiddenProviders: [provider],
-    });
+    const output = render(
+      {
+        ...defaultSettings(),
+        hiddenProviders: [provider],
+      },
+      {},
+      reportWithEveryMarketedProvider(),
+    );
     assert.doesNotMatch(output, pattern, provider);
-    assert.match(output, /^1 hidden provider · p Preferences/m, provider);
+    assert.doesNotMatch(output, /^\d+ hidden provider/m, provider);
   }
+});
+
+test("the summary counts unavailable providers, not disabled ones", () => {
+  const value = reportWithEveryMarketedProvider();
+  value.providers.find(
+    (provider) => provider.provider === "codex",
+  ).state.status = "unavailable";
+
+  const output = render(
+    { ...defaultSettings(), hiddenProviders: ["claude"] },
+    {},
+    value,
+  );
+  assert.doesNotMatch(output, /^Claude\s*$/m);
+  assert.match(output, /^1 hidden provider · p Preferences/m);
+});
+
+test("no summary line renders when every non-disabled provider is available", () => {
+  const output = render(
+    defaultSettings(),
+    {},
+    reportWithEveryMarketedProvider(),
+  );
+  assert.doesNotMatch(output, /^\d+ hidden provider/m);
 });
 
 test("all hidden is an honest p-key recovery state at every product size", () => {
@@ -71,7 +110,7 @@ test("all hidden is an honest p-key recovery state at every product size", () =>
       const output = render(settings, { width, height });
       assert.match(output, /No providers shown/);
       assert.match(output, /Press p for (?:Preferences|prefs)/);
-      assert.match(output, /6 hidden/);
+      assert.doesNotMatch(output, /hidden/);
       assert.doesNotMatch(output, /All known|Limits on pace|%|█/);
       assert.equal(output.split("\n").length, height);
     }
