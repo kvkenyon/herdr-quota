@@ -124,6 +124,17 @@ enum Event<W: RefreshWorker> {
     },
 }
 
+struct PublicationState {
+    generation: u64,
+    closed: bool,
+}
+
+struct PostCollection<W: RefreshWorker> {
+    generation: u64,
+    attempt: RefreshAttempt,
+    value: W::Value,
+}
+
 fn begin_collection<W>(
     worker: Arc<W>,
     events: mpsc::UnboundedSender<Event<W>>,
@@ -147,22 +158,26 @@ fn begin_collection<W>(
     });
 }
 
-fn begin_post_collection<W>(
+async fn run_post_collections<W>(
     worker: Arc<W>,
     events: mpsc::UnboundedSender<Event<W>>,
-    tasks: &mut JoinSet<()>,
-    post_collection_gate: Arc<Mutex<()>>,
-    generation: u64,
-    attempt: RefreshAttempt,
-    value: W::Value,
+    mut post_collections: mpsc::UnboundedReceiver<PostCollection<W>>,
+    publication_state: Arc<Mutex<PublicationState>>,
 ) where
     W: RefreshWorker,
 {
-    tasks.spawn(async move {
-        let _serialized = post_collection_gate.lock().await;
-        let result = worker.after_success(value, attempt).await;
-        let _ = events.send(Event::PostCollectionFinished { generation, result });
-    });
+    while let Some(work) = post_collections.recv().await {
+        let state = publication_state.lock().await;
+        if state.closed || state.generation != work.generation {
+            continue;
+        }
+        let result = worker.after_success(work.value, work.attempt).await;
+        drop(state);
+        let _ = events.send(Event::PostCollectionFinished {
+            generation: work.generation,
+            result,
+        });
+    }
 }
 
 fn backoff(failures: usize) -> Duration {
@@ -176,20 +191,35 @@ where
     let (event_sender, mut events) = mpsc::unbounded_channel();
     let current_generation = Arc::new(AtomicU64::new(0));
     let closed = Arc::new(AtomicBool::new(false));
-    let post_collection_gate = Arc::new(Mutex::new(()));
+    let publication_state = Arc::new(Mutex::new(PublicationState {
+        generation: 0,
+        closed: false,
+    }));
+    let (post_collection_sender, post_collection_receiver) = mpsc::unbounded_channel();
     let mut tasks = JoinSet::new();
     let mut generation = 0_u64;
     let mut failures = 0_usize;
     let mut timer: Option<std::pin::Pin<Box<Sleep>>> = None;
     let mut age_timer = Box::pin(tokio::time::sleep(AGE_TICK));
 
-    begin_collection(
+    tasks.spawn(run_post_collections(
         Arc::clone(&worker),
         event_sender.clone(),
-        &mut tasks,
-        &mut generation,
-        &current_generation,
-    );
+        post_collection_receiver,
+        Arc::clone(&publication_state),
+    ));
+
+    {
+        let mut state = publication_state.lock().await;
+        begin_collection(
+            Arc::clone(&worker),
+            event_sender.clone(),
+            &mut tasks,
+            &mut generation,
+            &current_generation,
+        );
+        state.generation = generation;
+    }
 
     loop {
         tokio::select! {
@@ -198,27 +228,34 @@ where
                     failures = 0;
                     drop(timer.take());
                     worker.cancel_active();
+                    let mut state = publication_state.lock().await;
                     begin_collection(
-                        Arc::clone(&worker),
-                        event_sender.clone(),
-                        &mut tasks,
-                        &mut generation,
-                        &current_generation,
-                    );
+                            Arc::clone(&worker),
+                            event_sender.clone(),
+                            &mut tasks,
+                            &mut generation,
+                            &current_generation,
+                        );
+                    state.generation = generation;
                     let _ = acknowledged.send(());
                 }
                 Some(Command::Close(acknowledged)) => {
+                    tasks.abort_all();
+                    let mut state = publication_state.lock().await;
+                    state.closed = true;
                     closed.store(true, Ordering::Release);
                     generation = generation.saturating_add(1);
+                    state.generation = generation;
                     current_generation.store(generation, Ordering::Release);
                     worker.cancel_active();
-                    tasks.abort_all();
                     let _ = acknowledged.send(());
                     return;
                 }
                 None => {
-                    closed.store(true, Ordering::Release);
                     tasks.abort_all();
+                    let mut state = publication_state.lock().await;
+                    state.closed = true;
+                    closed.store(true, Ordering::Release);
                     return;
                 }
             },
@@ -236,15 +273,11 @@ where
                                     closed: Arc::clone(&closed),
                                 };
                                 worker.on_success(&value, &attempt);
-                                begin_post_collection(
-                                    Arc::clone(&worker),
-                                    event_sender.clone(),
-                                    &mut tasks,
-                                    Arc::clone(&post_collection_gate),
-                                    result_generation,
+                                let _ = post_collection_sender.send(PostCollection {
+                                    generation: result_generation,
                                     attempt,
                                     value,
-                                );
+                                });
                             }
                             Err(error) => settle_failure(
                                 &*worker,
@@ -282,6 +315,7 @@ where
                 }
             } => {
                 timer = None;
+                let mut state = publication_state.lock().await;
                 begin_collection(
                     Arc::clone(&worker),
                     event_sender.clone(),
@@ -289,6 +323,7 @@ where
                     &mut generation,
                     &current_generation,
                 );
+                state.generation = generation;
             },
             _ = &mut age_timer => {
                 worker.on_age_tick();
@@ -317,7 +352,10 @@ fn settle_failure<W>(
 
 #[cfg(test)]
 mod tests {
-    use super::{AGE_TICK, FAILURE_BACKOFF, NORMAL_REFRESH, RefreshAttempt, RefreshWorker, open};
+    use super::{
+        AGE_TICK, FAILURE_BACKOFF, NORMAL_REFRESH, PostCollection, PublicationState,
+        RefreshAttempt, RefreshWorker, open, run_post_collections,
+    };
     use std::collections::VecDeque;
     use std::future::Future;
     use std::sync::Mutex;
@@ -334,6 +372,7 @@ mod tests {
         starts: AtomicUsize,
         cancellations: AtomicUsize,
         successes: Mutex<Vec<&'static str>>,
+        post_started: Mutex<Vec<&'static str>>,
         failures: Mutex<Vec<&'static str>>,
         scheduled: Mutex<Vec<(Duration, bool)>>,
         settled: AtomicUsize,
@@ -348,6 +387,7 @@ mod tests {
                 starts: AtomicUsize::new(0),
                 cancellations: AtomicUsize::new(0),
                 successes: Mutex::new(Vec::new()),
+                post_started: Mutex::new(Vec::new()),
                 failures: Mutex::new(Vec::new()),
                 scheduled: Mutex::new(Vec::new()),
                 settled: AtomicUsize::new(0),
@@ -397,9 +437,10 @@ mod tests {
 
         fn after_success(
             &self,
-            _value: &'static str,
+            value: &'static str,
             _attempt: RefreshAttempt,
         ) -> impl Future<Output = PostOutcome> + Send {
+            self.post_started.lock().expect("lock").push(value);
             let receive = self
                 .post_collections
                 .lock()
@@ -442,6 +483,93 @@ mod tests {
         for _ in 0..8 {
             tokio::task::yield_now().await;
         }
+    }
+
+    #[tokio::test]
+    async fn post_collection_consumer_preserves_enqueue_order() {
+        let worker = std::sync::Arc::new(TestWorker::new());
+        let first = worker.post_next();
+        let second = worker.post_next();
+        let current_generation = std::sync::Arc::new(super::AtomicU64::new(1));
+        let closed = std::sync::Arc::new(super::AtomicBool::new(false));
+        let attempt = RefreshAttempt {
+            generation: 1,
+            current_generation,
+            closed,
+        };
+        let publication_state = std::sync::Arc::new(tokio::sync::Mutex::new(PublicationState {
+            generation: 1,
+            closed: false,
+        }));
+        let (events, mut event_receiver) =
+            tokio::sync::mpsc::unbounded_channel::<super::Event<std::sync::Arc<TestWorker>>>();
+        let (sender, receiver) =
+            tokio::sync::mpsc::unbounded_channel::<PostCollection<std::sync::Arc<TestWorker>>>();
+        let consumer = tokio::spawn(run_post_collections(
+            std::sync::Arc::new(std::sync::Arc::clone(&worker)),
+            events,
+            receiver,
+            publication_state,
+        ));
+
+        sender
+            .send(PostCollection {
+                generation: 1,
+                attempt: attempt.clone(),
+                value: "first",
+            })
+            .expect("consumer");
+        sender
+            .send(PostCollection {
+                generation: 1,
+                attempt,
+                value: "second",
+            })
+            .expect("consumer");
+        flush().await;
+        assert_eq!(
+            worker.post_started.lock().expect("lock").as_slice(),
+            ["first"]
+        );
+
+        first.send(Ok("saved")).expect("receiver");
+        event_receiver.recv().await.expect("completion");
+        flush().await;
+        assert_eq!(
+            worker.post_started.lock().expect("lock").as_slice(),
+            ["first", "second"]
+        );
+        second.send(Ok("saved")).expect("receiver");
+        drop(sender);
+        consumer.await.expect("consumer task");
+    }
+
+    #[tokio::test]
+    async fn manual_refresh_cannot_advance_generation_during_publication() {
+        let worker = std::sync::Arc::new(TestWorker::new());
+        let first = worker.collect_next();
+        let publication = worker.post_next();
+        let second = worker.collect_next();
+        let handle = open(std::sync::Arc::clone(&worker));
+        flush().await;
+
+        first.send(Ok("first")).expect("receiver");
+        flush().await;
+        assert_eq!(
+            worker.post_started.lock().expect("lock").as_slice(),
+            ["first"]
+        );
+
+        let manual_handle = handle.clone();
+        let manual = tokio::spawn(async move { manual_handle.manual().await });
+        flush().await;
+        assert_eq!(worker.starts.load(Ordering::SeqCst), 1);
+
+        publication.send(Ok("saved")).expect("receiver");
+        manual.await.expect("manual task");
+        assert_eq!(worker.starts.load(Ordering::SeqCst), 2);
+        handle.close().await;
+        drop(second);
     }
 
     #[tokio::test(start_paused = true)]
