@@ -780,6 +780,7 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
         interactive: true,
         transition_count: state.transitions.events.len(),
         status: dashboard_status(&state.app),
+        ..DashboardConfig::default()
     }
 }
 
