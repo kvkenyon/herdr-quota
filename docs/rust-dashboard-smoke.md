@@ -156,8 +156,8 @@ first-load recovery copy, and `NO_COLOR`.
 ## PR 22 selected-provider trend record
 
 Date: 2026-09-03. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
-`herdr-quota` on PR 20 base `5dd43e2ff2958d83fd431d548fda5dd72d9aa06e`
-plus this selected-provider trend worktree, run directly in an exact-size PTY
+`herdr-quota` on merged-main base `16fadf39c77bc6ebcf7e0a3bea0dbf6dabd1620c`
+plus this restacked selected-provider trend worktree, run directly in an exact-size PTY
 with `NO_COLOR`, isolated config/state directories, and the sanitized
 `complete.json` schema-v5 fixture.
 

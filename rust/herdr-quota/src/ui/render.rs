@@ -613,7 +613,6 @@ fn overview_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
             style: RowStyle::Warning,
         });
     }
-    rows.extend(overview_evidence_rows(report, config, width));
     rows
 }
 
@@ -1424,6 +1423,14 @@ fn render_frame(
     let footer = height.saturating_sub(1);
     let body_end = footer.max(body_start);
     let viewport = body_end.saturating_sub(body_start);
+    if config.view == DashboardView::Overview {
+        let spare = viewport.saturating_sub(rows.len());
+        rows.extend(
+            overview_evidence_rows(report, config, width as u16)
+                .into_iter()
+                .take(spare),
+        );
+    }
     let scroll = if config.view == DashboardView::Overview {
         config
             .selected_provider
@@ -2726,6 +2733,39 @@ mod tests {
         assert!(lines[4].starts_with(" =Cursor"));
         assert!(lines[5].starts_with(" =Kimi"));
         assert_eq!(lines[11].trim_end(), "j/k · enter details · p · q");
+    }
+
+    #[test]
+    fn overview_evidence_uses_only_spare_rows_and_excludes_primary_providers() {
+        let mut claude = provider("claude", Some(40.0), ProviderStatus::Fresh);
+        claude.windows[0].resets_at = Some("2026-09-05T12:00:00Z".into());
+        claude.effective[0].runway = Some(Runway {
+            status: RunwayStatus::ProjectedExhaustion,
+            usable_runway_seconds: Some(86_400.0),
+            projected_exhausted_at: Some("2026-09-03T12:00:00Z".into()),
+            limiting_window_id: Some("main".into()),
+            projection_confidence: Some(ProjectionConfidence::Established),
+            unmeasurable_window_ids: vec![],
+        });
+        let mut kimi = provider("kimi", Some(80.0), ProviderStatus::Fresh);
+        kimi.windows[0].resets_at = Some("2026-09-06T12:00:00Z".into());
+        let report = report(vec![claude, kimi]);
+        let config = DashboardConfig {
+            selected_provider: 1,
+            ..DashboardConfig::default()
+        };
+
+        let lines = render_lines(&report, 36, 12, &config);
+
+        assert!(lines[1].contains("out 09/03 12:00"), "{lines:?}");
+        assert!(lines[2].starts_with(" !Claude"), "{lines:?}");
+        assert!(lines[3].starts_with(">=Kimi"), "{lines:?}");
+        assert!(
+            lines[4..11]
+                .iter()
+                .all(|line| !line.contains("Claude") && !line.contains("Kimi")),
+            "{lines:?}"
+        );
     }
 
     #[test]
