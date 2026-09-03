@@ -274,7 +274,7 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
         window
             .pace
             .as_ref()
-            .is_some_and(|pace| matches!(pace.status, PaceStatus::Behind | PaceStatus::Mixed))
+            .is_some_and(|pace| matches!(pace.status, PaceStatus::Ahead | PaceStatus::Mixed))
     }) {
         return ("? Pace needs review".into(), RowStyle::Warning);
     }
@@ -283,7 +283,7 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
             window
                 .pace
                 .as_ref()
-                .is_some_and(|pace| matches!(pace.status, PaceStatus::Ahead | PaceStatus::OnPace))
+                .is_some_and(|pace| matches!(pace.status, PaceStatus::Behind | PaceStatus::OnPace))
         })
     {
         return ("= Limits on pace".into(), RowStyle::Normal);
@@ -823,27 +823,24 @@ mod tests {
         let mut no_windows = base.clone();
         no_windows.providers[0].windows.clear();
 
-        let mut behind = base.clone();
-        behind.providers[0].windows[0].pace = Some(WindowPace {
-            status: PaceStatus::Behind,
-            reserve_percent_points: None,
-            burn_multiple: None,
-            projected_exhausted_at: None,
-            projection_confidence: None,
-        });
-        let mut healthy = base;
-        healthy.providers[0].windows[0].pace = Some(WindowPace {
-            status: PaceStatus::OnPace,
-            reserve_percent_points: None,
-            burn_multiple: None,
-            projected_exhausted_at: None,
-            projection_confidence: None,
-        });
+        let with_pace = |status| {
+            let mut report = base.clone();
+            report.providers[0].windows[0].pace = Some(WindowPace {
+                status,
+                reserve_percent_points: None,
+                burn_multiple: None,
+                projected_exhausted_at: None,
+                projection_confidence: None,
+            });
+            report
+        };
 
         for (report, expected) in [
             (no_windows, "? Quota data partial"),
-            (behind, "? Pace needs review"),
-            (healthy, "= Limits on pace"),
+            (with_pace(PaceStatus::Ahead), "? Pace needs review"),
+            (with_pace(PaceStatus::Mixed), "? Pace needs review"),
+            (with_pace(PaceStatus::Behind), "= Limits on pace"),
+            (with_pace(PaceStatus::OnPace), "= Limits on pace"),
         ] {
             for (columns, rows) in [(36, 23), (20, 12)] {
                 let plain = DashboardConfig::default();
@@ -854,6 +851,14 @@ mod tests {
                 let lines = render_lines(&report, columns, rows, &plain);
                 assert_eq!(lines[1].trim_end(), expected);
                 assert_eq!(lines, render_lines(&report, columns, rows, &colored));
+                let buffer = render_buffer(&report, columns, rows, &plain);
+                assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
+                assert!(
+                    buffer
+                        .content
+                        .iter()
+                        .all(|cell| cell.modifier == Modifier::empty())
+                );
             }
         }
     }
