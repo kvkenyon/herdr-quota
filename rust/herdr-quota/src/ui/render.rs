@@ -204,6 +204,26 @@ fn compact_provider_name(provider: MarketedProvider) -> &'static str {
     }
 }
 
+fn narrow_provider_name(provider: MarketedProvider) -> &'static str {
+    if provider == MarketedProvider::Copilot {
+        "GitHub"
+    } else {
+        compact_provider_name(provider)
+    }
+}
+
+fn compact_annotation(value: &str) -> &str {
+    match value {
+        "signed out" => "out",
+        "rate limited" => "rate",
+        "unavailable" => "down",
+        "non-current" => "old",
+        "partial data" => "partial",
+        "no reading" | "consumer quota unavailable" => "none",
+        other => other,
+    }
+}
+
 fn effective_risk(effective: &EffectiveAvailability) -> u8 {
     match effective.runway.as_ref().map(|runway| runway.status) {
         Some(RunwayStatus::ExhaustedNow) => 0,
@@ -475,21 +495,10 @@ fn overview_row(
         .find(|candidate| UnicodeWidthStr::width(candidate.as_str()) <= width)
         .unwrap_or_else(|| {
             if matches!(state.as_str(), "? partial" | "? unknown") {
-                let narrow_name = if section.provider == MarketedProvider::Copilot {
-                    "GitHub"
-                } else {
-                    name
-                };
+                let narrow_name = narrow_provider_name(section.provider);
                 return truncate(&format!("{cursor}{narrow_name}{state}"), width);
             }
-            let compact_state = match state.as_str() {
-                "signed out" => "out",
-                "rate limited" => "rate",
-                "unavailable" => "down",
-                "non-current" => "old",
-                "no reading" | "consumer quota unavailable" => "none",
-                other => other,
-            };
+            let compact_state = compact_annotation(&state);
             fitting(
                 [
                     format!("{prefix} {compact_state}"),
@@ -663,7 +672,11 @@ fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Ve
                     fitting(
                         [
                             format!("> {} · {value}", section.label),
-                            format!("> {}", section.label),
+                            format!(
+                                ">?{} {}",
+                                narrow_provider_name(section.provider),
+                                compact_annotation(value)
+                            ),
                         ],
                         width as usize,
                     )
@@ -2032,7 +2045,30 @@ mod tests {
         );
 
         assert_eq!(lines[1].trim_end(), "? Data partial");
-        assert_eq!(lines[3].trim_end(), "> Claude");
+        assert_eq!(lines[3].trim_end(), ">?Claude partial");
+
+        for (mut provider, expected) in [
+            (
+                provider("copilot", Some(50.0), ProviderStatus::AuthRequired),
+                ">?GitHub out",
+            ),
+            (
+                provider("claude", Some(50.0), ProviderStatus::Unavailable),
+                ">?Claude down",
+            ),
+        ] {
+            provider.state.auth_status = Some("usable".into());
+            let lines = render_lines(
+                &report(vec![provider]),
+                16,
+                12,
+                &DashboardConfig {
+                    view: DashboardView::Details,
+                    ..DashboardConfig::default()
+                },
+            );
+            assert_eq!(lines[3].trim_end(), expected);
+        }
     }
 
     #[test]
