@@ -441,11 +441,7 @@ mod tests {
         fs::write(&path, b"current\n").expect("write current settings");
         let competing_path = path.clone();
         let (started_tx, started_rx) = mpsc::channel();
-        let competitor = std::thread::spawn(move || {
-            started_tx.send(()).expect("signal competing save");
-            replace_atomically(&competing_path, b"future\n", |_| Ok::<(), Infallible>(()))
-                .expect("write competing settings");
-        });
+        let mut competitor = None;
 
         replace_atomically_with_hook(
             &path,
@@ -453,13 +449,27 @@ mod tests {
             |_| Ok::<(), Infallible>(()),
             |stage| {
                 if stage == WriteStage::BeforeRename {
+                    competitor = Some(std::thread::spawn({
+                        let competing_path = competing_path.clone();
+                        let started_tx = started_tx.clone();
+                        move || {
+                            started_tx.send(()).expect("signal competing save");
+                            replace_atomically(&competing_path, b"future\n", |_| {
+                                Ok::<(), Infallible>(())
+                            })
+                            .expect("write competing settings");
+                        }
+                    }));
                     started_rx.recv().expect("wait for competing save");
                 }
                 Ok(())
             },
         )
         .expect("write next settings");
-        competitor.join().expect("join competing save");
+        competitor
+            .expect("start competing save")
+            .join()
+            .expect("join competing save");
 
         assert_eq!(fs::read(&path).expect("read final settings"), b"future\n");
     }
