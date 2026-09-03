@@ -263,8 +263,7 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
                     };
                     rows.push(SemanticRow {
                         text: format!(
-                            " {marker}{label:<label_budget$} {}{meter}{conclusion}",
-                            percent
+                            " {marker}{label:<label_budget$} {percent}{meter}{conclusion}"
                         ),
                         style: if critical {
                             RowStyle::Critical
