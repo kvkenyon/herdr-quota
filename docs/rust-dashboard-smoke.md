@@ -80,3 +80,19 @@ The static fixture has no collector, so refresh is intentionally unavailable.
 Semantic-row reachability and cell-width bounds are
 covered by ordinary Rust unit tests; this record is a direct dashboard smoke,
 not a comparison against the TypeScript runtime.
+
+## PR 15 terminal-loop record
+
+Date: 2026-09-02. Platform: macOS arm64 (Darwin 25.1.0). Runtime: Rust
+`herdr-quota` at `8b2c762` plus the PR 15 worktree, run directly in a native
+POSIX PTY with `NO_COLOR=1`, temporary schema-v3/v2 local state, and the
+plugin-local schema-v5 collector.
+
+| PTY path                  | Steps                                                                                                                                                                       | Result                                                                                                                                                                |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 36 × 23 → 20 × 12         | Opened `dashboard`; reviewed and acknowledged a bounded transition; exercised fragmented Down, save/cancel/reset/clear confirmations, and rapid `r`; resized; quit with `q` | Both sizes remained interactive; fragmented Escape input stayed in Preferences; the transition was acknowledged; and raw mode, cursor, and alternate screen restored. |
+| 20 × 12, SIGINT / SIGTERM | Opened `dashboard`, delivered each signal in a separate direct run, and inspected terminal state and emitted terminal teardown                                              | Both signals produced a clean exit and restored canonical/echo/signal input flags, the cursor, and the primary screen.                                                |
+
+The run used no Herdr lifecycle command. The same paths are covered by the
+ordinary Rust POSIX-PTY integration test with a bounded fake collector so rapid
+refresh and teardown remain deterministic in the test suite.

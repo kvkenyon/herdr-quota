@@ -1,6 +1,6 @@
 //! Command handling for the Rust foundation.
 //!
-//! This package does not collect quota data or start the Herdr runtime.
+//! The live dashboard owns collection only for the lifetime of its terminal pane.
 
 use std::path::PathBuf;
 
@@ -25,8 +25,8 @@ pub enum Command {
         height: u16,
         svg: Option<PathBuf>,
     },
-    /// Open the rendered fixture in a terminal dashboard.
-    Dashboard { fixture: PathBuf },
+    /// Open the live, pane-owned terminal dashboard.
+    Dashboard,
 }
 
 /// An error from command-line parsing.
@@ -64,18 +64,14 @@ where
         [command, flag, fixture, rest @ ..] if command == "preview" && flag == "--fixture" => {
             parse_preview(PathBuf::from(fixture), rest)
         }
-        [command, flag, fixture] if command == "dashboard" && flag == "--fixture" => {
-            Ok(Command::Dashboard {
-                fixture: PathBuf::from(fixture),
-            })
-        }
+        [command] if command == "dashboard" => Ok(Command::Dashboard),
         _ => Err(ParseError::new(usage())),
     }
 }
 
 /// Return command help for unsupported input.
 pub fn usage() -> &'static str {
-    "usage: herdr-quota --version | herdr-quota preview --fixture <path> [--width <cells> --height <rows> --svg <path>] | herdr-quota dashboard --fixture <path>"
+    "usage: herdr-quota --version | herdr-quota preview --fixture <path> [--width <cells> --height <rows> --svg <path>] | herdr-quota dashboard"
 }
 
 /// Return the package version.
@@ -164,6 +160,15 @@ mod tests {
                 height: 12,
                 svg: Some(PathBuf::from("docs/preview.svg")),
             })
+        );
+    }
+
+    #[test]
+    fn parses_only_the_live_dashboard_entrypoint() {
+        assert_eq!(parse_command(["dashboard"]), Ok(Command::Dashboard));
+        assert_eq!(
+            parse_command(["dashboard", "--fixture", "test/fixture.json"]),
+            Err(super::ParseError::new(usage()))
         );
     }
 }

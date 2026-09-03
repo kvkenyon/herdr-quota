@@ -4,22 +4,14 @@
 //! whole semantic rows before placing them in a fixed-height frame, so scrolling
 //! cannot split a provider heading from the row model or leak collector text.
 
-use std::collections::BTreeSet;
-use std::io::{self, Stdout};
-
-use crossterm::{
-    event::{self, Event, KeyCode},
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
 use ratatui::{
-    Terminal,
-    backend::CrosstermBackend,
+    Frame,
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
     widgets::Widget,
 };
+use std::collections::BTreeSet;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::domain::{
@@ -44,6 +36,31 @@ pub struct DashboardConfig {
     pub scroll: usize,
     /// Whether optional Ratatui colour may reinforce the textual markers.
     pub color: bool,
+    /// Saved provider order. An empty value preserves report order for previews.
+    pub provider_order: Vec<String>,
+    /// The locally selected meter interpretation.
+    pub meter_mode: MeterMode,
+    /// Whether controls that require the live runtime may be advertised.
+    pub interactive: bool,
+    /// Number of in-pane transition cues available for review.
+    pub transition_count: usize,
+    /// Current bounded collector state, when visible.
+    pub status: Option<DashboardStatus>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DashboardStatus {
+    Refreshing,
+    Timeout,
+    MissingExecutable,
+    IncompatibleOutput,
+    NetworkProcess,
+}
+
+impl Default for MeterMode {
+    fn default() -> Self {
+        Self::Remaining
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -179,8 +196,44 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
         .filter_map(|id| MarketedProvider::from_id(id))
         .map(|provider| (provider, ProviderVisibility::UserDisabled))
         .collect::<ProviderVisibilityMap>();
-    let model = dashboard_model(report, MeterMode::Remaining, &visibility);
+    let mut model = dashboard_model(report, config.meter_mode, &visibility);
+    if !config.provider_order.is_empty() {
+        model.providers.sort_by_key(|section| {
+            config
+                .provider_order
+                .iter()
+                .position(|id| id == section.provider.id())
+                .unwrap_or(usize::MAX)
+        });
+    }
     let mut rows = Vec::new();
+    if let Some(status) = config.status {
+        rows.push(SemanticRow {
+            text: match status {
+                DashboardStatus::Refreshing => "~ Refreshing quota data".into(),
+                DashboardStatus::Timeout => "? Quota check timed out".into(),
+                DashboardStatus::MissingExecutable => "? quota-axi executable is missing".into(),
+                DashboardStatus::IncompatibleOutput => "? quota-axi output is incompatible".into(),
+                DashboardStatus::NetworkProcess => "? Quota network/process check failed".into(),
+            },
+            style: if status == DashboardStatus::Refreshing {
+                RowStyle::Normal
+            } else {
+                RowStyle::Warning
+            },
+        });
+    }
+    if config.transition_count > 0 {
+        let noun = if config.transition_count == 1 {
+            "change"
+        } else {
+            "changes"
+        };
+        rows.push(SemanticRow {
+            text: format!("! {} {noun} · a review", config.transition_count),
+            style: RowStyle::Warning,
+        });
+    }
     for section in model.providers {
         let current = report
             .providers
@@ -229,7 +282,7 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
                         },
                         label_budget,
                     );
-                    let percent = percent(tier.percent_remaining);
+                    let percent = percent(tier.displayed_percent);
                     let candidate_conclusion = match tier.conclusion {
                         TierConclusion::NotReported => " · not reported",
                         TierConclusion::OnPace => " · on pace",
@@ -460,15 +513,16 @@ fn render_frame(
     let rows = semantic_rows(report, config, width as u16);
     let title = "Herdr Quota";
     let (attention, attention_style) = attention(report, config);
-    let controls = if width >= 30 {
+    let controls = if config.interactive && width >= 30 {
+        "j/k · r · p · a · q"
+    } else if config.interactive {
+        "j/k r p a q"
+    } else if width >= 30 {
         "j/k · PgUp/PgDn · q"
     } else {
         "j/k · q"
     };
-    let body_start = if height >= 5 { 3 } else { 2.min(height) };
-    let footer = height.saturating_sub(1);
-    let body_end = footer.max(body_start);
-    let viewport = body_end.saturating_sub(body_start);
+    let (body_start, footer, viewport) = viewport(height);
     let scroll = config.scroll.min(rows.len().saturating_sub(viewport));
     let mut output = vec![
         SemanticRow {
@@ -514,6 +568,24 @@ fn render_frame(
         .collect()
 }
 
+fn viewport(height: usize) -> (usize, usize, usize) {
+    let body_start = if height >= 5 { 3 } else { 2.min(height) };
+    let footer = height.saturating_sub(1);
+    let body_end = footer.max(body_start);
+    (body_start, footer, body_end.saturating_sub(body_start))
+}
+
+pub(super) fn clamp_scroll(
+    report: &QuotaReport,
+    width: u16,
+    height: u16,
+    config: &DashboardConfig,
+) -> usize {
+    let rows = semantic_rows(report, config, width.max(1)).len();
+    let (_, _, viewport) = viewport(usize::from(height.max(1)));
+    config.scroll.min(rows.saturating_sub(viewport))
+}
+
 fn truncate(value: &str, width: usize) -> String {
     if UnicodeWidthStr::width(value) <= width {
         return value.to_owned();
@@ -541,6 +613,22 @@ fn pad_cells(value: &str, width: usize) -> String {
 struct Dashboard<'a> {
     rows: &'a [SemanticRow],
     config: &'a DashboardConfig,
+}
+
+pub(super) fn draw_dashboard(
+    frame: &mut Frame<'_>,
+    report: &QuotaReport,
+    config: &DashboardConfig,
+) {
+    let area = frame.area();
+    let rows = render_frame(report, area.width, area.height, config);
+    frame.render_widget(
+        Dashboard {
+            rows: &rows,
+            config,
+        },
+        area,
+    );
 }
 
 impl Widget for Dashboard<'_> {
@@ -602,84 +690,6 @@ pub fn preview_svg(lines: &[String], width: u16, height: u16) -> String {
         u32::from(width) * 9 + 16,
         u32::from(height) * 18 + 8
     )
-}
-
-/// Drive the interactive Crossterm dashboard. `j`/`k`, Page keys, `q`, and Escape are local.
-pub fn dashboard(report: &QuotaReport) -> io::Result<()> {
-    enable_raw_mode()?;
-    let mut session = TerminalSession {
-        raw: true,
-        alternate: false,
-    };
-    let mut stdout = io::stdout();
-    session.alternate = true;
-    execute!(stdout, EnterAlternateScreen)?;
-    let result = dashboard_loop(&mut stdout, report);
-    let cleanup = session.restore(&mut stdout);
-    result.and(cleanup)
-}
-
-struct TerminalSession {
-    raw: bool,
-    alternate: bool,
-}
-
-impl TerminalSession {
-    fn restore(&mut self, stdout: &mut Stdout) -> io::Result<()> {
-        let leave = if self.alternate {
-            self.alternate = false;
-            execute!(stdout, LeaveAlternateScreen)
-        } else {
-            Ok(())
-        };
-        let raw = if self.raw {
-            self.raw = false;
-            disable_raw_mode()
-        } else {
-            Ok(())
-        };
-        leave.and(raw)
-    }
-}
-
-impl Drop for TerminalSession {
-    fn drop(&mut self) {
-        let _ = self.restore(&mut io::stdout());
-    }
-}
-
-fn dashboard_loop(stdout: &mut Stdout, report: &QuotaReport) -> io::Result<()> {
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    let mut config = DashboardConfig {
-        color: std::env::var_os("NO_COLOR").is_none(),
-        ..DashboardConfig::default()
-    };
-    loop {
-        terminal.draw(|frame| {
-            let area = frame.area();
-            let rows = render_frame(report, area.width, area.height, &config);
-            frame.render_widget(
-                Dashboard {
-                    rows: &rows,
-                    config: &config,
-                },
-                area,
-            );
-        })?;
-        if let Event::Key(key) = event::read()? {
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                KeyCode::Char('j') | KeyCode::Down => {
-                    config.scroll = config.scroll.saturating_add(1)
-                }
-                KeyCode::Char('k') | KeyCode::Up => config.scroll = config.scroll.saturating_sub(1),
-                KeyCode::PageDown => config.scroll = config.scroll.saturating_add(8),
-                KeyCode::PageUp => config.scroll = config.scroll.saturating_sub(8),
-                _ => {}
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -899,6 +909,26 @@ mod tests {
             assert_eq!(lines.last().unwrap().trim_end(), controls);
             assert!(lines.iter().all(|line| !line.contains(" · r")));
         }
+    }
+
+    #[test]
+    fn live_preferences_change_order_meter_and_controls_without_changing_severity() {
+        let report = report(vec![
+            provider("claude", Some(9.0), ProviderStatus::Fresh),
+            provider("codex", Some(60.0), ProviderStatus::Fresh),
+        ]);
+        let config = DashboardConfig {
+            provider_order: vec!["codex".into(), "claude".into()],
+            meter_mode: MeterMode::Used,
+            interactive: true,
+            ..DashboardConfig::default()
+        };
+        let lines = render_lines(&report, 36, 23, &config);
+        let output = lines.join("\n");
+        assert!(output.find("> OpenAI Codex").unwrap() < output.find("> Claude").unwrap());
+        assert!(output.contains(" 40%"));
+        assert!(output.contains("!primary tier     91%"));
+        assert_eq!(lines.last().unwrap().trim_end(), "j/k · r · p · a · q");
     }
 
     #[test]

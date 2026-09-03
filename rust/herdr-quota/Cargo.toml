@@ -22,7 +22,7 @@ ratatui = "0.29"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
-tokio = { version = "1.47", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
+tokio = { version = "1.47", features = ["io-util", "macros", "process", "rt", "signal", "sync", "time"] }
 time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
 unicode-width = "0.2"
 
