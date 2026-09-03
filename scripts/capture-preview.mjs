@@ -19,7 +19,7 @@ await run(
     "--width",
     "36",
     "--height",
-    "23",
+    "12",
     "--svg",
     "docs/dashboard-preview.svg",
   ],

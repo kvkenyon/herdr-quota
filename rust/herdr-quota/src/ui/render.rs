@@ -4,14 +4,23 @@
 //! whole semantic rows before placing them in a fixed-height frame, so scrolling
 //! cannot split a provider heading from the row model or leak collector text.
 
+use std::collections::BTreeSet;
+use std::io::{self, Stdout};
+
+use chrono::{Datelike, Timelike};
+use crossterm::{
+    event::{self, Event, KeyCode},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
 use ratatui::{
-    Frame,
+    Terminal,
+    backend::CrosstermBackend,
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
     widgets::Widget,
 };
-use std::collections::BTreeSet;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::domain::{
@@ -22,10 +31,21 @@ use crate::domain::{
     schema::QuotaReport,
     tiers::TierConclusion,
 };
+use crate::store::settings::{DashboardSettings, SettingsStore, StartupView};
 use crate::ui::{
     bar::MeterMode,
     model::{ProviderDetail, ProviderVisibility, ProviderVisibilityMap, dashboard_model},
 };
+
+/// The finite dashboard surface currently shown in the terminal.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DashboardView {
+    #[default]
+    Overview,
+    Details,
+    Preferences,
+    TransitionReview,
+}
 
 /// Local rendering inputs; collection and quota semantics do not depend on them.
 #[derive(Clone, Debug, Default)]
@@ -36,31 +56,15 @@ pub struct DashboardConfig {
     pub scroll: usize,
     /// Whether optional Ratatui colour may reinforce the textual markers.
     pub color: bool,
-    /// Saved provider order. An empty value preserves report order for previews.
-    pub provider_order: Vec<String>,
-    /// The locally selected meter interpretation.
-    pub meter_mode: MeterMode,
-    /// Whether controls that require the live runtime may be advertised.
-    pub interactive: bool,
-    /// Number of in-pane transition cues available for review.
-    pub transition_count: usize,
-    /// Current bounded collector state, when visible.
-    pub status: Option<DashboardStatus>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DashboardStatus {
-    Refreshing,
-    Timeout,
-    MissingExecutable,
-    IncompatibleOutput,
-    NetworkProcess,
-}
-
-impl Default for MeterMode {
-    fn default() -> Self {
-        Self::Remaining
-    }
+    /// The current finite dashboard surface.
+    pub view: DashboardView,
+    /// The stable cursor into the visible provider roster.
+    pub selected_provider: usize,
+    /// The editable startup preference shown by Preferences.
+    pub startup_view: StartupView,
+    saved_startup_view: StartupView,
+    return_view: DashboardView,
+    save_failed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,18 +99,6 @@ impl RowStyle {
 
 fn provider_id(provider: &ProviderQuota) -> Option<MarketedProvider> {
     MarketedProvider::from_id(&provider.provider.to_ascii_lowercase())
-}
-
-fn display_name(provider: &ProviderQuota) -> &str {
-    provider
-        .label
-        .as_deref()
-        .filter(|label| !label.is_empty())
-        .unwrap_or_else(|| {
-            provider_id(provider)
-                .map(MarketedProvider::label)
-                .unwrap_or("Provider")
-        })
 }
 
 fn has_current_quota(provider: &ProviderQuota) -> bool {
@@ -176,65 +168,458 @@ fn gauge(value: Option<f64>, cells: usize) -> String {
     )
 }
 
-fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
+fn hidden_unavailable_count(report: &QuotaReport, config: &DashboardConfig) -> usize {
     let report_ids: BTreeSet<_> = report
         .providers
         .iter()
         .filter_map(provider_id)
         .map(MarketedProvider::id)
         .collect();
-    let hidden_unavailable = MarketedProvider::ALL
+    MarketedProvider::ALL
         .iter()
         .filter(|provider| {
             !config.user_hidden.contains(provider.id()) && !report_ids.contains(provider.id())
         })
-        .count();
+        .count()
+}
 
+fn visible_model(
+    report: &QuotaReport,
+    config: &DashboardConfig,
+) -> crate::ui::model::DashboardModel {
     let visibility = config
         .user_hidden
         .iter()
         .filter_map(|id| MarketedProvider::from_id(id))
         .map(|provider| (provider, ProviderVisibility::UserDisabled))
         .collect::<ProviderVisibilityMap>();
-    let mut model = dashboard_model(report, config.meter_mode, &visibility);
-    if !config.provider_order.is_empty() {
-        model.providers.sort_by_key(|section| {
-            config
-                .provider_order
-                .iter()
-                .position(|id| id == section.provider.id())
-                .unwrap_or(usize::MAX)
-        });
+    dashboard_model(report, MeterMode::Remaining, &visibility)
+}
+
+fn compact_provider_name(provider: MarketedProvider) -> &'static str {
+    match provider {
+        MarketedProvider::Codex => "Codex",
+        MarketedProvider::Copilot => "Copilot",
+        other => other.label(),
     }
-    let mut rows = Vec::new();
-    if let Some(status) = config.status {
-        rows.push(SemanticRow {
-            text: match status {
-                DashboardStatus::Refreshing => "~ Refreshing quota data".into(),
-                DashboardStatus::Timeout => "? Quota check timed out".into(),
-                DashboardStatus::MissingExecutable => "? quota-axi executable is missing".into(),
-                DashboardStatus::IncompatibleOutput => "? quota-axi output is incompatible".into(),
-                DashboardStatus::NetworkProcess => "? Quota network/process check failed".into(),
-            },
-            style: if status == DashboardStatus::Refreshing {
-                RowStyle::Normal
+}
+
+fn effective_risk(effective: &EffectiveAvailability) -> u8 {
+    match effective.runway.as_ref().map(|runway| runway.status) {
+        Some(RunwayStatus::ExhaustedNow) => 0,
+        Some(RunwayStatus::ProjectedExhaustion)
+            if effective
+                .runway
+                .as_ref()
+                .and_then(|runway| runway.projection_confidence)
+                == Some(ProjectionConfidence::Established) =>
+        {
+            1
+        }
+        _ if effective
+            .pace
+            .as_ref()
+            .is_some_and(|pace| matches!(pace.status, PaceStatus::Ahead | PaceStatus::Mixed)) =>
+        {
+            2
+        }
+        _ => 3,
+    }
+}
+
+fn limiting_effective(provider: &ProviderQuota) -> Option<&EffectiveAvailability> {
+    provider
+        .effective
+        .iter()
+        .enumerate()
+        .filter(|(_, effective)| decision_grade(effective))
+        .min_by(|(left_order, left), (right_order, right)| {
+            effective_risk(left)
+                .cmp(&effective_risk(right))
+                .then_with(|| {
+                    timestamp(
+                        left.runway
+                            .as_ref()
+                            .and_then(|runway| runway.projected_exhausted_at.as_deref()),
+                    )
+                    .cmp(&timestamp(
+                        right
+                            .runway
+                            .as_ref()
+                            .and_then(|runway| runway.projected_exhausted_at.as_deref()),
+                    ))
+                })
+                .then_with(|| {
+                    left.effective_percent_remaining
+                        .unwrap_or(101.0)
+                        .total_cmp(&right.effective_percent_remaining.unwrap_or(101.0))
+                })
+                .then_with(|| left_order.cmp(right_order))
+        })
+        .map(|(_, effective)| effective)
+}
+
+fn reset_date(value: Option<&str>, compact: bool) -> Option<String> {
+    let date = chrono::DateTime::parse_from_rfc3339(value?).ok()?;
+    Some(if compact {
+        format!("{}/{}", date.month(), date.day())
+    } else {
+        format!("{:02}/{:02}", date.month(), date.day())
+    })
+}
+
+fn moment(value: Option<&str>, compact: bool) -> Option<String> {
+    let date = chrono::DateTime::parse_from_rfc3339(value?).ok()?;
+    Some(if compact {
+        format!(
+            "{}/{} {:02}:{:02}",
+            date.month(),
+            date.day(),
+            date.hour(),
+            date.minute()
+        )
+    } else {
+        format!(
+            "{:02}/{:02} {:02}:{:02}",
+            date.month(),
+            date.day(),
+            date.hour(),
+            date.minute()
+        )
+    })
+}
+
+fn fitting(candidates: impl IntoIterator<Item = String>, width: usize) -> String {
+    candidates
+        .into_iter()
+        .find(|candidate| UnicodeWidthStr::width(candidate.as_str()) <= width)
+        .unwrap_or_default()
+}
+
+fn hidden_sibling_unsafe(
+    section: &crate::ui::model::ProviderSection,
+    provider: &ProviderQuota,
+) -> bool {
+    provider.semantics_status == Some(SemanticsStatus::Partial)
+        || provider
+            .effective
+            .iter()
+            .any(|effective| effective.status != EffectiveStatus::Known)
+        || matches!(&section.detail, ProviderDetail::Tiers(tiers) if tiers
+            .iter()
+            .any(|tier| matches!(tier.conclusion, TierConclusion::NotReported)))
+}
+
+fn overview_row(
+    section: &crate::ui::model::ProviderSection,
+    provider: &ProviderQuota,
+    selected: bool,
+    width: usize,
+) -> SemanticRow {
+    let current = has_current_quota(provider);
+    let annotation = section.annotation.as_ref().map(|value| value.text);
+    let tiers = match &section.detail {
+        ProviderDetail::Tiers(tiers) => Some(tiers.as_slice()),
+        ProviderDetail::Recovery { .. } | ProviderDetail::Message { .. } => None,
+    };
+    let has_hidden_unknown = hidden_sibling_unsafe(section, provider);
+
+    let (marker, state, tier, reset, displayed, style) = if !current || tiers.is_none() {
+        (
+            '?',
+            annotation.unwrap_or("non-current").to_owned(),
+            None,
+            None,
+            None,
+            RowStyle::Warning,
+        )
+    } else if has_hidden_unknown {
+        (
+            '?',
+            "? partial".to_owned(),
+            None,
+            None,
+            None,
+            RowStyle::Warning,
+        )
+    } else if provider.semantics_status != Some(SemanticsStatus::Known) {
+        (
+            '?',
+            "? unknown".to_owned(),
+            None,
+            None,
+            None,
+            RowStyle::Warning,
+        )
+    } else if let Some(effective) = limiting_effective(provider) {
+        let limiting_id = limiting_window_id(effective);
+        let tier = tiers
+            .and_then(|tiers| limiting_id.and_then(|id| tiers.iter().find(|tier| tier.id == id)));
+        let remaining = effective.effective_percent_remaining;
+        let critical =
+            effective_risk(effective) <= 1 || remaining.is_some_and(|value| value <= 10.0);
+        let warning = effective_risk(effective) == 2;
+        (
+            if critical {
+                '!'
+            } else if warning {
+                '?'
             } else {
-                RowStyle::Warning
+                '='
             },
-        });
+            percent(remaining).trim().to_owned(),
+            tier.filter(|tier| {
+                !(section.provider == MarketedProvider::Cursor && tier.id == "api_usage")
+            })
+            .map(|tier| tier.compact_label.as_str()),
+            reset_date(tier.and_then(|tier| tier.resets_at.as_deref()), width <= 23),
+            remaining,
+            if critical {
+                RowStyle::Critical
+            } else if warning {
+                RowStyle::Warning
+            } else {
+                RowStyle::Normal
+            },
+        )
+    } else {
+        (
+            '?',
+            "? unknown".to_owned(),
+            None,
+            None,
+            None,
+            RowStyle::Warning,
+        )
+    };
+
+    let cursor = if selected { '>' } else { ' ' };
+    let name = compact_provider_name(section.provider);
+    let prefix = format!("{cursor}{marker}{name}");
+    let tier = tier.map(str::to_owned);
+    let mut candidates = Vec::new();
+    if width >= 24 {
+        if let Some(displayed) = displayed {
+            candidates.push(format!(
+                "{prefix} [{}] {state}{}{}",
+                gauge(Some(displayed), 6),
+                tier.as_deref()
+                    .map(|value| format!(" {value}"))
+                    .unwrap_or_default(),
+                reset
+                    .as_deref()
+                    .map(|value| format!(" {value}"))
+                    .unwrap_or_default(),
+            ));
+        }
     }
-    if config.transition_count > 0 {
-        let noun = if config.transition_count == 1 {
-            "change"
+    let text_priority = if width <= 23 {
+        [
+            (tier.as_deref(), reset.as_deref()),
+            (None, reset.as_deref()),
+            (tier.as_deref(), None),
+            (None, None),
+        ]
+    } else {
+        [
+            (tier.as_deref(), reset.as_deref()),
+            (tier.as_deref(), None),
+            (None, reset.as_deref()),
+            (None, None),
+        ]
+    };
+    for (shown_tier, shown_reset) in text_priority {
+        candidates.push(format!(
+            "{prefix} {state}{}{}",
+            shown_tier
+                .map(|value| format!(" {value}"))
+                .unwrap_or_default(),
+            shown_reset
+                .map(|value| format!(" {value}"))
+                .unwrap_or_default(),
+        ));
+    }
+    let text = candidates
+        .into_iter()
+        .find(|candidate| UnicodeWidthStr::width(candidate.as_str()) <= width)
+        .unwrap_or_else(|| {
+            if matches!(state.as_str(), "? partial" | "? unknown") {
+                let narrow_name = if section.provider == MarketedProvider::Copilot {
+                    "GitHub"
+                } else {
+                    name
+                };
+                return truncate(&format!("{cursor}{narrow_name}{state}"), width);
+            }
+            let compact_state = match state.as_str() {
+                "signed out" => "out",
+                "rate limited" => "rate",
+                "unavailable" => "down",
+                "non-current" => "old",
+                "no reading" | "consumer quota unavailable" => "none",
+                other => other,
+            };
+            fitting(
+                [
+                    format!("{prefix} {compact_state}"),
+                    format!("{prefix}{compact_state}"),
+                    prefix,
+                ],
+                width,
+            )
+        });
+    SemanticRow { text, style }
+}
+
+fn overview_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
+    let model = visible_model(report, config);
+    let mut rows = Vec::new();
+    let selected = config
+        .selected_provider
+        .min(model.providers.len().saturating_sub(1));
+    for (index, section) in model.providers.iter().enumerate() {
+        let Some(provider) = report
+            .providers
+            .iter()
+            .find(|provider| provider_id(provider) == Some(section.provider))
+        else {
+            continue;
+        };
+        rows.push(overview_row(
+            section,
+            provider,
+            index == selected,
+            width as usize,
+        ));
+    }
+    let hidden_unavailable = hidden_unavailable_count(report, config);
+    if hidden_unavailable > 0 {
+        let noun = if hidden_unavailable == 1 {
+            "provider"
         } else {
-            "changes"
+            "providers"
         };
         rows.push(SemanticRow {
-            text: format!("! {} {noun} · a review", config.transition_count),
+            text: fitting(
+                [
+                    format!("? {hidden_unavailable} unavailable {noun} hidden"),
+                    format!("? {hidden_unavailable} unavailable hidden"),
+                    format!("? {hidden_unavailable} unavailable"),
+                ],
+                width as usize,
+            ),
             style: RowStyle::Warning,
         });
     }
-    for section in model.providers {
+    rows.extend(overview_evidence_rows(report, config, width));
+    rows
+}
+
+fn overview_evidence_rows(
+    report: &QuotaReport,
+    config: &DashboardConfig,
+    width: u16,
+) -> Vec<SemanticRow> {
+    let model = visible_model(report, config);
+    let selected = model
+        .providers
+        .get(
+            config
+                .selected_provider
+                .min(model.providers.len().saturating_sub(1)),
+        )
+        .map(|section| section.provider);
+    let mut rows = Vec::new();
+    for section in &model.providers {
+        let Some(provider) = report
+            .providers
+            .iter()
+            .find(|provider| provider_id(provider) == Some(section.provider))
+        else {
+            continue;
+        };
+        if !has_trustworthy_quota(provider) || hidden_sibling_unsafe(section, provider) {
+            continue;
+        }
+        let Some(effective) = limiting_effective(provider) else {
+            continue;
+        };
+        let name = compact_provider_name(section.provider);
+        let compact = width <= 23;
+        let limiting = limiting_window_id(effective)
+            .and_then(|id| provider.windows.iter().find(|window| window.id == id));
+        if let Some(reset) = moment(
+            limiting.and_then(|window| window.resets_at.as_deref()),
+            compact,
+        ) {
+            rows.push(SemanticRow {
+                text: fitting(
+                    [
+                        format!("  {name} reset {reset}"),
+                        format!("  reset {reset} · {name}"),
+                        format!(
+                            "  {name} reset {}",
+                            reset
+                                .split_once(' ')
+                                .map_or(reset.as_str(), |(date, _)| date)
+                        ),
+                    ],
+                    width as usize,
+                ),
+                style: RowStyle::Normal,
+            });
+        }
+        let runway = effective.runway.as_ref();
+        if runway.is_some_and(|runway| {
+            runway.status == RunwayStatus::ProjectedExhaustion
+                && runway.projection_confidence == Some(ProjectionConfidence::Established)
+        }) && selected != Some(section.provider)
+        {
+            let when = moment(
+                runway.and_then(|runway| runway.projected_exhausted_at.as_deref()),
+                compact,
+            )
+            .unwrap_or_else(|| "before reset".into());
+            let date = when.split_once(' ').map_or(when.as_str(), |(date, _)| date);
+            rows.push(SemanticRow {
+                text: fitting(
+                    [
+                        format!("! {name} out {when}"),
+                        format!("!{name} out {date}"),
+                        format!("! {name} out"),
+                    ],
+                    width as usize,
+                ),
+                style: RowStyle::Critical,
+            });
+        } else if runway.is_some_and(|runway| runway.status == RunwayStatus::ThroughReset) {
+            rows.push(SemanticRow {
+                text: fitting(
+                    [
+                        format!("= {name} through reset"),
+                        format!("= {name} on pace"),
+                    ],
+                    width as usize,
+                ),
+                style: RowStyle::Normal,
+            });
+        }
+    }
+    rows.retain(|row| !row.text.is_empty());
+    rows
+}
+
+fn detail_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
+    let model = visible_model(report, config);
+    let Some(section) = model.providers.get(
+        config
+            .selected_provider
+            .min(model.providers.len().saturating_sub(1)),
+    ) else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    {
         let current = report
             .providers
             .iter()
@@ -251,7 +636,7 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
                 RowStyle::Heading
             },
         });
-        match section.detail {
+        match &section.detail {
             ProviderDetail::Recovery { instruction } => rows.push(SemanticRow {
                 text: format!("  ? {instruction}"),
                 style: RowStyle::Warning,
@@ -282,7 +667,7 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
                         },
                         label_budget,
                     );
-                    let percent = percent(tier.displayed_percent);
+                    let percent = percent(tier.percent_remaining);
                     let candidate_conclusion = match tier.conclusion {
                         TierConclusion::NotReported => " · not reported",
                         TierConclusion::OnPace => " · on pace",
@@ -330,21 +715,18 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
             }
         }
     }
-    if hidden_unavailable > 0 {
-        let noun = if hidden_unavailable == 1 {
-            "provider"
-        } else {
-            "providers"
-        };
-        rows.push(SemanticRow {
-            text: format!("? {hidden_unavailable} unavailable {noun} hidden"),
-            style: RowStyle::Warning,
-        });
-    }
     rows
 }
 
-fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyle) {
+fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
+    match config.view {
+        DashboardView::Overview => overview_rows(report, config, width),
+        DashboardView::Details => detail_rows(report, config, width),
+        DashboardView::Preferences | DashboardView::TransitionReview => Vec::new(),
+    }
+}
+
+fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (String, RowStyle) {
     let visible: Vec<_> = report
         .providers
         .iter()
@@ -421,20 +803,28 @@ fn attention(report: &QuotaReport, config: &DashboardConfig) -> (String, RowStyl
         });
     if let Some((_, _, _, _, _, provider, effective)) = constraints {
         let limiting_id = limiting_window_id(effective);
-        let tier = limiting_id.and_then(|id| {
-            provider
-                .windows
-                .iter()
-                .find(|window| window.id == id)
-                .map(|window| window.label.as_str())
-        });
-        let remaining = effective
-            .effective_percent_remaining
-            .map(|value| format!(" · {}%", value.round()))
-            .unwrap_or_default();
-        let tier = tier.map(|label| format!(" · {label}")).unwrap_or_default();
+        let runway = effective
+            .runway
+            .as_ref()
+            .expect("constraint requires runway");
+        let consequence = match runway.status {
+            RunwayStatus::ProjectedExhaustion => {
+                moment(runway.projected_exhausted_at.as_deref(), width <= 23)
+                    .map(|when| format!("out {when}"))
+                    .unwrap_or_else(|| "out before reset".into())
+            }
+            RunwayStatus::ExhaustedNow => {
+                let reset = limiting_id
+                    .and_then(|id| provider.windows.iter().find(|window| window.id == id))
+                    .and_then(|window| moment(window.resets_at.as_deref(), width <= 23));
+                reset
+                    .map(|when| format!("out now · reset {when}"))
+                    .unwrap_or_else(|| "out now".into())
+            }
+            RunwayStatus::ThroughReset | RunwayStatus::Unknown => "needs review".into(),
+        };
         return (
-            format!("! {}{remaining}{tier}", display_name(provider)),
+            fitting([format!("! {consequence}")], width),
             RowStyle::Critical,
         );
     }
@@ -510,20 +900,62 @@ fn render_frame(
 ) -> Vec<SemanticRow> {
     let width = width.max(1) as usize;
     let height = height.max(1) as usize;
-    let rows = semantic_rows(report, config, width as u16);
-    let title = "Herdr Quota";
-    let (attention, attention_style) = attention(report, config);
-    let controls = if config.interactive && width >= 30 {
-        "j/k · r · p · a · q"
-    } else if config.interactive {
-        "j/k r p a q"
-    } else if width >= 30 {
-        "j/k · PgUp/PgDn · q"
-    } else {
-        "j/k · q"
+    if config.view == DashboardView::Preferences {
+        return render_preferences(width, height, config);
+    }
+    let rows = match config.view {
+        DashboardView::Overview | DashboardView::Details => {
+            semantic_rows(report, config, width as u16)
+        }
+        DashboardView::TransitionReview => vec![SemanticRow {
+            text: "No new transition events".into(),
+            style: RowStyle::Normal,
+        }],
+        DashboardView::Preferences => unreachable!("handled above"),
     };
-    let (body_start, footer, viewport) = viewport(height);
-    let scroll = config.scroll.min(rows.len().saturating_sub(viewport));
+    let title = if config.view == DashboardView::Details {
+        let model = visible_model(report, config);
+        model
+            .providers
+            .get(
+                config
+                    .selected_provider
+                    .min(model.providers.len().saturating_sub(1)),
+            )
+            .map(|section| format!("Herdr Quota · {}", compact_provider_name(section.provider)))
+            .unwrap_or_else(|| "Herdr Quota".into())
+    } else if config.view == DashboardView::TransitionReview {
+        "Transition review".into()
+    } else {
+        "Herdr Quota".into()
+    };
+    let (attention, attention_style) = attention(report, config, width);
+    let controls = match (config.view, width >= 30) {
+        (DashboardView::Overview, true) => "j/k · enter details · p · q",
+        (DashboardView::Overview, false) => "j/k enter p q",
+        (DashboardView::Details, true) => "j/k · esc overview · q",
+        (DashboardView::Details, false) => "j/k esc q",
+        (DashboardView::TransitionReview, true) => "a/enter acknowledge · esc",
+        (DashboardView::TransitionReview, false) => "a/enter ack · esc",
+        (DashboardView::Preferences, _) => unreachable!("handled above"),
+    };
+    let body_start = if config.view == DashboardView::Details && height >= 5 {
+        3
+    } else {
+        2.min(height)
+    };
+    let footer = height.saturating_sub(1);
+    let body_end = footer.max(body_start);
+    let viewport = body_end.saturating_sub(body_start);
+    let scroll = if config.view == DashboardView::Overview {
+        config
+            .selected_provider
+            .saturating_add(1)
+            .saturating_sub(viewport)
+            .min(rows.len().saturating_sub(viewport))
+    } else {
+        config.scroll.min(rows.len().saturating_sub(viewport))
+    };
     let mut output = vec![
         SemanticRow {
             text: String::new(),
@@ -532,7 +964,7 @@ fn render_frame(
         height
     ];
     output[0] = SemanticRow {
-        text: truncate(title, width),
+        text: truncate(&title, width),
         style: RowStyle::Heading,
     };
     if height > 1 {
@@ -541,7 +973,7 @@ fn render_frame(
             style: attention_style,
         };
     }
-    if height > 2 {
+    if height > 2 && config.view == DashboardView::Details {
         output[2].text = truncate(&position(scroll, rows.len(), viewport), width);
     }
     if rows.is_empty() && viewport > 0 {
@@ -568,22 +1000,58 @@ fn render_frame(
         .collect()
 }
 
-fn viewport(height: usize) -> (usize, usize, usize) {
-    let body_start = if height >= 5 { 3 } else { 2.min(height) };
-    let footer = height.saturating_sub(1);
-    let body_end = footer.max(body_start);
-    (body_start, footer, body_end.saturating_sub(body_start))
-}
-
-pub(super) fn clamp_scroll(
-    report: &QuotaReport,
-    width: u16,
-    height: u16,
-    config: &DashboardConfig,
-) -> usize {
-    let rows = semantic_rows(report, config, width.max(1)).len();
-    let (_, _, viewport) = viewport(usize::from(height.max(1)));
-    config.scroll.min(rows.saturating_sub(viewport))
+fn render_preferences(width: usize, height: usize, config: &DashboardConfig) -> Vec<SemanticRow> {
+    let mut output = vec![
+        SemanticRow {
+            text: String::new(),
+            style: RowStyle::Normal,
+        };
+        height
+    ];
+    output[0] = SemanticRow {
+        text: truncate("Preferences", width),
+        style: RowStyle::Heading,
+    };
+    if height > 1 {
+        output[1] = SemanticRow {
+            text: truncate("Startup view", width),
+            style: RowStyle::Normal,
+        };
+    }
+    if height > 2 {
+        let value = match config.startup_view {
+            StartupView::Overview => "> overview",
+            StartupView::Details => "> details",
+        };
+        output[2] = SemanticRow {
+            text: truncate(value, width),
+            style: RowStyle::Heading,
+        };
+    }
+    if height > 3 && config.save_failed {
+        output[3] = SemanticRow {
+            text: truncate("? Save failed", width),
+            style: RowStyle::Warning,
+        };
+    }
+    if height > 1 {
+        let footer = height - 1;
+        output[footer].text = truncate(
+            if width >= 24 {
+                "←/→ · enter save · esc"
+            } else {
+                "←/→ enter esc"
+            },
+            width,
+        );
+    }
+    output
+        .into_iter()
+        .map(|row| SemanticRow {
+            text: pad_cells(&row.text, width),
+            ..row
+        })
+        .collect()
 }
 
 fn truncate(value: &str, width: usize) -> String {
@@ -613,22 +1081,6 @@ fn pad_cells(value: &str, width: usize) -> String {
 struct Dashboard<'a> {
     rows: &'a [SemanticRow],
     config: &'a DashboardConfig,
-}
-
-pub(super) fn draw_dashboard(
-    frame: &mut Frame<'_>,
-    report: &QuotaReport,
-    config: &DashboardConfig,
-) {
-    let area = frame.area();
-    let rows = render_frame(report, area.width, area.height, config);
-    frame.render_widget(
-        Dashboard {
-            rows: &rows,
-            config,
-        },
-        area,
-    );
 }
 
 impl Widget for Dashboard<'_> {
@@ -690,6 +1142,240 @@ pub fn preview_svg(lines: &[String], width: u16, height: u16) -> String {
         u32::from(width) * 9 + 16,
         u32::from(height) * 18 + 8
     )
+}
+
+/// Drive the interactive Crossterm dashboard with finite local preferences.
+pub fn dashboard(report: &QuotaReport) -> io::Result<()> {
+    let settings_store = SettingsStore::from_environment().ok();
+    let settings = settings_store
+        .as_ref()
+        .map(|store| store.load().settings)
+        .unwrap_or_default();
+    enable_raw_mode()?;
+    let mut session = TerminalSession {
+        raw: true,
+        alternate: false,
+    };
+    let mut stdout = io::stdout();
+    session.alternate = true;
+    execute!(stdout, EnterAlternateScreen)?;
+    let result = dashboard_loop(&mut stdout, report, settings_store.as_ref(), settings);
+    let cleanup = session.restore(&mut stdout);
+    result.and(cleanup)
+}
+
+struct TerminalSession {
+    raw: bool,
+    alternate: bool,
+}
+
+impl TerminalSession {
+    fn restore(&mut self, stdout: &mut Stdout) -> io::Result<()> {
+        let leave = if self.alternate {
+            self.alternate = false;
+            execute!(stdout, LeaveAlternateScreen)
+        } else {
+            Ok(())
+        };
+        let raw = if self.raw {
+            self.raw = false;
+            disable_raw_mode()
+        } else {
+            Ok(())
+        };
+        leave.and(raw)
+    }
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        let _ = self.restore(&mut io::stdout());
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InputAction {
+    None,
+    Quit,
+    SavePreferences,
+    AcknowledgeTransition,
+}
+
+fn handle_key(config: &mut DashboardConfig, key: KeyCode, provider_count: usize) -> InputAction {
+    if key == KeyCode::Char('q') {
+        return InputAction::Quit;
+    }
+    match config.view {
+        DashboardView::Overview => match key {
+            KeyCode::Esc => InputAction::Quit,
+            KeyCode::Char('j') | KeyCode::Down => {
+                config.selected_provider = config
+                    .selected_provider
+                    .saturating_add(1)
+                    .min(provider_count.saturating_sub(1));
+                InputAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                config.selected_provider = config.selected_provider.saturating_sub(1);
+                InputAction::None
+            }
+            KeyCode::PageDown => {
+                config.selected_provider = config
+                    .selected_provider
+                    .saturating_add(4)
+                    .min(provider_count.saturating_sub(1));
+                InputAction::None
+            }
+            KeyCode::PageUp => {
+                config.selected_provider = config.selected_provider.saturating_sub(4);
+                InputAction::None
+            }
+            KeyCode::Char(number @ '1'..='6') => {
+                let index = number as usize - '1' as usize;
+                if index < provider_count {
+                    config.selected_provider = index;
+                }
+                InputAction::None
+            }
+            KeyCode::Enter if provider_count > 0 => {
+                config.view = DashboardView::Details;
+                config.scroll = 0;
+                InputAction::None
+            }
+            KeyCode::Char('p') => {
+                config.return_view = DashboardView::Overview;
+                config.saved_startup_view = config.startup_view;
+                config.save_failed = false;
+                config.view = DashboardView::Preferences;
+                InputAction::None
+            }
+            _ => InputAction::None,
+        },
+        DashboardView::Details => match key {
+            KeyCode::Esc => {
+                config.view = DashboardView::Overview;
+                config.scroll = 0;
+                InputAction::None
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                config.scroll = config.scroll.saturating_add(1);
+                InputAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                config.scroll = config.scroll.saturating_sub(1);
+                InputAction::None
+            }
+            KeyCode::PageDown => {
+                config.scroll = config.scroll.saturating_add(8);
+                InputAction::None
+            }
+            KeyCode::PageUp => {
+                config.scroll = config.scroll.saturating_sub(8);
+                InputAction::None
+            }
+            KeyCode::Char('p') => {
+                config.return_view = DashboardView::Details;
+                config.saved_startup_view = config.startup_view;
+                config.save_failed = false;
+                config.view = DashboardView::Preferences;
+                InputAction::None
+            }
+            _ => InputAction::None,
+        },
+        DashboardView::Preferences => match key {
+            KeyCode::Esc => {
+                config.startup_view = config.saved_startup_view;
+                config.view = config.return_view;
+                config.save_failed = false;
+                InputAction::None
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') => {
+                config.startup_view = match config.startup_view {
+                    StartupView::Overview => StartupView::Details,
+                    StartupView::Details => StartupView::Overview,
+                };
+                config.save_failed = false;
+                InputAction::None
+            }
+            KeyCode::Enter => InputAction::SavePreferences,
+            _ => InputAction::None,
+        },
+        DashboardView::TransitionReview => match key {
+            KeyCode::Esc => {
+                config.view = DashboardView::Overview;
+                InputAction::None
+            }
+            KeyCode::Char('a') | KeyCode::Enter => InputAction::AcknowledgeTransition,
+            KeyCode::Char('j') | KeyCode::Down => {
+                config.scroll = config.scroll.saturating_add(1);
+                InputAction::None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                config.scroll = config.scroll.saturating_sub(1);
+                InputAction::None
+            }
+            _ => InputAction::None,
+        },
+    }
+}
+
+fn config_from_settings(settings: &DashboardSettings) -> DashboardConfig {
+    DashboardConfig {
+        user_hidden: settings
+            .hidden_providers
+            .iter()
+            .map(|provider| provider.id().to_owned())
+            .collect(),
+        color: std::env::var_os("NO_COLOR").is_none(),
+        view: match settings.startup_view {
+            StartupView::Overview => DashboardView::Overview,
+            StartupView::Details => DashboardView::Details,
+        },
+        startup_view: settings.startup_view,
+        saved_startup_view: settings.startup_view,
+        ..DashboardConfig::default()
+    }
+}
+
+fn dashboard_loop(
+    stdout: &mut Stdout,
+    report: &QuotaReport,
+    settings_store: Option<&SettingsStore>,
+    mut settings: DashboardSettings,
+) -> io::Result<()> {
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    let mut config = config_from_settings(&settings);
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            let rows = render_frame(report, area.width, area.height, &config);
+            frame.render_widget(
+                Dashboard {
+                    rows: &rows,
+                    config: &config,
+                },
+                area,
+            );
+        })?;
+        if let Event::Key(key) = event::read()? {
+            let provider_count = visible_model(report, &config).providers.len();
+            match handle_key(&mut config, key.code, provider_count) {
+                InputAction::Quit => return Ok(()),
+                InputAction::SavePreferences => {
+                    settings.startup_view = config.startup_view;
+                    if settings_store.is_some_and(|store| store.save(&settings).is_ok()) {
+                        config.saved_startup_view = config.startup_view;
+                        config.view = config.return_view;
+                        config.save_failed = false;
+                    } else {
+                        config.save_failed = true;
+                    }
+                }
+                InputAction::AcknowledgeTransition | InputAction::None => {}
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -767,6 +1453,13 @@ mod tests {
         UnicodeWidthStr::width(line)
     }
 
+    fn detail_config() -> DashboardConfig {
+        DashboardConfig {
+            view: DashboardView::Details,
+            ..DashboardConfig::default()
+        }
+    }
+
     fn reachable_lines(
         report: &QuotaReport,
         columns: u16,
@@ -834,47 +1527,31 @@ mod tests {
             36,
             12,
             &DashboardConfig {
-                scroll: 2,
+                selected_provider: 1,
                 ..DashboardConfig::default()
             },
         );
         assert_eq!(first[0], later[0]);
         assert_eq!(first[1], later[1]);
         assert_eq!(first[11], later[11]);
-        assert!(first[2].starts_with("Rows "));
-        assert!(later[2].starts_with("Rows "));
+        assert!(first[2].starts_with(">!Claude"));
+        assert!(later[3].starts_with(">?Codex ? partial"));
     }
 
     #[test]
-    fn every_semantic_row_is_reachable() {
+    fn every_provider_summary_is_reachable() {
         let report = report(
             MarketedProvider::ALL
                 .iter()
                 .map(|market| provider(market.id(), Some(50.0), ProviderStatus::Fresh))
                 .collect(),
         );
-        let total = semantic_rows(&report, &DashboardConfig::default(), 20).len();
-        let seen: Vec<_> = (0..total)
-            .flat_map(|scroll| {
-                render_lines(
-                    &report,
-                    20,
-                    12,
-                    &DashboardConfig {
-                        scroll,
-                        ..DashboardConfig::default()
-                    },
-                )
-                .into_iter()
-                .skip(3)
-                .take(8)
-            })
-            .collect();
-        for row in semantic_rows(&report, &DashboardConfig::default(), 20) {
-            assert!(
-                seen.iter()
-                    .any(|line| line.trim_end() == truncate(&row.text, 20))
-            );
+        let seen = render_lines(&report, 20, 12, &DashboardConfig::default());
+        for provider in MarketedProvider::ALL {
+            assert!(seen.iter().any(|line| {
+                line.contains(compact_provider_name(provider))
+                    || (provider == MarketedProvider::Copilot && line.contains("GitHub"))
+            }));
         }
     }
 
@@ -884,9 +1561,8 @@ mod tests {
         let output = render_lines(&report, 36, 12, &DashboardConfig::default()).join("\n");
         assert!(output.contains("Herdr Quota"));
         assert!(output.contains("? Quota data partial"));
-        assert!(output.contains(" --"));
-        assert!(output.contains("Rows "));
-        assert!(output.contains("j/k · PgUp/PgDn · q"));
+        assert!(output.contains("? unknown"));
+        assert!(output.contains("j/k · enter details · p · q"));
     }
 
     #[test]
@@ -904,31 +1580,14 @@ mod tests {
     #[test]
     fn static_dashboard_does_not_advertise_refresh() {
         let report = report(vec![provider("claude", Some(50.0), ProviderStatus::Fresh)]);
-        for (columns, rows, controls) in [(36, 23, "j/k · PgUp/PgDn · q"), (20, 12, "j/k · q")] {
+        for (columns, rows, controls) in [
+            (36, 23, "j/k · enter details · p · q"),
+            (20, 12, "j/k enter p q"),
+        ] {
             let lines = render_lines(&report, columns, rows, &DashboardConfig::default());
             assert_eq!(lines.last().unwrap().trim_end(), controls);
             assert!(lines.iter().all(|line| !line.contains(" · r")));
         }
-    }
-
-    #[test]
-    fn live_preferences_change_order_meter_and_controls_without_changing_severity() {
-        let report = report(vec![
-            provider("claude", Some(9.0), ProviderStatus::Fresh),
-            provider("codex", Some(60.0), ProviderStatus::Fresh),
-        ]);
-        let config = DashboardConfig {
-            provider_order: vec!["codex".into(), "claude".into()],
-            meter_mode: MeterMode::Used,
-            interactive: true,
-            ..DashboardConfig::default()
-        };
-        let lines = render_lines(&report, 36, 23, &config);
-        let output = lines.join("\n");
-        assert!(output.find("> OpenAI Codex").unwrap() < output.find("> Claude").unwrap());
-        assert!(output.contains(" 40%"));
-        assert!(output.contains("!primary tier     91%"));
-        assert_eq!(lines.last().unwrap().trim_end(), "j/k · r · p · a · q");
     }
 
     #[test]
@@ -949,8 +1608,8 @@ mod tests {
                 render_lines(&report, columns, rows, &colored)
             );
             let lines = reachable_lines(&report, columns, rows, &plain);
-            assert!(lines.iter().any(|line| line.starts_with(" !")));
-            assert!(lines.iter().any(|line| line.starts_with("> Cursor")));
+            assert!(lines.iter().any(|line| line.starts_with(">!Claude")));
+            assert!(lines.iter().any(|line| line.starts_with(" ?Cursor")));
             let buffer = render_buffer(&report, columns, rows, &plain);
             assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
             assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
@@ -972,17 +1631,24 @@ mod tests {
         ]);
         let config = DashboardConfig {
             color: true,
-            ..DashboardConfig::default()
+            ..detail_config()
         };
-        let row_style = |prefix: &str| reachable_style(&report, 36, 23, &config, prefix);
-
-        let critical = row_style(" !primary tier");
+        let critical = reachable_style(&report, 36, 23, &config, " !primary tier");
         assert_eq!(critical.fg, Some(Color::Red));
         assert!(critical.add_modifier.contains(Modifier::BOLD));
-        let warning = row_style("> Cursor");
+        let warning = reachable_style(
+            &report,
+            36,
+            23,
+            &DashboardConfig {
+                selected_provider: 2,
+                ..config.clone()
+            },
+            "> Cursor",
+        );
         assert_eq!(warning.fg, Some(Color::Yellow));
         assert!(warning.add_modifier.contains(Modifier::BOLD));
-        let heading = row_style("> Claude");
+        let heading = reachable_style(&report, 36, 23, &config, "> Claude");
         assert_eq!(heading.fg, Some(Color::Reset));
         assert!(heading.add_modifier.contains(Modifier::BOLD));
     }
@@ -1011,8 +1677,8 @@ mod tests {
                 );
                 let lines = reachable_lines(&report, columns, rows, &plain);
                 assert_eq!(lines[1].trim_end(), "? Limits non-current");
-                assert!(lines.iter().any(|line| line.starts_with("> ")));
-                assert!(lines.iter().all(|line| !line.starts_with(" !")));
+                assert!(lines.iter().any(|line| line.starts_with(">?")));
+                assert!(lines.iter().all(|line| !line.starts_with(">!")));
                 let buffer = render_buffer(&report, columns, rows, &plain);
                 assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
                 assert!(
@@ -1026,13 +1692,10 @@ mod tests {
 
         let mut stale_fresh = provider("claude", Some(7.0), ProviderStatus::Fresh);
         stale_fresh.state.stale = true;
-        let lines = reachable_lines(
-            &report(vec![stale_fresh]),
-            36,
-            23,
-            &DashboardConfig::default(),
-        );
+        let stale_report = report(vec![stale_fresh]);
+        let lines = reachable_lines(&stale_report, 36, 23, &DashboardConfig::default());
         assert_eq!(lines[1].trim_end(), "? Limits non-current");
+        let lines = reachable_lines(&stale_report, 36, 23, &detail_config());
         assert!(lines.iter().any(|line| line.starts_with(" ~ last known")));
     }
 
@@ -1050,14 +1713,12 @@ mod tests {
                 };
                 let lines = reachable_lines(&auth_report, columns, rows, &plain);
                 assert_eq!(lines[1].trim_end(), "? Limits non-current");
-                assert!(lines.iter().any(|line| {
-                    line.starts_with(if columns >= 36 {
-                        "> OpenAI Codex · signed out"
-                    } else {
-                        "> OpenAI Codex"
-                    })
-                }));
-                assert!(lines.iter().all(|line| !line.starts_with(" !")));
+                assert!(
+                    lines
+                        .iter()
+                        .any(|line| { line.starts_with(">?Codex signed out") })
+                );
+                assert!(lines.iter().all(|line| !line.starts_with(">!")));
                 assert_eq!(
                     render_lines(&auth_report, columns, rows, &plain),
                     render_lines(&auth_report, columns, rows, &colored)
@@ -1078,7 +1739,7 @@ mod tests {
             ]);
             for (columns, rows) in [(36, 23), (20, 12)] {
                 let lines = render_lines(&mixed, columns, rows, &DashboardConfig::default());
-                assert!(lines[1].starts_with("! claude · 7%"));
+                assert!(lines[1].starts_with("! out now"));
             }
         }
     }
@@ -1097,7 +1758,7 @@ mod tests {
 
         for (report, expected) in [
             (report(vec![healthy]), "= Limits on pace"),
-            (report(vec![projected]), "! codex · 80% · primary tier"),
+            (report(vec![projected]), "! out before reset"),
         ] {
             for (columns, rows) in [(36, 23), (20, 12)] {
                 let plain = DashboardConfig::default();
@@ -1135,7 +1796,7 @@ mod tests {
             projected("codex", 80.0, "2026-09-02T13:00:00Z"),
         ]);
         let lines = render_lines(&projections, 36, 23, &DashboardConfig::default());
-        assert!(lines[1].starts_with("! codex · 80%"));
+        assert!(lines[1].starts_with("! out 09/02 13:00"));
 
         let mut exhausted_soon = provider("claude", Some(0.0), ProviderStatus::Fresh);
         exhausted_soon.windows[0].resets_at = Some("2026-09-02T13:00:00Z".into());
@@ -1147,7 +1808,7 @@ mod tests {
             23,
             &DashboardConfig::default(),
         );
-        assert!(lines[1].starts_with("! codex · 0%"));
+        assert!(lines[1].starts_with("! out now · reset 09/02 17:00"));
 
         let mut labeled = projected("claude", 80.0, "2026-09-02T13:00:00Z");
         let mut pace_window = labeled.windows[0].clone();
@@ -1167,7 +1828,8 @@ mod tests {
             unknown_window_ids: vec![],
         });
         let lines = render_lines(&report(vec![labeled]), 36, 23, &DashboardConfig::default());
-        assert!(lines[1].starts_with("! claude · 80% · pace tier"));
+        assert!(lines[1].starts_with("! out 09/02 13:00"));
+        assert!(lines.iter().any(|line| line.contains("80% pace tier")));
     }
 
     #[test]
@@ -1247,7 +1909,8 @@ mod tests {
             },
         )
         .join("\n");
-        assert!(output.contains("> OpenAI Codex · unavailable"));
+        assert!(output.contains(">=Claude") || output.contains(">?Claude"));
+        assert!(output.contains(" ?Codex unavailable"));
         assert!(output.contains("3 unavailable providers hidden"));
         let complete = report(
             MarketedProvider::ALL
@@ -1269,7 +1932,7 @@ mod tests {
             &DashboardConfig::default(),
         )
         .join("\n");
-        assert!(output.contains("· unavailable"));
+        assert!(output.contains(">?Claude unavailable"));
         assert!(!output.contains("unavailable provider"));
     }
 
@@ -1279,7 +1942,7 @@ mod tests {
         codex.label = Some("collector label".into());
         codex.windows[0].id = "weekly".into();
         codex.windows[0].label = "collector weekly label".into();
-        let lines = render_lines(&report(vec![codex]), 36, 23, &DashboardConfig::default());
+        let lines = render_lines(&report(vec![codex]), 36, 23, &detail_config());
         assert!(lines.iter().any(|line| line.starts_with("> OpenAI Codex")));
         assert!(lines.iter().any(|line| line.starts_with("  Week")));
         assert!(
@@ -1293,7 +1956,7 @@ mod tests {
             Some(50.0),
             ProviderStatus::Unavailable,
         )]);
-        let lines = render_lines(&unavailable, 36, 23, &DashboardConfig::default());
+        let lines = render_lines(&unavailable, 36, 23, &detail_config());
         assert!(
             lines
                 .iter()
@@ -1315,10 +1978,10 @@ mod tests {
         });
 
         let report = report(vec![claude]);
-        let semantic = semantic_rows(&report, &DashboardConfig::default(), 36);
+        let semantic = semantic_rows(&report, &detail_config(), 36);
         assert!(semantic.iter().any(|row| row.text.contains("· ahead")));
 
-        let lines = render_lines(&report, 36, 23, &DashboardConfig::default());
+        let lines = render_lines(&report, 36, 23, &detail_config());
         assert!(
             lines
                 .iter()
@@ -1327,8 +1990,209 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("· ahead")));
         assert!(!lines.iter().any(|line| line.starts_with(" ~ last known")));
 
-        let compact = render_lines(&report, 20, 12, &DashboardConfig::default());
+        let compact = render_lines(&report, 20, 12, &detail_config());
         assert!(!compact.iter().any(|line| line.contains("· ah")));
+    }
+
+    #[test]
+    fn overview_fits_four_provider_summaries_with_fixed_decision_and_footer_at_36x12() {
+        let report = report(
+            ["claude", "codex", "cursor", "kimi"]
+                .into_iter()
+                .map(|id| provider(id, Some(50.0), ProviderStatus::Fresh))
+                .collect(),
+        );
+        let lines = render_lines(&report, 36, 12, &DashboardConfig::default());
+
+        assert_eq!(lines[0].trim_end(), "Herdr Quota");
+        assert!(lines[1].starts_with("= Limits on pace"));
+        assert!(lines[2].starts_with(">=Claude"));
+        assert!(lines[3].starts_with(" ?Codex ? partial"));
+        assert!(lines[4].starts_with(" =Cursor"));
+        assert!(lines[5].starts_with(" =Kimi"));
+        assert_eq!(lines[11].trim_end(), "j/k · enter details · p · q");
+    }
+
+    #[test]
+    fn complete_overview_uses_every_row_for_truthful_evidence_without_midword_clipping() {
+        let report = crate::domain::schema::parse_quota_response(include_str!(
+            "../../../../test/fixtures/complete.json"
+        ))
+        .expect("complete fixture");
+
+        for columns in [36, 20] {
+            let lines = render_lines(&report, columns, 12, &DashboardConfig::default());
+            assert!(lines[2..11].iter().all(|line| !line.trim().is_empty()));
+            assert!(lines.iter().all(|line| !line.trim_end().ends_with("Fabl")));
+            assert!(lines.iter().all(|line| !line.trim_end().ends_with("prov")));
+            assert!(lines.iter().all(|line| !line.contains("3rd-party")));
+            assert!(lines[1].contains("out"));
+            assert!(!lines[1].contains("Claude"));
+            assert!(lines.iter().all(|line| !line.contains("Codex reset")));
+            assert!(lines.iter().all(|line| !line.contains("Codex on pace")));
+        }
+    }
+
+    #[test]
+    fn overview_uses_exact_partial_and_unknown_states_when_siblings_are_unsafe() {
+        let codex = provider("codex", Some(79.0), ProviderStatus::Fresh);
+        let mut cursor = provider("cursor", None, ProviderStatus::Fresh);
+        cursor.semantics_status = Some(SemanticsStatus::Unknown);
+        cursor.effective.clear();
+        let lines = render_lines(
+            &report(vec![codex, cursor]),
+            36,
+            12,
+            &DashboardConfig::default(),
+        );
+
+        assert!(lines.iter().any(|line| line.contains("?Codex ? partial")));
+        assert!(lines.iter().any(|line| line.contains("?Cursor ? unknown")));
+        assert!(lines.iter().all(|line| !line.contains("Cursor 0%")));
+    }
+
+    #[test]
+    fn narrow_overview_drops_bars_and_preserves_marker_provider_value_and_compact_date() {
+        let mut kimi = provider("kimi", Some(50.0), ProviderStatus::Fresh);
+        kimi.windows[0].resets_at = Some("2026-09-02T17:00:00Z".into());
+        let kimi_report = report(vec![kimi]);
+
+        for columns in 16..=23 {
+            let lines = render_lines(&kimi_report, columns, 12, &DashboardConfig::default());
+            let row = lines[2].trim_end();
+            assert!(row.starts_with(">=Kimi"), "{columns}: {row:?}");
+            assert!(row.contains("50%"), "{columns}: {row:?}");
+            assert!(!row.contains('['), "{columns}: {row:?}");
+        }
+        let row = render_lines(&kimi_report, 23, 12, &DashboardConfig::default())[2].clone();
+        assert!(row.contains("9/2"));
+        assert!(!row.contains("09/02"));
+
+        let partial = render_lines(
+            &report(vec![provider("codex", Some(50.0), ProviderStatus::Fresh)]),
+            16,
+            12,
+            &DashboardConfig::default(),
+        );
+        assert_eq!(partial[2].trim_end(), ">Codex? partial");
+
+        let mut unknown = provider("cursor", None, ProviderStatus::Fresh);
+        unknown.semantics_status = Some(SemanticsStatus::Unknown);
+        unknown.effective.clear();
+        let unknown = render_lines(&report(vec![unknown]), 16, 12, &DashboardConfig::default());
+        assert_eq!(unknown[2].trim_end(), ">Cursor? unknown");
+    }
+
+    #[test]
+    fn enter_opens_selected_detail_escape_returns_and_all_tiers_are_immediately_reachable() {
+        let mut claude = provider("claude", Some(50.0), ProviderStatus::Fresh);
+        for index in 2..=4 {
+            let mut window = claude.windows[0].clone();
+            window.id = format!("tier_{index}");
+            window.label = format!("tier {index}");
+            claude.windows.push(window);
+        }
+        let report = report(vec![
+            provider("cursor", Some(60.0), ProviderStatus::Fresh),
+            claude,
+        ]);
+        let mut config = DashboardConfig::default();
+
+        assert_eq!(handle_key(&mut config, KeyCode::Down, 2), InputAction::None);
+        assert_eq!(config.selected_provider, 1);
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Enter, 2),
+            InputAction::None
+        );
+        assert_eq!(config.view, DashboardView::Details);
+        let details = render_lines(&report, 20, 12, &config).join("\n");
+        for label in ["primary", "tier 2", "tier 3", "tier 4"] {
+            assert!(details.contains(label), "missing {label:?} in {details:?}");
+        }
+        assert_eq!(handle_key(&mut config, KeyCode::Esc, 2), InputAction::None);
+        assert_eq!(config.view, DashboardView::Overview);
+        assert_eq!(config.selected_provider, 1);
+        assert!(render_lines(&report, 20, 12, &config)[3].starts_with(">=Claude"));
+    }
+
+    #[test]
+    fn every_provider_detail_is_reachable_in_two_keys_from_overview() {
+        for index in 0..MarketedProvider::ALL.len() {
+            let mut config = DashboardConfig::default();
+            let number = char::from_digit((index + 1) as u32, 10).expect("provider digit");
+            assert_eq!(
+                handle_key(
+                    &mut config,
+                    KeyCode::Char(number),
+                    MarketedProvider::ALL.len()
+                ),
+                InputAction::None
+            );
+            assert_eq!(config.selected_provider, index);
+            assert_eq!(
+                handle_key(&mut config, KeyCode::Enter, MarketedProvider::ALL.len()),
+                InputAction::None
+            );
+            assert_eq!(config.view, DashboardView::Details);
+        }
+    }
+
+    #[test]
+    fn enter_and_acknowledgement_are_modal_local() {
+        let mut config = DashboardConfig::default();
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Char('a'), 1),
+            InputAction::None
+        );
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Enter, 1),
+            InputAction::None
+        );
+        assert_eq!(config.view, DashboardView::Details);
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Enter, 1),
+            InputAction::None
+        );
+
+        config.view = DashboardView::Preferences;
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Enter, 1),
+            InputAction::SavePreferences
+        );
+        config.view = DashboardView::TransitionReview;
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Enter, 1),
+            InputAction::AcknowledgeTransition
+        );
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Char('a'), 1),
+            InputAction::AcknowledgeTransition
+        );
+        assert_eq!(handle_key(&mut config, KeyCode::Esc, 1), InputAction::None);
+        assert_eq!(config.view, DashboardView::Overview);
+    }
+
+    #[test]
+    fn preferences_exposes_only_the_finite_startup_view_choice() {
+        let settings = DashboardSettings {
+            startup_view: StartupView::Details,
+            ..DashboardSettings::default()
+        };
+        let mut config = config_from_settings(&settings);
+        assert_eq!(config.view, DashboardView::Details);
+        handle_key(&mut config, KeyCode::Char('p'), 1);
+        assert_eq!(config.view, DashboardView::Preferences);
+        let initial = render_lines(&report(vec![]), 20, 12, &config).join("\n");
+        assert!(initial.contains("Startup view"));
+        assert!(initial.contains("> details"));
+        assert!(!initial.contains("theme"));
+        assert!(!initial.contains("interval"));
+
+        handle_key(&mut config, KeyCode::Right, 1);
+        assert_eq!(config.startup_view, StartupView::Overview);
+        handle_key(&mut config, KeyCode::Esc, 1);
+        assert_eq!(config.startup_view, StartupView::Details);
+        assert_eq!(config.view, DashboardView::Details);
     }
 
     #[test]
