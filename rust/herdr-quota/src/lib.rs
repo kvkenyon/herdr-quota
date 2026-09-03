@@ -4,8 +4,10 @@
 
 use std::path::PathBuf;
 
+pub mod collector;
 pub mod domain;
 pub mod sanitize;
+mod unix_signal;
 
 /// The commands that this foundation supports.
 #[derive(Debug, PartialEq, Eq)]
