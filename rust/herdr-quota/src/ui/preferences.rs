@@ -1,11 +1,14 @@
 //! Pure reducer for the finite Preferences surface.
 
-use crate::store::settings::{DashboardSettings, MeterMode, RemainingThreshold, SupportedProvider};
+use crate::store::settings::{
+    DashboardSettings, MeterMode, RemainingThreshold, StartupView, SupportedProvider,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PreferenceFocus {
     Provider(SupportedProvider),
     Meter,
+    StartupView,
     Threshold,
     Forecast,
     Save,
@@ -73,6 +76,7 @@ pub fn focus_order(settings: &DashboardSettings) -> Vec<PreferenceFocus> {
         .map(PreferenceFocus::Provider)
         .chain([
             PreferenceFocus::Meter,
+            PreferenceFocus::StartupView,
             PreferenceFocus::Threshold,
             PreferenceFocus::Forecast,
             PreferenceFocus::Save,
@@ -132,6 +136,12 @@ fn toggle_focused(mut state: PreferencesState, direction: isize) -> PreferencesS
             state.draft.meter_mode = match state.draft.meter_mode {
                 MeterMode::Remaining => MeterMode::Used,
                 MeterMode::Used => MeterMode::Remaining,
+            };
+        }
+        PreferenceFocus::StartupView => {
+            state.draft.startup_view = match state.draft.startup_view {
+                StartupView::Overview => StartupView::Details,
+                StartupView::Details => StartupView::Overview,
             };
         }
         PreferenceFocus::Threshold => {
@@ -341,6 +351,9 @@ mod tests {
         state = focused(state, PreferenceFocus::Meter);
         state = reduce(state, PreferenceAction::Next, 4).state;
         assert_eq!(state.draft.meter_mode, MeterMode::Used);
+        state = focused(state, PreferenceFocus::StartupView);
+        state = reduce(state, PreferenceAction::Activate, 4).state;
+        assert_eq!(state.draft.startup_view, StartupView::Details);
         state = focused(state, PreferenceFocus::Threshold);
         state = reduce(state, PreferenceAction::Previous, 4).state;
         assert_eq!(
@@ -385,7 +398,7 @@ mod tests {
         );
         let state = reduce(state, PreferenceAction::PageDown, 6).state;
         assert_eq!(state.focus, PreferenceFocus::Meter);
-        let state = reduce(state, PreferenceAction::PageDown, 4).state;
+        let state = reduce(state, PreferenceAction::PageDown, 5).state;
         assert_eq!(state.focus, PreferenceFocus::Cancel);
         let state = reduce(state, PreferenceAction::FocusDown, 4).state;
         assert_eq!(state.focus, PreferenceFocus::Reset);

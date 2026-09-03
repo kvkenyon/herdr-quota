@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
 use chrono::{DateTime, Utc};
+use crossterm::event::KeyCode;
 use ratatui::{Terminal, backend::CrosstermBackend, text::Line, widgets::Paragraph};
 use tokio::sync::mpsc;
 
@@ -21,7 +22,7 @@ use crate::store::{
     history::LocalHistory,
     settings::{
         DashboardSettings, MeterMode as SettingsMeterMode, RemainingThreshold as SettingsThreshold,
-        SettingsAvailability, SettingsStore, SupportedProvider,
+        SettingsAvailability, SettingsStore, StartupView, SupportedProvider,
     },
     transitions::{
         self, HistoryDataHealth, HistoryFact, HistoryProjectionConfidence, HistoryProviderSnapshot,
@@ -37,7 +38,10 @@ use crate::ui::{
         self, PreferenceAction, PreferenceCommand, PreferenceFocus, PreferenceNotice,
         PreferencesState,
     },
-    render::{DashboardConfig, DashboardStatus, clamp_scroll, draw_dashboard},
+    render::{
+        DashboardConfig, DashboardStatus, DashboardView, InputAction, clamp_scroll,
+        draw_dashboard, handle_key, visible_provider_count,
+    },
     terminal::{RawInput, TerminalGuard},
 };
 
@@ -51,8 +55,17 @@ struct RuntimeState {
     transitions: TransitionView,
     preferences: Option<PreferencesState>,
     transition_review: bool,
+    view: DashboardView,
+    selected_provider: usize,
     scroll: usize,
     terminal_height: u16,
+}
+
+fn startup_dashboard_view(startup_view: StartupView) -> DashboardView {
+    match startup_view {
+        StartupView::Overview => DashboardView::Overview,
+        StartupView::Details => DashboardView::Details,
+    }
 }
 
 impl RuntimeState {
@@ -76,6 +89,7 @@ impl RuntimeState {
             (None, _) => empty_transitions(TransitionAvailability::Unavailable),
             (_, None) => empty_transitions(TransitionAvailability::FirstRun),
         };
+        let view = startup_dashboard_view(loaded.settings.startup_view);
         Self {
             app: AppState::default(),
             settings: loaded.settings,
@@ -86,6 +100,8 @@ impl RuntimeState {
             transitions,
             preferences: None,
             transition_review: false,
+            view,
+            selected_provider: 0,
             scroll: 0,
             terminal_height: 24,
         }
@@ -500,7 +516,6 @@ async fn handle_actions(
             continue;
         }
         match action {
-            DashboardAction::Escape => return Ok(true),
             DashboardAction::Refresh => refresh.manual().await,
             DashboardAction::Preferences => {
                 let mut state = lock(shared);
@@ -512,21 +527,44 @@ async fn handle_actions(
                     state.transition_review = true;
                 }
             }
-            DashboardAction::ScrollDown => {
+            DashboardAction::Escape
+            | DashboardAction::ScrollDown
+            | DashboardAction::ScrollUp
+            | DashboardAction::PageDown
+            | DashboardAction::PageUp
+            | DashboardAction::Activate
+            | DashboardAction::SelectProvider(_) => {
                 let mut state = lock(shared);
-                state.scroll = state.scroll.saturating_add(1);
-            }
-            DashboardAction::ScrollUp => {
-                let mut state = lock(shared);
-                state.scroll = state.scroll.saturating_sub(1);
-            }
-            DashboardAction::PageDown => {
-                let mut state = lock(shared);
-                state.scroll = state.scroll.saturating_add(8);
-            }
-            DashboardAction::PageUp => {
-                let mut state = lock(shared);
-                state.scroll = state.scroll.saturating_sub(8);
+                let mut config = dashboard_config(&state);
+                let Some(provider_count) = state
+                    .app
+                    .report
+                    .as_ref()
+                    .map(|report| visible_provider_count(report, &config))
+                else {
+                    if action == DashboardAction::Escape {
+                        return Ok(true);
+                    }
+                    continue;
+                };
+                let key = match action {
+                    DashboardAction::Escape => KeyCode::Esc,
+                    DashboardAction::ScrollDown => KeyCode::Down,
+                    DashboardAction::ScrollUp => KeyCode::Up,
+                    DashboardAction::PageDown => KeyCode::PageDown,
+                    DashboardAction::PageUp => KeyCode::PageUp,
+                    DashboardAction::Activate => KeyCode::Enter,
+                    DashboardAction::SelectProvider(index) => {
+                        KeyCode::Char(char::from_digit((index + 1) as u32, 10).unwrap())
+                    }
+                    _ => unreachable!(),
+                };
+                if handle_key(&mut config, key, provider_count) == InputAction::Quit {
+                    return Ok(true);
+                }
+                state.view = config.view;
+                state.selected_provider = config.selected_provider;
+                state.scroll = config.scroll;
             }
             _ => {}
         }
@@ -713,12 +751,19 @@ fn draw<W: io::Write>(
     let area = terminal.size()?;
     let mut state = lock(shared);
     state.terminal_height = area.height;
-    if state.preferences.is_none()
-        && !state.transition_review
-        && let Some(report) = state.app.report.as_ref()
-    {
+    if state.preferences.is_none() && !state.transition_review {
         let config = dashboard_config(&state);
-        state.scroll = clamp_scroll(report, area.width, area.height, &config);
+        if let Some((provider_count, scroll)) = state.app.report.as_ref().map(|report| {
+            (
+                visible_provider_count(report, &config),
+                clamp_scroll(report, area.width, area.height, &config),
+            )
+        }) {
+            state.selected_provider = state
+                .selected_provider
+                .min(provider_count.saturating_sub(1));
+            state.scroll = scroll;
+        }
     }
     terminal.draw(|frame| {
         if let Some(preferences) = state.preferences.as_ref() {
@@ -780,6 +825,9 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
         interactive: true,
         transition_count: state.transitions.events.len(),
         status: dashboard_status(&state.app),
+        view: state.view,
+        selected_provider: state.selected_provider,
+        startup_view: state.settings.startup_view,
         ..DashboardConfig::default()
     }
 }
@@ -855,6 +903,13 @@ fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings) -> Str
             match settings.meter_mode {
                 SettingsMeterMode::Remaining => "remaining",
                 SettingsMeterMode::Used => "used",
+            }
+        ),
+        PreferenceFocus::StartupView => format!(
+            "Startup view: {}",
+            match settings.startup_view {
+                StartupView::Overview => "overview",
+                StartupView::Details => "details",
             }
         ),
         PreferenceFocus::Threshold => format!(
@@ -955,5 +1010,25 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(text.contains("> Clear transition history"));
+    }
+
+    #[test]
+    fn startup_view_projects_into_the_live_dashboard_and_preferences() {
+        assert_eq!(
+            startup_dashboard_view(StartupView::Overview),
+            DashboardView::Overview
+        );
+        assert_eq!(
+            startup_dashboard_view(StartupView::Details),
+            DashboardView::Details
+        );
+        let mut preferences = preferences::open(&DashboardSettings::default());
+        preferences.focus = PreferenceFocus::StartupView;
+        let text = preference_lines(&preferences, 12)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("> Startup view: overview"));
     }
 }
