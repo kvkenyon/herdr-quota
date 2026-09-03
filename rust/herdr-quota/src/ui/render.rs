@@ -125,15 +125,7 @@ fn semantic_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> 
         .filter(|provider| {
             !config.user_hidden.contains(provider.id()) && !report_ids.contains(provider.id())
         })
-        .count()
-        + report
-            .providers
-            .iter()
-            .filter(|provider| {
-                provider_id(provider).is_some_and(|id| !config.user_hidden.contains(id.id()))
-                    && provider.state.status == ProviderStatus::Unavailable
-            })
-            .count();
+        .count();
 
     let mut rows = Vec::new();
     for provider in report.providers.iter().filter(|provider| {
@@ -416,7 +408,7 @@ pub fn preview_svg(lines: &[String], width: u16, height: u16) -> String {
         .enumerate()
         .map(|(index, line)| {
             format!(
-                r#"<text x="8" y="{}">{}</text>"#,
+                r#"<text x="8" y="{}" xml:space="preserve">{}</text>"#,
                 18 + index * 18,
                 escape(line)
             )
@@ -726,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn hidden_summary_excludes_user_choice_but_counts_missing_and_unavailable() {
+    fn hidden_summary_only_counts_nonrendered_non_user_hidden_providers() {
         let partial_report = report(vec![
             provider("claude", Some(50.0), ProviderStatus::Fresh),
             provider("codex", Some(50.0), ProviderStatus::Unavailable),
@@ -743,7 +735,8 @@ mod tests {
             },
         )
         .join("\n");
-        assert!(output.contains("4 unavailable providers hidden"));
+        assert!(output.contains("> codex · unavailable"));
+        assert!(output.contains("3 unavailable providers hidden"));
         let complete = report(
             MarketedProvider::ALL
                 .iter()
@@ -755,11 +748,23 @@ mod tests {
                 .join("\n")
                 .contains("unavailable provider")
         );
+        let mut complete_with_unavailable = complete;
+        complete_with_unavailable.providers[0].state.status = ProviderStatus::Unavailable;
+        let output = render_lines(
+            &complete_with_unavailable,
+            36,
+            23,
+            &DashboardConfig::default(),
+        )
+        .join("\n");
+        assert!(output.contains("· unavailable"));
+        assert!(!output.contains("unavailable provider"));
     }
 
     #[test]
     fn svg_escapes_terminal_text() {
         let svg = preview_svg(&["<safe & bounded>".into()], 20, 1);
         assert!(svg.contains("&lt;safe &amp; bounded&gt;"));
+        assert!(svg.contains(r#"xml:space="preserve">&lt;safe &amp; bounded&gt;"#));
     }
 }
