@@ -10,8 +10,10 @@ use std::time::{Duration, Instant};
 
 use herdr_quota::collector::Collector;
 use tempfile::TempDir;
+use unicode_width::UnicodeWidthChar;
 
 const REPORT: &str = include_str!("../../../test/fixtures/launch.json");
+const MULTI_ACCOUNT_REPORT: &str = include_str!("../../../test/fixtures/multi-account.json");
 
 #[test]
 fn child_dashboard_process() {
@@ -41,10 +43,14 @@ struct DashboardChild {
 
 impl DashboardChild {
     fn spawn(directory: &TempDir, width: u16, height: u16) -> Self {
+        Self::spawn_with_report(directory, width, height, REPORT)
+    }
+
+    fn spawn_with_report(directory: &TempDir, width: u16, height: u16, report: &str) -> Self {
         let collector = directory.path().join("quota-axi");
         fs::write(
             &collector,
-            format!("#!/bin/sh\nsleep 0.05\nprintf '%s' '{REPORT}'\n"),
+            format!("#!/bin/sh\nsleep 0.05\nprintf '%s' '{report}'\n"),
         )
         .expect("write fake collector");
         let mut permissions = fs::metadata(&collector)
@@ -114,7 +120,8 @@ impl DashboardChild {
             self.drain();
             assert!(
                 Instant::now() < deadline,
-                "dashboard evidence did not render: {label}"
+                "dashboard evidence did not render: {label}; observed={}",
+                String::from_utf8_lossy(&self.output).escape_debug()
             );
             thread::sleep(Duration::from_millis(10));
         }
@@ -123,6 +130,11 @@ impl DashboardChild {
     fn checkpoint(&mut self) -> usize {
         self.drain();
         self.output.len()
+    }
+
+    fn screen_text(&mut self, width: u16, height: u16) -> String {
+        self.drain();
+        terminal_screen(&self.output, width as usize, height as usize)
     }
 
     fn wait_for_quiet(&mut self, label: &str) {
@@ -196,6 +208,71 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
+}
+
+fn terminal_screen(output: &[u8], width: usize, height: usize) -> String {
+    let text = String::from_utf8_lossy(output);
+    let mut cells = vec![vec![' '; width]; height];
+    let mut row = 0_usize;
+    let mut column = 0_usize;
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\u{1b}' && characters.next_if_eq(&'[').is_some() {
+            let mut sequence = String::new();
+            for next in characters.by_ref() {
+                sequence.push(next);
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+            let command = sequence.pop().unwrap_or_default();
+            let parameters = sequence.trim_start_matches('?');
+            match command {
+                'H' | 'f' => {
+                    let mut parts = parameters.split(';');
+                    row = parts
+                        .next()
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(1)
+                        .saturating_sub(1)
+                        .min(height.saturating_sub(1));
+                    column = parts
+                        .next()
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(1)
+                        .saturating_sub(1)
+                        .min(width.saturating_sub(1));
+                }
+                'J' if parameters == "2" => {
+                    cells.iter_mut().for_each(|line| line.fill(' '));
+                    row = 0;
+                    column = 0;
+                }
+                'h' if sequence == "?1049" => {
+                    cells.iter_mut().for_each(|line| line.fill(' '));
+                    row = 0;
+                    column = 0;
+                }
+                _ => {}
+            }
+            continue;
+        }
+        match character {
+            '\r' => column = 0,
+            '\n' => row = (row + 1).min(height.saturating_sub(1)),
+            value if !value.is_control() && row < height && column < width => {
+                cells[row][column] = value;
+                column = (column + UnicodeWidthChar::width(value).unwrap_or(0))
+                    .min(width.saturating_sub(1));
+            }
+            _ => {}
+        }
+    }
+    cells
+        .into_iter()
+        .map(|line| line.into_iter().collect::<String>().trim_end().to_owned())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[allow(clippy::unnecessary_mut_passed)] // macOS openpty requires a mutable winsize pointer.
@@ -311,6 +388,41 @@ fn exact_20x12_refresh_marker_uses_the_fixed_activity_slot_without_resize() {
     );
     dashboard.send(b"q");
     dashboard.finish(None);
+}
+
+#[test]
+fn multi_account_rows_and_resets_are_reachable_at_sidebar_widths() {
+    for width in [20, 24, 36] {
+        let directory = TempDir::new().expect("temporary directory");
+        let mut dashboard =
+            DashboardChild::spawn_with_report(&directory, width, 12, MULTI_ACCOUNT_REPORT);
+        dashboard.wait_for("terminal enter", b"\x1b[?25l");
+        dashboard.wait_for("multi-account collection", b"A1");
+        dashboard.wait_for_quiet("multi-account overview");
+        let overview = dashboard.screen_text(width, 12);
+        assert!(overview.contains("Claude A1"), "{width}: {overview}");
+        assert!(overview.contains("Claude A2"), "{width}: {overview}");
+        assert!(overview.contains("Claude A3"), "{width}: {overview}");
+
+        dashboard.send(b"j\r");
+        dashboard.wait_for_quiet("second account detail");
+        let second = dashboard.screen_text(width, 12);
+        assert!(second.contains("Account 2"), "{width}: {second}");
+        assert!(second.contains("reset"), "{width}: {second}");
+        assert!(
+            second.contains("09/05") || second.contains("9/5"),
+            "{width}: {second}"
+        );
+
+        dashboard.send(b"\x1bj\r");
+        dashboard.wait_for_quiet("third account detail");
+        let third = dashboard.screen_text(width, 12);
+        assert!(third.contains("Account 3"), "{width}: {third}");
+        assert!(third.contains("64%"), "{width}: {third}");
+        assert!(third.contains("reset unavailable"), "{width}: {third}");
+        dashboard.send(b"q");
+        dashboard.finish(None);
+    }
 }
 
 #[test]

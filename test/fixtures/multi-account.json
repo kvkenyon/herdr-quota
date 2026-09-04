@@ -1,0 +1,140 @@
+{
+  "generatedAt": "2026-09-04T12:00:00Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "claude",
+      "label": "Claude",
+      "account": {
+        "email": "primary.user@example.com",
+        "accountId": "opaque-account-secret-111111111111",
+        "accessToken": "sk-secret-account-token-111111111111"
+      },
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "percentRemaining": 72,
+          "resetsAt": "2026-09-04T16:30:00Z"
+        },
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 41
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 41,
+            "boundedBy": ["five_hour", "seven_day"],
+            "limitingWindowIds": ["seven_day"],
+            "runway": { "status": "unknown" }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false, "authStatus": "usable" }
+    },
+    {
+      "provider": "claude",
+      "label": "Claude",
+      "account": { "organization": "Research Team" },
+      "windows": [
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 8,
+          "resetsAt": "2026-09-05T18:00:00Z"
+        },
+        {
+          "id": "model:opus",
+          "label": "Opus week",
+          "kind": "model",
+          "percentRemaining": 55,
+          "resetsAt": "2026-09-07T09:15:00Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 8,
+            "boundedBy": ["seven_day"],
+            "limitingWindowIds": ["seven_day"],
+            "runway": {
+              "status": "exhausted_now",
+              "limitingWindowId": "seven_day"
+            }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false, "authStatus": "usable" }
+    },
+    {
+      "provider": "claude",
+      "label": "Claude",
+      "account": {
+        "accountId": "opaque-account-secret-333333333333",
+        "credentialPath": "/Users/private/.credentials/account-three.json",
+        "refreshToken": "token-secret-account-three-333333333333"
+      },
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "percentRemaining": 64
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 64,
+            "boundedBy": ["five_hour"],
+            "limitingWindowIds": ["five_hour"],
+            "runway": { "status": "unknown" }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false, "authStatus": "usable" }
+    },
+    {
+      "provider": "cursor",
+      "label": "Cursor",
+      "windows": [
+        {
+          "id": "included_usage",
+          "label": "Included",
+          "kind": "monthly",
+          "percentRemaining": 67,
+          "resetsAt": "2026-10-01T00:00:00Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 67,
+            "boundedBy": ["included_usage"],
+            "limitingWindowIds": ["included_usage"],
+            "runway": { "status": "through_reset" }
+          }
+        ]
+      },
+      "state": { "status": "fresh", "stale": false, "authStatus": "usable" }
+    }
+  ]
+}

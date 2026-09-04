@@ -358,6 +358,8 @@ mod tests {
     fn quota(id: &str, effective: Vec<EffectiveAvailability>) -> ProviderQuota {
         ProviderQuota {
             provider: id.into(),
+            account_label: None,
+            account_reported: false,
             label: None,
             source: None,
             plan: None,

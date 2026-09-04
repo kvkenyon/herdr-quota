@@ -90,15 +90,13 @@ pub(crate) fn decision_grade(effective: &EffectiveAvailability) -> bool {
                 .is_some_and(|pace| pace.status != PaceStatus::Unknown))
 }
 
-/// Classify one marketed provider without forwarding source, account, or error text.
-pub fn provider_readiness(report: &QuotaReport, marketed: MarketedProvider) -> ProviderReadiness {
-    let Some(provider) = report
-        .providers
-        .iter()
-        .find(|provider| provider_id(provider) == Some(marketed))
-    else {
-        return ProviderReadiness::Unsupported;
-    };
+/// Classify one provider/account record without forwarding source, account,
+/// or error text.
+pub(crate) fn quota_readiness(
+    report: &QuotaReport,
+    provider: &ProviderQuota,
+    marketed: MarketedProvider,
+) -> ProviderReadiness {
     if provider.state.reason.as_deref() == Some("keychain_access_required") {
         return ProviderReadiness::QuotaUnavailable;
     }
@@ -126,6 +124,26 @@ pub fn provider_readiness(report: &QuotaReport, marketed: MarketedProvider) -> P
     ProviderReadiness::Live
 }
 
+/// Classify one marketed provider. Every reported account must be live before
+/// the provider is summarized as live; otherwise the first non-live account
+/// keeps its explicit state.
+pub fn provider_readiness(report: &QuotaReport, marketed: MarketedProvider) -> ProviderReadiness {
+    let states = report
+        .providers
+        .iter()
+        .filter(|provider| provider_id(provider) == Some(marketed))
+        .map(|provider| quota_readiness(report, provider, marketed))
+        .collect::<Vec<_>>();
+    if states.is_empty() {
+        return ProviderReadiness::Unsupported;
+    }
+    states
+        .iter()
+        .find(|state| !state.is_ready())
+        .cloned()
+        .unwrap_or(ProviderReadiness::Live)
+}
+
 /// First-run readiness copy counts only trustworthy live evidence and explicit auth needs.
 pub fn readiness_line(report: &QuotaReport) -> String {
     let readiness = MarketedProvider::ALL.map(|provider| provider_readiness(report, provider));
@@ -145,6 +163,8 @@ mod tests {
     fn provider(id: &str, status: ProviderStatus) -> ProviderQuota {
         ProviderQuota {
             provider: id.into(),
+            account_label: None,
+            account_reported: false,
             label: Some("private@example.com".into()),
             source: Some("/Users/private/auth.json".into()),
             plan: Some("account-123".into()),

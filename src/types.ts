@@ -87,6 +87,9 @@ export interface EffectiveAvailability {
 
 export interface ProviderQuota {
   provider: string;
+  /** Boundary-produced display identity; raw account data is never retained. */
+  accountLabel?: string;
+  accountReported?: true;
   label?: string;
   source?: string;
   plan?: string;

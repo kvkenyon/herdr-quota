@@ -408,6 +408,8 @@ mod tests {
     fn provider(id: &str, windows: Vec<QuotaWindow>) -> ProviderQuota {
         ProviderQuota {
             provider: id.into(),
+            account_label: None,
+            account_reported: false,
             label: None,
             source: None,
             plan: None,

@@ -860,6 +860,8 @@ mod tests {
             schema_version: 5,
             providers: vec![ProviderQuota {
                 provider: "claude".to_owned(),
+                account_label: None,
+                account_reported: false,
                 label: None,
                 source: None,
                 plan: None,
