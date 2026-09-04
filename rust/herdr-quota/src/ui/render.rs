@@ -2954,6 +2954,7 @@ mod tests {
             .expect("Grok fixture");
         grok.state.status = ProviderStatus::Fresh;
         grok.state.auth_status = Some("usable".into());
+        grok.semantics_status = Some(SemanticsStatus::Known);
         let lines = render_lines(&report, 20, 12, &DashboardConfig::default());
         assert!(
             lines

@@ -99,6 +99,9 @@ pub fn provider_readiness(report: &QuotaReport, marketed: MarketedProvider) -> P
     else {
         return ProviderReadiness::Unsupported;
     };
+    if provider.state.reason.as_deref() == Some("keychain_access_required") {
+        return ProviderReadiness::QuotaUnavailable;
+    }
     if provider_needs_sign_in(provider) {
         return ProviderReadiness::Auth;
     }
@@ -108,11 +111,11 @@ pub fn provider_readiness(report: &QuotaReport, marketed: MarketedProvider) -> P
     if !matches!(provider.state.status, ProviderStatus::Fresh) {
         return ProviderReadiness::QuotaUnavailable;
     }
-    if provider.windows.is_empty() {
-        return ProviderReadiness::QuotaUnavailable;
-    }
     if evidence_is_partial(provider, marketed) {
         return ProviderReadiness::Partial;
+    }
+    if provider.windows.is_empty() {
+        return ProviderReadiness::QuotaUnavailable;
     }
     if !provider.effective.iter().any(decision_grade) {
         return ProviderReadiness::QuotaUnavailable;
@@ -281,5 +284,30 @@ mod tests {
             ProviderReadiness::QuotaUnavailable
         );
         assert_eq!(readiness_line(&report), "0 ready · 0 sign-in");
+    }
+
+    #[test]
+    fn partial_and_keychain_states_precede_quota_shape() {
+        let mut partial = provider("claude", ProviderStatus::Fresh);
+        partial.semantics_status = Some(SemanticsStatus::Partial);
+        partial.windows.clear();
+        partial.effective.clear();
+        let mut keychain = provider("cursor", ProviderStatus::Fresh);
+        keychain.state.reason = Some("keychain_access_required".into());
+
+        let report = report(vec![partial, keychain]);
+
+        assert_eq!(
+            provider_readiness(&report, MarketedProvider::Claude),
+            ProviderReadiness::Partial
+        );
+        assert_eq!(
+            provider_readiness(&report, MarketedProvider::Cursor),
+            ProviderReadiness::QuotaUnavailable
+        );
+        assert_eq!(readiness_line(&report), "0 ready · 0 sign-in");
+        let copy = provider_readiness(&report, MarketedProvider::Cursor).text();
+        assert!(!copy.contains("keychain"));
+        assert!(!copy.contains("store"));
     }
 }
