@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-09-03
 
 ### Added
 
@@ -14,9 +14,10 @@
   `refreshing` or `↻` in the title slot, rapid manual refreshes coalesce to one
   replacement attempt, and finite first-load or last-good failures remain
   actionable without shifting provider rows.
-- Settings now use schema v3. Quota history and transition state now use schema v2. The stores migrate the previous versions in memory and write the new version on the next save.
-- GitHub Copilot joins Claude, OpenAI Codex, Cursor, and Kimi in the complete provider set. Existing settings add Copilot to the provider order in memory and do not change on disk until the next save.
-- Herdr Quota 0.3.x treats the new documents as future schemas and preserves their bytes.
+- The plugin now builds and launches the Rust dashboard and sidebar action. The TypeScript runtime is no longer a production entrypoint.
+- Settings now use schema v4 for the finite startup view. Schemas v1-v3 migrate in memory without a load-time write; only the Rust runtime writes the migrated document on the next explicit save. Quota history and transition state use schema v2.
+- The marketed roster is Claude, OpenAI Codex, Cursor, Kimi, Grok, and GitHub Copilot. Existing settings add missing providers to the order in memory and do not change on disk until the next save.
+- Herdr Quota 0.3.x treats settings v4 as a future schema and preserves its bytes.
 
 ## 0.3.0 — 2026-08-20
 

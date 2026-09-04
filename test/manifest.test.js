@@ -1,30 +1,84 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { parse } from "smol-toml";
 
-const manifest = await readFile(
-  new URL("../herdr-plugin.toml", import.meta.url),
-  "utf8",
+const manifest = parse(
+  await readFile(new URL("../herdr-plugin.toml", import.meta.url), "utf8"),
+);
+const cargoManifest = parse(
+  await readFile(
+    new URL("../rust/herdr-quota/Cargo.toml", import.meta.url),
+    "utf8",
+  ),
+);
+const cargoLock = parse(
+  await readFile(new URL("../Cargo.lock", import.meta.url), "utf8"),
 );
 const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
 const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
 
-test("manifest exposes a split-pane action without promising an unsupported binding", () => {
-  assert.match(manifest, /^id = "herdr-quota"$/m);
-  assert.match(manifest, /^min_herdr_version = "0\.7\.3"$/m);
-  assert.match(manifest, /^platforms = \["macos", "linux"\]$/m);
-  assert.match(manifest, /\[\[panes\]\][\s\S]*?placement = "split"/);
-  assert.match(manifest, /\[\[actions\]\][\s\S]*?id = "open-dashboard"/);
-  assert.match(manifest, /command = \["node", "dist\/sidebar\.js"\]/);
-  assert.doesNotMatch(manifest, /\[\[keys\.command\]\]/);
-  assert.doesNotMatch(manifest, /\[\[(events|startup)\]\]/);
+test("manifest installs and exposes the Rust dashboard", () => {
+  assert.deepEqual(
+    {
+      id: manifest.id,
+      minHerdrVersion: manifest.min_herdr_version,
+      platforms: manifest.platforms,
+    },
+    {
+      id: "herdr-quota",
+      minHerdrVersion: "0.7.3",
+      platforms: ["macos", "linux"],
+    },
+  );
+  assert.deepEqual(
+    manifest.build.map(({ command }) => command),
+    [
+      ["npm", "ci"],
+      [
+        "cargo",
+        "build",
+        "--release",
+        "--locked",
+        "-p",
+        "herdr-quota",
+        "--target-dir",
+        "target",
+      ],
+    ],
+  );
+  assert.deepEqual(manifest.panes, [
+    {
+      id: "dashboard",
+      title: "AI Quota",
+      placement: "split",
+      command: ["target/release/herdr-quota", "dashboard"],
+    },
+  ]);
+  assert.deepEqual(manifest.actions, [
+    {
+      id: "open-dashboard",
+      title: "Open AI quota dashboard",
+      contexts: ["workspace", "pane"],
+      command: ["target/release/herdr-quota", "sidebar"],
+    },
+  ]);
+  assert.equal(manifest.keys, undefined);
+  assert.equal(manifest.events, undefined);
+  assert.equal(manifest.startup, undefined);
 });
 
-test("package and manifest advertise the same v0.3.0 implementation", () => {
-  assert.equal(packageJson.version, "0.3.0");
-  assert.match(manifest, /^version = "0\.3\.0"$/m);
+test("release metadata advertises the same v0.4.0 implementation", () => {
+  const lockedRustPackage = cargoLock.package.find(
+    ({ name }) => name === cargoManifest.package.name,
+  );
+
+  assert.equal(packageJson.version, "0.4.0");
+  assert.equal(manifest.version, packageJson.version);
+  assert.equal(cargoManifest.package.version, packageJson.version);
+  assert.equal(lockedRustPackage.version, packageJson.version);
   assert.match(readme, /five minutes after each completed attempt/);
   assert.match(readme, /10, 20, then at most 30 minutes/);
 });
