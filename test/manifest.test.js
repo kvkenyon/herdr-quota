@@ -54,7 +54,11 @@ test("manifest installs and exposes the Rust dashboard", () => {
       id: "dashboard",
       title: "AI Quota",
       placement: "split",
-      command: ["target/release/herdr-quota", "dashboard"],
+      command: [
+        "sh",
+        "-c",
+        'exec "$HERDR_PLUGIN_ROOT/target/release/herdr-quota" dashboard',
+      ],
     },
   ]);
   assert.deepEqual(manifest.actions, [
@@ -62,7 +66,11 @@ test("manifest installs and exposes the Rust dashboard", () => {
       id: "open-dashboard",
       title: "Open AI quota dashboard",
       contexts: ["workspace", "pane"],
-      command: ["target/release/herdr-quota", "sidebar"],
+      command: [
+        "sh",
+        "-c",
+        'exec "$HERDR_PLUGIN_ROOT/target/release/herdr-quota" sidebar',
+      ],
     },
   ]);
   assert.equal(manifest.keys, undefined);

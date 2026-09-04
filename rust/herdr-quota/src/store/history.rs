@@ -600,13 +600,13 @@ fn temporary_path(path: &Path) -> PathBuf {
 }
 
 fn target_may_be_replaced<F: HistoryFileOperations>(operations: &F, path: &Path) -> io::Result<()> {
-    if let Some(text) = operations.read_target(path, true)? {
-        if parse_history_document(&text) == Err(HistoryDocumentError::Incompatible) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "history_incompatible",
-            ));
-        }
+    if let Some(text) = operations.read_target(path, true)?
+        && parse_history_document(&text) == Err(HistoryDocumentError::Incompatible)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "history_incompatible",
+        ));
     }
     Ok(())
 }
