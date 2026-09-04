@@ -421,10 +421,13 @@ fn hidden_sibling_unsafe(
 }
 
 fn has_decision_safe_quota(
+    report: &QuotaReport,
     section: &crate::ui::model::ProviderSection,
     provider: &ProviderQuota,
 ) -> bool {
-    has_trustworthy_quota(provider) && !hidden_sibling_unsafe(section, provider)
+    provider_readiness(report, section.provider) == ProviderReadiness::Live
+        && has_trustworthy_quota(provider)
+        && !hidden_sibling_unsafe(section, provider)
 }
 
 fn readiness_row(
@@ -662,7 +665,7 @@ fn overview_evidence_rows(
                 .providers
                 .iter()
                 .find(|provider| provider_id(provider) == Some(section.provider))
-                .filter(|provider| has_decision_safe_quota(section, provider))
+                .filter(|provider| has_decision_safe_quota(report, section, provider))
         })
         .collect();
     let decision_provider =
@@ -679,7 +682,7 @@ fn overview_evidence_rows(
         else {
             continue;
         };
-        if !has_decision_safe_quota(section, provider) {
+        if !has_decision_safe_quota(report, section, provider) {
             continue;
         }
         let Some(effective) = limiting_effective(provider) else {
@@ -889,7 +892,7 @@ fn detail_rows_with_history(
             .providers
             .iter()
             .find(|provider| provider_id(provider) == Some(section.provider))
-            .is_some_and(|provider| has_decision_safe_quota(section, provider))
+            .is_some_and(|provider| has_decision_safe_quota(report, section, provider))
         {
             rows.extend(trend_row(history, section.provider, width as usize));
         }
@@ -1098,7 +1101,7 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
     let trustworthy: Vec<_> = visible
         .iter()
         .filter_map(|(section, provider)| {
-            has_decision_safe_quota(section, provider).then_some(*provider)
+            has_decision_safe_quota(report, section, provider).then_some(*provider)
         })
         .collect();
     if let Some((provider, effective)) = decision_constraint(&trustworthy) {
@@ -1201,7 +1204,7 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
         .any(|state| matches!(state, ProviderReadiness::Partial))
         || visible
             .iter()
-            .any(|(section, provider)| !has_decision_safe_quota(section, provider))
+            .any(|(section, provider)| !has_decision_safe_quota(report, section, provider))
     {
         return (
             fitting(
@@ -2461,6 +2464,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn keychain_unavailable_provider_cannot_drive_decisions_or_history() {
+        let mut keychain = provider("claude", Some(40.0), ProviderStatus::Fresh);
+        keychain.state.reason = Some("keychain_access_required".into());
+        keychain.windows[0].resets_at = Some("2026-09-05T12:00:00Z".into());
+        let runway = keychain.effective[0].runway.as_mut().unwrap();
+        runway.status = RunwayStatus::ProjectedExhaustion;
+        runway.projected_exhausted_at = Some("2026-09-03T12:00:00Z".into());
+        runway.projection_confidence = Some(ProjectionConfidence::Established);
+        let available = provider("kimi", Some(80.0), ProviderStatus::Fresh);
+        let report = report(vec![keychain, available]);
+
+        let overview = DashboardConfig {
+            selected_provider: 3,
+            ..DashboardConfig::default()
+        };
+        let lines = render_lines(&report, 36, 12, &overview);
+        assert_eq!(lines[1].trim_end(), "? Limits non-current");
+        assert!(overview_evidence_rows(&report, &overview, 36).is_empty());
+
+        let details = render_lines_with_history(
+            &report,
+            Some(&trend_history()),
+            36,
+            12,
+            &detail_config(),
+        );
+        assert!(details.iter().any(|line| line.contains("Keychain approval")));
+        assert!(details.iter().all(|line| !line.contains("18pp")));
     }
 
     #[test]

@@ -111,11 +111,14 @@ pub fn provider_readiness(report: &QuotaReport, marketed: MarketedProvider) -> P
     if !matches!(provider.state.status, ProviderStatus::Fresh) {
         return ProviderReadiness::QuotaUnavailable;
     }
-    if evidence_is_partial(provider, marketed) {
+    if provider.semantics_status == Some(SemanticsStatus::Partial) {
         return ProviderReadiness::Partial;
     }
     if provider.windows.is_empty() {
         return ProviderReadiness::QuotaUnavailable;
+    }
+    if evidence_is_partial(provider, marketed) {
+        return ProviderReadiness::Partial;
     }
     if !provider.effective.iter().any(decision_grade) {
         return ProviderReadiness::QuotaUnavailable;
@@ -309,5 +312,18 @@ mod tests {
         let copy = provider_readiness(&report, MarketedProvider::Cursor).text();
         assert!(!copy.contains("keychain"));
         assert!(!copy.contains("store"));
+    }
+
+    #[test]
+    fn unknown_semantics_without_windows_is_quota_unavailable() {
+        let mut unknown = provider("grok", ProviderStatus::Fresh);
+        unknown.semantics_status = Some(SemanticsStatus::Unknown);
+        unknown.windows.clear();
+        unknown.effective.clear();
+
+        assert_eq!(
+            provider_readiness(&report(vec![unknown]), MarketedProvider::Grok),
+            ProviderReadiness::QuotaUnavailable
+        );
     }
 }
