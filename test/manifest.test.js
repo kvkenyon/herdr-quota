@@ -22,9 +22,9 @@ test("manifest exposes a split-pane action without promising an unsupported bind
   assert.doesNotMatch(manifest, /\[\[(events|startup)\]\]/);
 });
 
-test("package and manifest advertise the same v0.3.0 implementation", () => {
-  assert.equal(packageJson.version, "0.3.0");
-  assert.match(manifest, /^version = "0\.3\.0"$/m);
+test("package and manifest advertise the same v0.4.0 implementation", () => {
+  assert.equal(packageJson.version, "0.4.0");
+  assert.match(manifest, /^version = "0\.4\.0"$/m);
   assert.match(readme, /five minutes after each completed attempt/);
   assert.match(readme, /10, 20, then at most 30 minutes/);
 });
