@@ -74,15 +74,13 @@ test("claude extra usage keeps spend evidence and unknown pace", async () => {
   );
 });
 
-test("codex gets an explicit code-review row when none is reported", async () => {
+test("codex does not invent a code-review entitlement when none is reported", async () => {
   const codex = byId(await providers("complete"), "codex");
   const rows = providerTiers(codex);
   assert.deepEqual(
     rows.map((row) => row.label),
-    ["Week", "Spark week", "Code review"],
+    ["Week", "Spark week"],
   );
-  assert.equal(rows.at(-1).conclusion.kind, "not_reported");
-  assert.equal(rows.at(-1).percentRemaining, undefined);
 });
 
 test("codex renders real code-review windows instead of the placeholder", async () => {

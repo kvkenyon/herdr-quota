@@ -31,7 +31,7 @@ function render(reportValue, options = {}) {
 test("36-cell sidebar shows every provider tier without scrolling", async () => {
   const output = render(await report("complete"));
   const lines = output.split("\n").map((line) => line.trimEnd());
-  assert.deepEqual(lines.slice(0, 21), [
+  assert.deepEqual(lines.slice(0, 20), [
     "AI Quota                      1m ago",
     "! Claude Fable · out 13h",
     "Claude",
@@ -43,7 +43,6 @@ test("36-cell sidebar shows every provider tier without scrolling", async () => 
     "OpenAI Codex",
     " Week        ███▏  79% 23h · on pace",
     " Spark week  ████ 100%  7d · on pace",
-    " Code review        -- not reported",
     "",
     "Cursor",
     " Included    ██▊─  69% 22d · on pace",
@@ -92,7 +91,7 @@ test("gauges, percentages, and countdowns share one column across providers", as
   const tiers = output
     .split("\n")
     .filter((line) => line.startsWith(" ") && /\d%|-- /.test(line));
-  assert.equal(tiers.length, 12);
+  assert.equal(tiers.length, 11);
   for (const line of tiers) {
     // Gauge, then the value right-aligned in the same four cells, for every
     // tier of every provider.
@@ -125,12 +124,13 @@ test("full, exhausted, and unknown tiers are distinct at a glance", async () => 
   claude.windows.find((window) => window.id === "seven_day").percentRemaining =
     99;
 
+  claude.windows.push({ id: "unknown", label: "Unknown", kind: "unknown" });
   const output = render(complete);
   // Exactly empty, exactly full, a notch short of full, and no reading.
   assert.match(output, /^ Session {5}──── {3}0%/m);
   assert.match(output, /^ Spark week {2}████ 100%/m);
   assert.match(output, /^ Week {8}███▉ {2}99%/m);
-  assert.match(output, /^ Code review {8}--/m);
+  assert.match(output, /^ Unknown +--/m);
 });
 
 test("no provider art, aggregates-only output, or implementation jargon", async () => {
@@ -265,7 +265,7 @@ test("short panes cut whole rows and report the visible position", async () => {
   const output = render(await report("complete"), { height: 12 });
   assert.equal(output.split("\n").length, 12);
   assert.match(output, /^! Claude Fable · out 13h/m);
-  assert.match(output, /^Rows 1–8 of 16/m);
+  assert.match(output, /^Rows 1–8 of 15/m);
   assert.match(output, /^j\/k Pg · p prefs · r · q\/esc$/m);
   assert.doesNotMatch(output, /more rows/);
   assert.doesNotMatch(output, /^\s*$/m);
@@ -279,7 +279,7 @@ test("every provider/detail row is reachable with pinned context at exact pane s
       .slice(2, -1)
       .map((line) => line.trimEnd())
       .filter(Boolean);
-    assert.equal(reference.length, 16, `${width}-column detail count`);
+    assert.equal(reference.length, 15, `${width}-column detail count`);
 
     for (const height of [6, 8, 12, 23]) {
       const state = { report: value, loading: false, scroll: 0 };
@@ -341,14 +341,14 @@ test("line and page navigation clamp after data, auth, and height changes", asyn
   assert.equal(applyDashboardScroll(state, "scroll_up", 8), 0);
 
   state.scroll = 999;
-  assert.equal(clampDashboardScroll(state, 8), 12);
+  assert.equal(clampDashboardScroll(state, 8), 11);
   state.scroll = clampDashboardScroll(state, 8);
   state.report.providers = state.report.providers.slice(0, 2);
-  assert.equal(clampDashboardScroll(state, 8), 5);
+  assert.equal(clampDashboardScroll(state, 8), 4);
 
   state.scroll = clampDashboardScroll(state, 8);
   state.report.providers[0].state.status = "auth_required";
-  assert.equal(clampDashboardScroll(state, 8), 2);
+  assert.equal(clampDashboardScroll(state, 8), 0);
 
   state.scroll = clampDashboardScroll(state, 8);
   assert.equal(clampDashboardScroll(state, 23), 0);
@@ -378,7 +378,7 @@ test("safe top-level failures retain last-good detail and show automatic retry t
     const lines = output.split("\n").map((line) => line.trimEnd());
     assert.ok(lines.includes(expected));
     assert.ok(lines.includes("! Claude · out 13h"));
-    assert.ok(lines.includes("Rows 14–16 of 16"));
+    assert.ok(lines.includes("Rows 13–15 of 15"));
     assert.ok(lines.includes("Kimi"));
     assert.ok(lines.includes(" Session    100% 57m"));
     assert.doesNotMatch(output, /secret|alice|auth\.json|Bearer/i);
@@ -430,7 +430,6 @@ test("24x30 and 20x12 no-color views are stable snapshots", async () => {
     "OpenAI Codex",
     " Week         79% 23h",
     " Spark week  100%  7d",
-    " Code review   --  --",
     "",
     "Cursor",
     " Included     69% 22d",
@@ -440,6 +439,7 @@ test("24x30 and 20x12 no-color views are stable snapshots", async () => {
     "Kimi",
     " Week        100%  2d",
     " Session     100% 57m",
+    "",
     "",
     "",
     "",
@@ -465,7 +465,7 @@ test("24x30 and 20x12 no-color views are stable snapshots", async () => {
     "OpenAI Codex",
     " Week        79% 23h",
     " Spark week 100%  7d",
-    "Rows 1–8 of 16",
+    "Rows 1–8 of 15",
     "j/k · p prefs · r/q",
   ]);
 });
@@ -625,7 +625,6 @@ test("history evidence has exact responsive hierarchy at product pane sizes", as
     "OpenAI Codex",
     " Week        ███▏  79% 23h · on pace",
     " Spark week  ████ 100%  7d · on pace",
-    " Code review        -- not reported",
     "",
     "Cursor",
     " Included    ██▊─  69% 22d · on pace",
@@ -635,6 +634,7 @@ test("history evidence has exact responsive hierarchy at product pane sizes", as
     "Kimi",
     " Week        ████ 100%  2d · on pace",
     " Session     ████ 100% 57m · on pace",
+    "",
     "j/k Pg · p prefs · r · q/esc",
   ]);
   assert.deepEqual(at(24, 12), [
@@ -648,7 +648,7 @@ test("history evidence has exact responsive hierarchy at product pane sizes", as
     " Extra usage  59%  --",
     "OpenAI Codex",
     " Week         79% 23h",
-    "Rows 1–7 of 16",
+    "Rows 1–7 of 15",
     "j/k · p prefs · r/q",
   ]);
   assert.deepEqual(at(20, 8), [
@@ -658,7 +658,7 @@ test("history evidence has exact responsive hierarchy at product pane sizes", as
     " Session     98%  3h",
     " Week        53% 33h",
     " Fable week   9% 33h",
-    "Rows 1–4 of 16",
+    "Rows 1–4 of 15",
     "j/k · p prefs · r/q",
   ]);
 

@@ -63,18 +63,12 @@ fn stale_age(report: &QuotaReport, provider: &ProviderQuota) -> Option<String> {
     })
 }
 
-fn evidence_is_partial(provider: &ProviderQuota, marketed: MarketedProvider) -> bool {
+fn evidence_is_partial(provider: &ProviderQuota) -> bool {
     provider.semantics_status != Some(SemanticsStatus::Known)
         || provider
             .effective
             .iter()
             .any(|effective| effective.status != EffectiveStatus::Known)
-        || (marketed == MarketedProvider::Codex
-            && !provider.windows.is_empty()
-            && !provider
-                .windows
-                .iter()
-                .any(|window| window.id.starts_with("code_review_")))
 }
 
 pub(crate) fn decision_grade(effective: &EffectiveAvailability) -> bool {
@@ -92,11 +86,7 @@ pub(crate) fn decision_grade(effective: &EffectiveAvailability) -> bool {
 
 /// Classify one provider/account record without forwarding source, account,
 /// or error text.
-pub(crate) fn quota_readiness(
-    report: &QuotaReport,
-    provider: &ProviderQuota,
-    marketed: MarketedProvider,
-) -> ProviderReadiness {
+pub(crate) fn quota_readiness(report: &QuotaReport, provider: &ProviderQuota) -> ProviderReadiness {
     if provider.state.reason.as_deref() == Some("keychain_access_required") {
         return ProviderReadiness::QuotaUnavailable;
     }
@@ -115,7 +105,7 @@ pub(crate) fn quota_readiness(
     if provider.windows.is_empty() {
         return ProviderReadiness::QuotaUnavailable;
     }
-    if evidence_is_partial(provider, marketed) {
+    if evidence_is_partial(provider) {
         return ProviderReadiness::Partial;
     }
     if !provider.effective.iter().any(decision_grade) {
@@ -132,7 +122,7 @@ pub fn provider_readiness(report: &QuotaReport, marketed: MarketedProvider) -> P
         .providers
         .iter()
         .filter(|provider| provider_id(provider) == Some(marketed))
-        .map(|provider| quota_readiness(report, provider, marketed))
+        .map(|provider| quota_readiness(report, provider))
         .collect::<Vec<_>>();
     if states.is_empty() {
         return ProviderReadiness::Unsupported;

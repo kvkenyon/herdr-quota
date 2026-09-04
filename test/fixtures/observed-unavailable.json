@@ -1,0 +1,372 @@
+{
+  "generatedAt": "2026-09-04T21:28:52.999Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "claude",
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "percentUsed": 0,
+          "windowSeconds": 18000,
+          "percentRemaining": 100,
+          "pace": {
+            "status": "unknown",
+            "reason": "missing_cycle"
+          }
+        },
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "percentUsed": 0,
+          "windowSeconds": 604800,
+          "percentRemaining": 100,
+          "pace": {
+            "status": "unknown",
+            "reason": "missing_cycle"
+          }
+        },
+        {
+          "id": "model:fable",
+          "label": "Fable week",
+          "kind": "model",
+          "percentUsed": 0,
+          "windowSeconds": 604800,
+          "percentRemaining": 100,
+          "pace": {
+            "status": "unknown",
+            "reason": "missing_cycle"
+          }
+        },
+        {
+          "id": "extra_usage",
+          "label": "extra usage",
+          "kind": "credits",
+          "percentUsed": 100,
+          "spentUsd": 502.19,
+          "limitUsd": 500,
+          "percentRemaining": 0,
+          "pace": {
+            "status": "unknown",
+            "reason": "missing_cycle"
+          }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "description": "Claude account windows bound every model. A model-specific window is an additional bound, so that model's effective remaining percentage is the minimum across the named windows.",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 100,
+            "boundedBy": ["five_hour", "seven_day"],
+            "limitingWindowIds": ["five_hour", "seven_day"],
+            "pace": {
+              "status": "unknown",
+              "unknownWindowIds": ["five_hour", "seven_day"]
+            },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            },
+            "selection": {
+              "status": "unknown",
+              "unmeasurableWindowIds": ["five_hour", "seven_day"]
+            }
+          },
+          {
+            "scope": "model:fable",
+            "status": "known",
+            "effectivePercentRemaining": 100,
+            "boundedBy": ["five_hour", "seven_day", "model:fable"],
+            "limitingWindowIds": ["five_hour", "seven_day", "model:fable"],
+            "pace": {
+              "status": "unknown",
+              "unknownWindowIds": ["five_hour", "seven_day", "model:fable"]
+            },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            },
+            "selection": {
+              "status": "unknown",
+              "unmeasurableWindowIds": ["five_hour", "seven_day", "model:fable"]
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-09-04T21:28:53.607Z"
+      }
+    },
+    {
+      "provider": "codex",
+      "windows": [
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentUsed": 60,
+          "resetsAt": "2026-09-11T03:22:02.000Z",
+          "windowSeconds": 604800,
+          "percentRemaining": 40,
+          "pace": {
+            "status": "ahead",
+            "timeRemainingPercent": 89.2178,
+            "elapsedPercent": 10.7822,
+            "reservePercentPoints": -49.2178,
+            "cycleBasis": "window_seconds",
+            "cycleSeconds": 604800,
+            "burnMultiple": 5.5647,
+            "projectedExhaustedAt": "2026-09-05T09:33:26.998Z",
+            "projectionConfidence": "established"
+          }
+        },
+        {
+          "id": "model:codex_bengalfox:5h",
+          "label": "GPT-5.3-Codex-Spark session",
+          "kind": "model",
+          "percentUsed": 0,
+          "resetsAt": "2026-09-05T02:28:53.000Z",
+          "windowSeconds": 18000,
+          "percentRemaining": 100,
+          "pace": {
+            "status": "unknown",
+            "reason": "future_cycle_start"
+          }
+        },
+        {
+          "id": "model:codex_bengalfox:7d",
+          "label": "GPT-5.3-Codex-Spark week",
+          "kind": "model",
+          "percentUsed": 0,
+          "resetsAt": "2026-09-11T21:28:53.000Z",
+          "windowSeconds": 604800,
+          "percentRemaining": 100,
+          "pace": {
+            "status": "unknown",
+            "reason": "future_cycle_start"
+          }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "description": "Codex base account windows bound every model. Named model windows add bounds for that model; code-review windows describe a separate workload and are not included in model availability.",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 40,
+            "boundedBy": ["weekly"],
+            "limitingWindowIds": ["weekly"],
+            "pace": {
+              "status": "ahead",
+              "aheadWindowIds": ["weekly"],
+              "worstReservePercentPoints": -49.2178,
+              "worstReserveWindowId": "weekly"
+            },
+            "runway": {
+              "status": "projected_exhaustion",
+              "usableRunwaySeconds": 43474,
+              "projectedExhaustedAt": "2026-09-05T09:33:26.998Z",
+              "limitingWindowId": "weekly",
+              "projectionConfidence": "established"
+            },
+            "selection": {
+              "status": "known",
+              "spendPriority": -5.1164
+            }
+          },
+          {
+            "scope": "model:codex_bengalfox",
+            "status": "known",
+            "effectivePercentRemaining": 40,
+            "boundedBy": [
+              "weekly",
+              "model:codex_bengalfox:5h",
+              "model:codex_bengalfox:7d"
+            ],
+            "limitingWindowIds": ["weekly"],
+            "pace": {
+              "status": "ahead",
+              "aheadWindowIds": ["weekly"],
+              "unknownWindowIds": [
+                "model:codex_bengalfox:5h",
+                "model:codex_bengalfox:7d"
+              ],
+              "worstReservePercentPoints": -49.2178,
+              "worstReserveWindowId": "weekly"
+            },
+            "runway": {
+              "status": "unknown",
+              "unmeasurableWindowIds": [
+                "model:codex_bengalfox:5h",
+                "model:codex_bengalfox:7d"
+              ]
+            },
+            "selection": {
+              "status": "unknown",
+              "unmeasurableWindowIds": [
+                "model:codex_bengalfox:5h",
+                "model:codex_bengalfox:7d"
+              ]
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-09-04T21:28:53.377Z"
+      }
+    },
+    {
+      "provider": "cursor",
+      "windows": [
+        {
+          "id": "included_usage",
+          "label": "included usage",
+          "kind": "monthly",
+          "percentUsed": 50,
+          "resetsAt": "2026-09-09T19:34:39.000Z",
+          "startsAt": "2026-08-09T19:34:39.000Z",
+          "percentRemaining": 50,
+          "pace": {
+            "status": "behind",
+            "timeRemainingPercent": 15.8731,
+            "elapsedPercent": 84.1269,
+            "reservePercentPoints": 34.1269,
+            "cycleBasis": "starts_at_resets_at",
+            "cycleSeconds": 2678400,
+            "burnMultiple": 0.5943,
+            "projectedExhaustedAt": "2026-09-30T23:23:06.998Z",
+            "projectionConfidence": "established"
+          }
+        },
+        {
+          "id": "auto_usage",
+          "label": "auto usage",
+          "kind": "monthly",
+          "percentUsed": 41,
+          "resetsAt": "2026-09-09T19:34:39.000Z",
+          "startsAt": "2026-08-09T19:34:39.000Z",
+          "percentRemaining": 59,
+          "pace": {
+            "status": "behind",
+            "timeRemainingPercent": 15.8731,
+            "elapsedPercent": 84.1269,
+            "reservePercentPoints": 43.1269,
+            "cycleBasis": "starts_at_resets_at",
+            "cycleSeconds": 2678400,
+            "burnMultiple": 0.4874,
+            "projectedExhaustedAt": "2026-10-12T10:10:20.460Z",
+            "projectionConfidence": "established"
+          }
+        },
+        {
+          "id": "api_usage",
+          "label": "API usage",
+          "kind": "monthly",
+          "percentUsed": 98,
+          "resetsAt": "2026-09-09T19:34:39.000Z",
+          "startsAt": "2026-08-09T19:34:39.000Z",
+          "percentRemaining": 2,
+          "pace": {
+            "status": "ahead",
+            "timeRemainingPercent": 15.8731,
+            "elapsedPercent": 84.1269,
+            "reservePercentPoints": -13.8731,
+            "cycleBasis": "starts_at_resets_at",
+            "cycleSeconds": 2678400,
+            "burnMultiple": 1.1649,
+            "projectedExhaustedAt": "2026-09-05T10:15:17.774Z",
+            "projectionConfidence": "established"
+          }
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "description": "Cursor's included, auto, API usage, and spend-limit windows jointly bound every model, so effective remaining is the minimum across the named windows.",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 2,
+            "boundedBy": ["included_usage", "auto_usage", "api_usage"],
+            "limitingWindowIds": ["api_usage"],
+            "pace": {
+              "status": "mixed",
+              "aheadWindowIds": ["api_usage"],
+              "behindWindowIds": ["included_usage", "auto_usage"],
+              "worstReservePercentPoints": -13.8731,
+              "worstReserveWindowId": "api_usage"
+            },
+            "runway": {
+              "status": "projected_exhaustion",
+              "usableRunwaySeconds": 45985,
+              "projectedExhaustedAt": "2026-09-05T10:15:17.774Z",
+              "limitingWindowId": "api_usage",
+              "projectionConfidence": "established"
+            },
+            "selection": {
+              "status": "known",
+              "spendPriority": 1.5821
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-09-04T21:28:53.273Z"
+      }
+    },
+    {
+      "provider": "kimi",
+      "windows": [],
+      "quotaSemantics": {
+        "status": "unknown",
+        "description": "No quota windows are available, so no effective remaining percentage can be computed.",
+        "effectiveAvailability": []
+      },
+      "state": {
+        "status": "auth_required",
+        "stale": false
+      }
+    },
+    {
+      "provider": "grok",
+      "windows": [],
+      "quotaSemantics": {
+        "status": "unknown",
+        "description": "No quota windows are available, so no effective remaining percentage can be computed.",
+        "effectiveAvailability": []
+      },
+      "state": {
+        "status": "auth_required",
+        "stale": false,
+        "authStatus": "unusable"
+      }
+    },
+    {
+      "provider": "copilot",
+      "windows": [],
+      "quotaSemantics": {
+        "status": "unknown",
+        "description": "No quota windows are available, so no effective remaining percentage can be computed.",
+        "effectiveAvailability": [],
+        "unresolvedWindowIds": []
+      },
+      "state": {
+        "status": "auth_required",
+        "stale": false
+      }
+    }
+  ]
+}
