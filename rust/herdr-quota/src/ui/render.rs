@@ -143,11 +143,17 @@ impl RowStyle {
         }
         match self {
             Self::Normal => Style::default(),
-            Self::Heading => Style::default().add_modifier(Modifier::BOLD),
-            Self::Warning => Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(Color::Yellow),
-            Self::Critical => Style::default().add_modifier(Modifier::BOLD).fg(Color::Red),
+            Self::Heading | Self::Warning | Self::Critical => {
+                Style::default().add_modifier(Modifier::BOLD)
+            }
+        }
+    }
+
+    fn accent(self) -> Color {
+        match self {
+            Self::Normal | Self::Heading => Color::Cyan,
+            Self::Warning => Color::Yellow,
+            Self::Critical => Color::Red,
         }
     }
 }
@@ -1915,6 +1921,23 @@ impl Widget for Dashboard<'_> {
                 area.width as usize,
                 row.style.ratatui(self.config.color),
             );
+            if self.config.color {
+                // Colour reinforces the meter and leading marker. Keep names,
+                // readings and resets on the terminal's readable foreground.
+                let marker = row.text.chars().position(|ch| !ch.is_whitespace());
+                let mut x = area.x;
+                for (index, ch) in row.text.chars().enumerate() {
+                    if x >= area.right() {
+                        break;
+                    }
+                    let is_bar = matches!(ch, '█' | '▉' | '▊' | '▋' | '▌' | '▍' | '▎' | '▏' | '─');
+                    let is_marker = Some(index) == marker && matches!(ch, '!' | '?' | '~' | '>');
+                    if is_bar || is_marker {
+                        buffer[(x, area.y + y as u16)].set_fg(row.style.accent());
+                    }
+                    x = x.saturating_add(ch.width().unwrap_or(0) as u16);
+                }
+            }
         }
     }
 }
@@ -2575,7 +2598,7 @@ mod tests {
             ..detail_config()
         };
         let critical = reachable_style(&report, 36, 23, &config, " !primary tier");
-        assert_eq!(critical.fg, Some(Color::Red));
+        assert_eq!(critical.fg, Some(Color::Reset));
         assert!(critical.add_modifier.contains(Modifier::BOLD));
         let warning = reachable_style(
             &report,
@@ -2590,8 +2613,55 @@ mod tests {
         assert_eq!(warning.fg, Some(Color::Yellow));
         assert!(warning.add_modifier.contains(Modifier::BOLD));
         let heading = reachable_style(&report, 36, 23, &config, "> Claude");
-        assert_eq!(heading.fg, Some(Color::Reset));
+        assert_eq!(heading.fg, Some(Color::Cyan));
         assert!(heading.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn color_accents_preserve_readable_evidence_and_remaining_semantics() {
+        for (status, remaining, expected) in [
+            (ProviderStatus::Fresh, Some(75.0), Color::Cyan),
+            (ProviderStatus::Fresh, Some(5.0), Color::Red),
+            (ProviderStatus::Stale, Some(75.0), Color::Yellow),
+            (ProviderStatus::Fresh, None, Color::Yellow),
+        ] {
+            let report = report(vec![provider("claude", remaining, status)]);
+            for (width, height) in [(20, 12), (36, 23)] {
+                for meter_mode in [MeterMode::Remaining, MeterMode::Used] {
+                    let config = DashboardConfig {
+                        color: true,
+                        meter_mode,
+                        ..DashboardConfig::default()
+                    };
+                    let buffer = render_buffer(&report, width, height, &config);
+                    let mut bars = 0;
+                    for cell in &buffer.content {
+                        let symbol = cell.symbol();
+                        if symbol.chars().any(char::is_alphanumeric) || symbol == "%" {
+                            assert_eq!(cell.fg, Color::Reset, "evidence {symbol:?}");
+                        }
+                        if matches!(symbol, "█" | "▉" | "▊" | "▋" | "▌" | "▍" | "▎" | "▏" | "─")
+                        {
+                            bars += 1;
+                            assert_eq!(cell.fg, expected);
+                        }
+                    }
+                    assert_eq!(bars > 0, remaining.is_some());
+                    assert_eq!(
+                        render_lines(&report, width, height, &config),
+                        render_lines(
+                            &report,
+                            width,
+                            height,
+                            &DashboardConfig {
+                                color: false,
+                                ..config
+                            }
+                        )
+                    );
+                }
+            }
+        }
     }
 
     #[test]

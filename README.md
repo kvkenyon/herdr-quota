@@ -72,6 +72,8 @@ The sidebar targets 36 terminal cells and supports narrow 20-cell panes. At narr
 
 Essential labels, percentages, resets, history, and state text use the terminal's default foreground so they remain legible in Herdr's light and dark themes. Bold weight is reserved for titles, provider headers, the limiting tier, focus, and severity—not every row. `!`, `=`, `?`, arrows, checkboxes, focus markers, and explicit state words carry all meaning without color; optional color only reinforces them. Unknown readings stay `unknown` with no bar rather than becoming a misleading zero.
 
+The live dashboard accents known remaining bars in cyan, critical bars in red, and stale bars in yellow. Labels, exact percentages, and resets keep the default foreground; `NO_COLOR` removes the accents without changing any text or bar. [Color replay](docs/compact-dashboard-color.svg) shows the same sanitized capture as the before/after comparison in a Rosé Pine palette.
+
 The development TypeScript validation sheets exercise its ANSI renderer against Herdr's [light](docs/theme-preview-light.svg) and [dark](docs/theme-preview-dark.svg) Rosé Pine terminal palettes at 20/24/36 columns and normal/short heights; the same matrix also runs in a real PTY and with `NO_COLOR` during `npm run check`.
 
 ### Preferences
