@@ -67,6 +67,26 @@ function strings(value: unknown): string[] {
     : [];
 }
 
+function accountLabel(value: unknown): string | undefined {
+  const account = object(value);
+  const email = text(account?.email);
+  if (email) {
+    const at = email.lastIndexOf("@");
+    if (at > 0 && at === email.indexOf("@") && at < email.length - 1)
+      return `${email[0]}•••${email.slice(at)}`;
+  }
+  const organization = text(account?.organization);
+  if (
+    organization &&
+    !/(?:bearer\s+|(?:sk|api|key|token)[-_]|\/Users\/|\/home\/|[A-Z]:\\|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/i.test(
+      organization,
+    ) &&
+    !/\b[A-Za-z0-9._~+/-]{24,}\b/.test(organization)
+  )
+    return organization;
+  return undefined;
+}
+
 function adaptWindow(value: unknown): QuotaWindow | undefined {
   const raw = object(value);
   const id = text(raw?.id);
@@ -256,6 +276,10 @@ function adaptProvider(
   const creditsRaw = object(raw.credits);
   return {
     provider,
+    ...(object(raw.account) ? { accountReported: true as const } : {}),
+    ...(accountLabel(raw.account)
+      ? { accountLabel: accountLabel(raw.account) }
+      : {}),
     ...(text(raw.label) ? { label: text(raw.label) } : {}),
     ...(text(raw.source) ? { source: text(raw.source) } : {}),
     ...(text(raw.plan) ? { plan: text(raw.plan) } : {}),

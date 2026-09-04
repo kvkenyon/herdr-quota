@@ -264,6 +264,11 @@ pub struct ProviderState {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderQuota {
     pub provider: String,
+    /// A display-safe account label produced at the schema boundary. Raw
+    /// account identifiers and credential metadata never enter product data.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_label: Option<String>,
+    pub account_reported: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::domain::attention::{Attention, select_attention_from};
-use crate::domain::provider::MarketedProvider;
+use crate::domain::provider::{MarketedProvider, ProviderQuota};
 use crate::domain::schema::QuotaReport;
 use crate::domain::tiers::{
     ProviderAnnotation, ProviderPresentation, present_provider, provider_annotation,
@@ -93,6 +93,19 @@ fn tier_detail(presentation: ProviderPresentation, meter_mode: MeterMode) -> Pro
     }
 }
 
+pub(crate) fn provider_section(
+    provider: MarketedProvider,
+    quota: &ProviderQuota,
+    meter_mode: MeterMode,
+) -> ProviderSection {
+    ProviderSection {
+        provider,
+        label: provider.label(),
+        annotation: provider_annotation(quota),
+        detail: tier_detail(present_provider(quota), meter_mode),
+    }
+}
+
 /// Creates the complete pure model. It intentionally owns no settings or
 /// persistence: callers provide the finite visibility decision for each
 /// marketed provider.
@@ -121,12 +134,7 @@ pub fn dashboard_model(
         .count();
     let sections = providers
         .iter()
-        .map(|(provider, quota)| ProviderSection {
-            provider: *provider,
-            label: provider.label(),
-            annotation: provider_annotation(quota),
-            detail: tier_detail(present_provider(quota), meter_mode),
-        })
+        .map(|(provider, quota)| provider_section(*provider, quota, meter_mode))
         .collect();
     DashboardModel {
         attention: select_attention_from(providers.iter().map(|(_, quota)| *quota)),
@@ -147,6 +155,8 @@ mod tests {
     fn quota(provider: &str, remaining: Option<f64>) -> ProviderQuota {
         ProviderQuota {
             provider: provider.into(),
+            account_label: None,
+            account_reported: false,
             label: Some("untrusted label".into()),
             source: None,
             plan: None,

@@ -30,8 +30,13 @@ use crate::domain::{
 use crate::store::settings::StartupView;
 use crate::ui::{
     bar::MeterMode,
-    model::{ProviderDetail, ProviderVisibility, ProviderVisibilityMap, dashboard_model},
-    readiness::{ProviderReadiness, decision_grade, provider_readiness, readiness_line},
+    model::{
+        ProviderDetail, ProviderVisibility, ProviderVisibilityMap, dashboard_model,
+        provider_section,
+    },
+    readiness::{
+        ProviderReadiness, decision_grade, provider_readiness, quota_readiness, readiness_line,
+    },
 };
 
 /// The finite dashboard surface currently shown in the terminal.
@@ -71,7 +76,7 @@ pub struct DashboardConfig {
     pub history: Option<HistoryDocument>,
     /// The current finite dashboard surface.
     pub view: DashboardView,
-    /// The stable cursor into the visible provider roster.
+    /// The stable cursor into the visible provider/account roster.
     pub selected_provider: usize,
     /// The editable startup preference shown by Preferences.
     pub startup_view: StartupView,
@@ -224,6 +229,43 @@ fn visible_marketed(config: &DashboardConfig) -> Vec<MarketedProvider> {
     providers
 }
 
+#[derive(Clone, Copy)]
+struct VisibleTarget {
+    marketed: MarketedProvider,
+    report_index: Option<usize>,
+    account_number: Option<usize>,
+}
+
+fn visible_targets(report: &QuotaReport, config: &DashboardConfig) -> Vec<VisibleTarget> {
+    let mut targets = Vec::new();
+    for marketed in visible_marketed(config) {
+        let matching = report
+            .providers
+            .iter()
+            .enumerate()
+            .filter(|(_, provider)| provider_id(provider) == Some(marketed))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if matching.is_empty() {
+            targets.push(VisibleTarget {
+                marketed,
+                report_index: None,
+                account_number: None,
+            });
+        } else {
+            let multiple = matching.len() > 1;
+            targets.extend(matching.into_iter().enumerate().map(
+                |(account_index, report_index)| VisibleTarget {
+                    marketed,
+                    report_index: Some(report_index),
+                    account_number: multiple.then_some(account_index + 1),
+                },
+            ));
+        }
+    }
+    targets
+}
+
 fn visible_model(
     report: &QuotaReport,
     config: &DashboardConfig,
@@ -247,8 +289,8 @@ fn visible_model(
     model
 }
 
-pub(super) fn visible_provider_count(_report: &QuotaReport, config: &DashboardConfig) -> usize {
-    visible_marketed(config).len()
+pub(super) fn visible_provider_count(report: &QuotaReport, config: &DashboardConfig) -> usize {
+    visible_targets(report, config).len()
 }
 
 fn compact_provider_name(provider: MarketedProvider) -> &'static str {
@@ -425,7 +467,7 @@ fn has_decision_safe_quota(
     section: &crate::ui::model::ProviderSection,
     provider: &ProviderQuota,
 ) -> bool {
-    provider_readiness(report, section.provider) == ProviderReadiness::Live
+    quota_readiness(report, provider, section.provider) == ProviderReadiness::Live
         && has_trustworthy_quota(provider)
         && !hidden_sibling_unsafe(section, provider)
 }
@@ -435,18 +477,29 @@ fn readiness_row(
     readiness: &ProviderReadiness,
     selected: bool,
     width: usize,
+    account_number: Option<usize>,
 ) -> SemanticRow {
     let state = readiness.text();
     let cursor = if selected { '>' } else { ' ' };
-    let compact = compact_provider_name(provider);
-    let narrow = narrow_provider_name(provider);
+    let compact = account_number.map_or_else(
+        || compact_provider_name(provider).to_owned(),
+        |number| format!("{} A{number}", compact_provider_name(provider)),
+    );
+    let narrow = account_number.map_or_else(
+        || narrow_provider_name(provider).to_owned(),
+        |number| format!("{} A{number}", narrow_provider_name(provider)),
+    );
     let marker = if selected { '>' } else { '?' };
     let text = fitting(
         [
             format!("{cursor}?{compact} · {state}"),
             format!("{cursor}?{compact} {state}"),
             format!("{cursor}?{narrow} {state}"),
-            format!("{marker}{} {state}", boundary_provider_name(provider)),
+            format!(
+                "{marker}{}{} {state}",
+                boundary_provider_name(provider),
+                account_number.map_or_else(String::new, |number| number.to_string())
+            ),
         ],
         width,
     );
@@ -462,10 +515,17 @@ fn overview_row(
     report: &QuotaReport,
     selected: bool,
     width: usize,
+    account_number: Option<usize>,
 ) -> SemanticRow {
-    let readiness = provider_readiness(report, section.provider);
+    let readiness = quota_readiness(report, provider, section.provider);
     if readiness != ProviderReadiness::Live {
-        return readiness_row(section.provider, &readiness, selected, width);
+        return readiness_row(
+            section.provider,
+            &readiness,
+            selected,
+            width,
+            account_number,
+        );
     }
     let current = has_current_quota(provider);
     let annotation = section.annotation.as_ref().map(|value| value.text);
@@ -545,7 +605,10 @@ fn overview_row(
     };
 
     let cursor = if selected { '>' } else { ' ' };
-    let name = compact_provider_name(section.provider);
+    let name = account_number.map_or_else(
+        || compact_provider_name(section.provider).to_owned(),
+        |number| format!("{} A{number}", compact_provider_name(section.provider)),
+    );
     let prefix = format!("{cursor}{marker}{name}");
     let tier = tier.map(str::to_owned);
     let mut candidates = Vec::new();
@@ -596,7 +659,10 @@ fn overview_row(
         .find(|candidate| UnicodeWidthStr::width(candidate.as_str()) <= width)
         .unwrap_or_else(|| {
             if matches!(state.as_str(), "? partial" | "? unknown") {
-                let narrow_name = narrow_provider_name(section.provider);
+                let narrow_name = account_number.map_or_else(
+                    || narrow_provider_name(section.provider).to_owned(),
+                    |number| format!("{} A{number}", narrow_provider_name(section.provider)),
+                );
                 return truncate(&format!("{cursor}{narrow_name}{state}"), width);
             }
             let compact_state = compact_annotation(&state);
@@ -613,31 +679,31 @@ fn overview_row(
 }
 
 fn overview_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
-    let model = visible_model(report, config);
     let mut rows = Vec::new();
-    let providers = visible_marketed(config);
+    let targets = visible_targets(report, config);
     let selected = config
         .selected_provider
-        .min(providers.len().saturating_sub(1));
-    for (index, marketed) in providers.into_iter().enumerate() {
-        let section = model
-            .providers
-            .iter()
-            .find(|section| section.provider == marketed);
-        let provider = report
-            .providers
-            .iter()
-            .find(|provider| provider_id(provider) == Some(marketed));
-        rows.push(match (section, provider) {
-            (Some(section), Some(provider)) => {
-                overview_row(section, provider, report, index == selected, width as usize)
-            }
-            _ => readiness_row(
-                marketed,
+        .min(targets.len().saturating_sub(1));
+    for (index, target) in targets.into_iter().enumerate() {
+        rows.push(if let Some(report_index) = target.report_index {
+            let provider = &report.providers[report_index];
+            let section = provider_section(target.marketed, provider, config.meter_mode);
+            overview_row(
+                &section,
+                provider,
+                report,
+                index == selected,
+                width as usize,
+                target.account_number,
+            )
+        } else {
+            readiness_row(
+                target.marketed,
                 &ProviderReadiness::Unsupported,
                 index == selected,
                 width as usize,
-            ),
+                None,
+            )
         });
     }
     rows
@@ -649,14 +715,14 @@ fn overview_evidence_rows(
     width: u16,
 ) -> Vec<SemanticRow> {
     let model = visible_model(report, config);
-    let marketed = visible_marketed(config);
-    let selected = marketed
+    let targets = visible_targets(report, config);
+    let selected = targets
         .get(
             config
                 .selected_provider
-                .min(marketed.len().saturating_sub(1)),
+                .min(targets.len().saturating_sub(1)),
         )
-        .copied();
+        .map(|target| target.marketed);
     let trustworthy: Vec<_> = model
         .providers
         .iter()
@@ -673,6 +739,15 @@ fn overview_evidence_rows(
     let mut rows = Vec::new();
     for section in &model.providers {
         if selected == Some(section.provider) || decision_provider == Some(section.provider) {
+            continue;
+        }
+        if report
+            .providers
+            .iter()
+            .filter(|provider| provider_id(provider) == Some(section.provider))
+            .count()
+            > 1
+        {
             continue;
         }
         let Some(provider) = report
@@ -828,43 +903,269 @@ fn trend_row(
     })
 }
 
+fn take_cells(value: &str, width: usize) -> String {
+    let mut shown = String::new();
+    let mut cells = 0;
+    for character in value.chars() {
+        let next = UnicodeWidthChar::width(character).unwrap_or(0);
+        if cells + next > width {
+            break;
+        }
+        shown.push(character);
+        cells += next;
+    }
+    shown
+}
+
+fn take_cells_from_end(value: &str, width: usize) -> String {
+    let mut shown = Vec::new();
+    let mut cells = 0;
+    for character in value.chars().rev() {
+        let next = UnicodeWidthChar::width(character).unwrap_or(0);
+        if cells + next > width {
+            break;
+        }
+        shown.push(character);
+        cells += next;
+    }
+    shown.into_iter().rev().collect()
+}
+
+fn elide_middle(value: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(value) <= width {
+        return value.to_owned();
+    }
+    if width <= 1 {
+        return "…".chars().take(width).collect();
+    }
+    let left = (width - 1) / 2;
+    let right = width - 1 - left;
+    format!(
+        "{}…{}",
+        take_cells(value, left),
+        take_cells_from_end(value, right)
+    )
+}
+
+fn account_heading(provider: &ProviderQuota, index: usize, count: usize, width: usize) -> String {
+    let number = index + 1;
+    let fallback = format!("Account {number}");
+    let Some(label) = provider.account_label.as_deref() else {
+        return format!("  {fallback}");
+    };
+    let prefix = if count > 1 {
+        format!("  {fallback} · ")
+    } else {
+        format!(
+            "> {} · ",
+            compact_provider_name(provider_id(provider).unwrap())
+        )
+    };
+    let budget = width.saturating_sub(UnicodeWidthStr::width(prefix.as_str()));
+    format!("{prefix}{}", elide_middle(label, budget))
+}
+
+fn account_tier_rows(
+    section: &crate::ui::model::ProviderSection,
+    current: bool,
+    width: usize,
+    nested: bool,
+) -> Vec<SemanticRow> {
+    let indent = if nested { "   " } else { " " };
+    match &section.detail {
+        ProviderDetail::Recovery { instruction } => vec![SemanticRow {
+            text: fitting(
+                [
+                    format!("{indent}? {instruction}"),
+                    format!("{indent}? sign in"),
+                ],
+                width,
+            ),
+            style: RowStyle::Warning,
+        }],
+        ProviderDetail::Message { message } => vec![SemanticRow {
+            text: fitting(
+                [
+                    format!("{indent}? {message}"),
+                    format!("{indent}? unavailable"),
+                ],
+                width,
+            ),
+            style: RowStyle::Warning,
+        }],
+        ProviderDetail::Tiers(tiers) => {
+            let mut rows = Vec::new();
+            for tier in tiers {
+                let critical = tier.percent_remaining.is_some_and(|value| value <= 10.0);
+                let missing = tier.resets_at.is_none();
+                let marker = if critical {
+                    '!'
+                } else if missing {
+                    '?'
+                } else {
+                    ' '
+                };
+                let label_source = if width >= 30 {
+                    &tier.label
+                } else {
+                    &tier.compact_label
+                };
+                let label_budget = if width >= 30 { 13 } else { 9 };
+                let label = elide_middle(label_source, label_budget);
+                let remaining = percent(tier.percent_remaining);
+                let status = if current { "" } else { " last" };
+                let usage = format!("{indent}{marker}{label} {remaining}{status}");
+                let reset = tier
+                    .resets_at
+                    .as_deref()
+                    .and_then(|value| moment(Some(value), width <= 23))
+                    .unwrap_or_else(|| "unavailable".into());
+                let combined = format!("{usage} · reset {reset}");
+                let style = if critical {
+                    RowStyle::Critical
+                } else if missing {
+                    RowStyle::Warning
+                } else {
+                    RowStyle::Normal
+                };
+                if width >= 30 && UnicodeWidthStr::width(combined.as_str()) <= width {
+                    rows.push(SemanticRow {
+                        text: combined,
+                        style,
+                    });
+                } else {
+                    rows.push(SemanticRow {
+                        text: fitting(
+                            [usage, format!("{indent}{marker}{remaining}{status}")],
+                            width,
+                        ),
+                        style,
+                    });
+                    rows.push(SemanticRow {
+                        text: fitting(
+                            [
+                                format!("{indent}reset {reset}"),
+                                format!("{indent}reset unavailable"),
+                            ],
+                            width,
+                        ),
+                        style: if missing {
+                            RowStyle::Warning
+                        } else {
+                            RowStyle::Normal
+                        },
+                    });
+                }
+            }
+            rows
+        }
+    }
+}
+
+fn account_detail_rows(
+    report: &QuotaReport,
+    history: Option<&HistoryDocument>,
+    config: &DashboardConfig,
+    target: VisibleTarget,
+    provider: &ProviderQuota,
+    account_count: usize,
+    width: usize,
+) -> Vec<SemanticRow> {
+    let selected = target.marketed;
+    let account_index = target.account_number.unwrap_or(1) - 1;
+    let multiple = account_count > 1;
+    let mut rows = Vec::new();
+    if multiple {
+        rows.push(SemanticRow {
+            text: format!("> {}", selected.label()),
+            style: RowStyle::Heading,
+        });
+    }
+    let section = provider_section(selected, provider, config.meter_mode);
+    if !multiple && has_decision_safe_quota(report, &section, provider) {
+        rows.extend(trend_row(history, selected, width));
+    }
+    let annotation = section.annotation.as_ref().map(|value| value.text);
+    let mut heading = account_heading(provider, account_index, account_count, width);
+    if let Some(annotation) = annotation {
+        heading = fitting(
+            [
+                format!("{heading} · {annotation}"),
+                heading,
+                format!(
+                    "  Account {} · {}",
+                    account_index + 1,
+                    compact_annotation(annotation)
+                ),
+            ],
+            width,
+        );
+    }
+    rows.push(SemanticRow {
+        text: heading,
+        style: if annotation.is_some() {
+            RowStyle::Warning
+        } else {
+            RowStyle::Heading
+        },
+    });
+    rows.extend(account_tier_rows(
+        &section,
+        has_current_quota(provider),
+        width,
+        multiple,
+    ));
+    rows
+}
+
 fn detail_rows_with_history(
     report: &QuotaReport,
     history: Option<&HistoryDocument>,
     config: &DashboardConfig,
     width: u16,
 ) -> Vec<SemanticRow> {
-    let model = visible_model(report, config);
-    let marketed = visible_marketed(config);
-    let Some(selected) = marketed
+    let targets = visible_targets(report, config);
+    let Some(target) = targets
         .get(
             config
                 .selected_provider
-                .min(marketed.len().saturating_sub(1)),
+                .min(targets.len().saturating_sub(1)),
         )
         .copied()
     else {
         return Vec::new();
     };
-    let Some(section) = model
-        .providers
-        .iter()
-        .find(|section| section.provider == selected)
-    else {
+    let selected = target.marketed;
+    let Some(report_index) = target.report_index else {
         return vec![readiness_row(
             selected,
             &ProviderReadiness::Unsupported,
             true,
             width as usize,
+            None,
         )];
     };
+    let provider = &report.providers[report_index];
+    let account_count = report
+        .providers
+        .iter()
+        .filter(|provider| provider_id(provider) == Some(selected))
+        .count();
+    if account_count > 1 || provider.account_reported {
+        return account_detail_rows(
+            report,
+            history,
+            config,
+            target,
+            provider,
+            account_count,
+            width as usize,
+        );
+    }
+    let section = provider_section(selected, provider, config.meter_mode);
     let mut rows = Vec::new();
     {
-        let current = report
-            .providers
-            .iter()
-            .find(|provider| provider_id(provider) == Some(section.provider))
-            .is_some_and(has_current_quota);
+        let current = has_current_quota(provider);
         let annotation = section.annotation.as_ref().map(|value| value.text);
         rows.push(SemanticRow {
             text: annotation
@@ -888,12 +1189,7 @@ fn detail_rows_with_history(
                 RowStyle::Heading
             },
         });
-        if report
-            .providers
-            .iter()
-            .find(|provider| provider_id(provider) == Some(section.provider))
-            .is_some_and(|provider| has_decision_safe_quota(report, section, provider))
-        {
+        if has_decision_safe_quota(report, &section, provider) {
             rows.extend(trend_row(history, section.provider, width as usize));
         }
         match &section.detail {
@@ -1082,19 +1378,20 @@ fn decision_constraint<'a>(
 }
 
 fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (String, RowStyle) {
-    let model = visible_model(report, config);
     let marketed = visible_marketed(config);
-    let visible: Vec<_> = model
+    let visible = report
         .providers
         .iter()
-        .filter_map(|section| {
-            report
-                .providers
-                .iter()
-                .find(|provider| provider_id(provider) == Some(section.provider))
-                .map(|provider| (section, provider))
+        .filter_map(|provider| {
+            let provider_kind = provider_id(provider)?;
+            marketed.contains(&provider_kind).then(|| {
+                (
+                    provider_section(provider_kind, provider, config.meter_mode),
+                    provider,
+                )
+            })
         })
-        .collect();
+        .collect::<Vec<_>>();
     if marketed.is_empty() {
         return ("? No providers shown".into(), RowStyle::Warning);
     }
@@ -1438,17 +1735,17 @@ fn render_frame(
         }
     };
     let title = if config.view == DashboardView::Details {
-        let marketed = visible_marketed(config);
-        marketed
+        let targets = visible_targets(report_value, config);
+        targets
             .get(
                 config
                     .selected_provider
-                    .min(marketed.len().saturating_sub(1)),
+                    .min(targets.len().saturating_sub(1)),
             )
-            .map(|provider| {
+            .map(|target| {
                 fitting(
                     [
-                        format!("Herdr Quota · {}", compact_provider_name(*provider)),
+                        format!("Herdr Quota · {}", compact_provider_name(target.marketed)),
                         "Herdr Quota".into(),
                     ],
                     width,
@@ -1935,6 +2232,8 @@ mod tests {
     fn provider(id: &str, remaining: Option<f64>, status: ProviderStatus) -> ProviderQuota {
         ProviderQuota {
             provider: id.into(),
+            account_label: None,
+            account_reported: false,
             label: Some(id.into()),
             source: None,
             plan: None,
@@ -3326,6 +3625,115 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("18pp"))
         );
+    }
+
+    #[test]
+    fn multi_account_overview_rows_are_individually_navigable() {
+        let report = crate::domain::schema::parse_quota_response(include_str!(
+            "../../../../test/fixtures/multi-account.json"
+        ))
+        .expect("multi-account fixture must adapt");
+        let mut config = DashboardConfig::default();
+        let count = visible_provider_count(&report, &config);
+
+        assert_eq!(count, 8, "three Claude accounts plus five provider rows");
+        for width in [20, 24, 36] {
+            let overview = render_lines(&report, width, 12, &config).join("\n");
+            assert!(overview.contains("Claude A1"), "{width}: {overview}");
+            assert!(overview.contains("Claude A2"), "{width}: {overview}");
+            assert!(overview.contains("Claude A3"), "{width}: {overview}");
+        }
+
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Down, count),
+            InputAction::None
+        );
+        assert_eq!(config.selected_provider, 1);
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Enter, count),
+            InputAction::None
+        );
+        assert_eq!(config.view, DashboardView::Details);
+        let detail = render_lines(&report, 36, 12, &config).join("\n");
+        assert!(detail.contains("Account 2 · Research Team"), "{detail}");
+        assert!(detail.contains("Week   8% · reset 09/05 18:00"), "{detail}");
+        assert!(detail.contains("Opus week  55%"), "{detail}");
+        assert!(detail.contains("reset 09/07 09:15"), "{detail}");
+        assert!(!detail.contains("Account 1"));
+        assert!(!detail.contains("Account 3"));
+    }
+
+    #[test]
+    fn account_details_keep_each_reset_explicit_and_private_at_narrow_sizes() {
+        let report = crate::domain::schema::parse_quota_response(include_str!(
+            "../../../../test/fixtures/multi-account.json"
+        ))
+        .expect("multi-account fixture must adapt");
+        for width in [20, 24, 36] {
+            let first = DashboardConfig {
+                view: DashboardView::Details,
+                selected_provider: 0,
+                ..DashboardConfig::default()
+            };
+            let first = render_lines(&report, width, 12, &first).join("\n");
+            assert!(first.contains("Account 1"), "{width}: {first}");
+            if width == 36 {
+                assert!(first.contains("p•••@example.com"), "{width}: {first}");
+            } else {
+                assert!(first.contains('…'), "{width}: {first}");
+            }
+            assert!(first.contains("reset unavailable"), "{width}: {first}");
+
+            let third = DashboardConfig {
+                view: DashboardView::Details,
+                selected_provider: 2,
+                ..DashboardConfig::default()
+            };
+            let third = render_lines(&report, width, 12, &third).join("\n");
+            assert!(third.contains("Account 3"), "{width}: {third}");
+            assert!(third.contains("reset unavailable"), "{width}: {third}");
+            for secret in [
+                "opaque-account-secret",
+                "sk-secret",
+                "/Users/private",
+                "credential",
+                "refreshToken",
+                "token-secret",
+                "primary.user@example.com",
+            ] {
+                assert!(!first.contains(secret), "{width}: leaked {secret}");
+                assert!(!third.contains(secret), "{width}: leaked {secret}");
+            }
+            assert!(
+                first
+                    .lines()
+                    .all(|line| UnicodeWidthStr::width(line) <= width as usize)
+            );
+            assert!(
+                third
+                    .lines()
+                    .all(|line| UnicodeWidthStr::width(line) <= width as usize)
+            );
+        }
+
+        let mut anonymous_single = report.clone();
+        anonymous_single
+            .providers
+            .retain(|provider| provider.provider != "claude");
+        anonymous_single
+            .providers
+            .insert(0, report.providers[2].clone());
+        let detail = render_lines(
+            &anonymous_single,
+            24,
+            12,
+            &DashboardConfig {
+                view: DashboardView::Details,
+                ..DashboardConfig::default()
+            },
+        )
+        .join("\n");
+        assert!(detail.contains("Account 1"), "{detail}");
     }
 
     #[test]

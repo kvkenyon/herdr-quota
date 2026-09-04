@@ -492,6 +492,14 @@ pub fn normalize_history_snapshot(
     let mut providers = report
         .providers
         .iter()
+        .filter(|provider| {
+            report
+                .providers
+                .iter()
+                .filter(|candidate| candidate.provider.eq_ignore_ascii_case(&provider.provider))
+                .count()
+                == 1
+        })
         .filter_map(normalize_provider)
         .collect::<Vec<_>>();
     providers.sort_by_key(|provider| provider.provider.order());
@@ -812,6 +820,8 @@ mod tests {
     fn provider(id: &str, status: ProviderStatus) -> ProviderQuota {
         ProviderQuota {
             provider: id.to_owned(),
+            account_label: None,
+            account_reported: false,
             label: Some("private@example.com".to_owned()),
             source: Some("/private/token".to_owned()),
             plan: Some("Bearer secret".to_owned()),
@@ -939,6 +949,22 @@ mod tests {
         assert!(
             normalize_history_snapshot(&unusable, history_time("2026-09-02T12:00:00.000Z"))
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn multi_account_provider_facts_are_not_conflated_in_provider_history() {
+        let mut first = provider("claude", ProviderStatus::Fresh);
+        first.account_reported = true;
+        let mut second = first.clone();
+        second.effective[0].effective_percent_remaining = Some(12.0);
+
+        assert_eq!(
+            normalize_history_snapshot(
+                &report(vec![first, second]),
+                history_time("2026-09-02T12:00:00.000Z")
+            ),
+            None
         );
     }
 

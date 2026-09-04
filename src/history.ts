@@ -478,6 +478,14 @@ export function normalizeHistorySnapshot(
 ): HistorySnapshot | undefined {
   if (!Number.isFinite(now.getTime())) return undefined;
   const providers = report.providers
+    .filter(
+      (provider) =>
+        report.providers.filter(
+          (candidate) =>
+            candidate.provider.toLowerCase() ===
+            provider.provider.toLowerCase(),
+        ).length === 1,
+    )
     .map(normalizeProvider)
     .filter((provider): provider is HistoryProviderSnapshot => !!provider)
     .toSorted(

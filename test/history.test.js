@@ -24,6 +24,12 @@ const timelineFixture = JSON.parse(
 const completeFixture = JSON.parse(
   await readFile(new URL("fixtures/complete.json", import.meta.url), "utf8"),
 );
+const multiAccountFixture = JSON.parse(
+  await readFile(
+    new URL("fixtures/multi-account.json", import.meta.url),
+    "utf8",
+  ),
+);
 const historyV1Fixture = await readFile(
   new URL("fixtures/history-v1.json", import.meta.url),
   "utf8",
@@ -150,6 +156,16 @@ test("normalizes only the finite privacy allow-list", () => {
       "provider",
     ]);
   }
+});
+
+test("does not conflate account windows in provider-keyed history", () => {
+  assert.equal(
+    normalizeHistorySnapshot(
+      adaptQuotaResponse(multiAccountFixture),
+      new Date("2026-09-04T12:00:00Z"),
+    )?.providers.some((provider) => provider.provider === "Claude"),
+    false,
+  );
 });
 
 test("stale, auth, error, and unknown-only reports cannot create snapshots", () => {

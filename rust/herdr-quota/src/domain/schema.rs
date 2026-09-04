@@ -9,7 +9,7 @@ use super::provider::{
     PaceStatus, ProjectionConfidence, ProviderQuota, ProviderState, ProviderStatus, QuotaWindow,
     Runway, RunwayStatus, SemanticsStatus, WindowPace,
 };
-use crate::sanitize::sanitize_display_text;
+use crate::sanitize::{sanitize_display_text, sanitize_process_error};
 
 /// The supported quota-axi schema version.
 pub const SCHEMA_VERSION: u8 = 5;
@@ -146,6 +146,27 @@ fn strings(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn masked_email(value: &str) -> Option<String> {
+    let (local, domain) = value.rsplit_once('@')?;
+    if local.is_empty() || domain.is_empty() || domain.contains('@') {
+        return None;
+    }
+    let first = local.chars().next()?;
+    Some(format!("{first}•••@{domain}"))
+}
+
+/// Keep only quota-axi's documented display-only account fields. In
+/// particular, accountId and every unknown account field are discarded.
+fn account_label(value: Option<&Value>) -> Option<String> {
+    let account = value.and_then(object)?;
+    text(account.get("email"))
+        .and_then(|email| masked_email(&email))
+        .or_else(|| {
+            text(account.get("organization"))
+                .filter(|organization| sanitize_process_error(organization) == *organization)
+        })
+}
+
 fn pace_status(value: Option<&str>) -> Option<PaceStatus> {
     match value {
         Some("ahead") => Some(PaceStatus::Ahead),
@@ -260,6 +281,8 @@ fn adapt_effective(value: &Value) -> Option<EffectiveAvailability> {
 fn invalid_provider(label: String) -> ProviderQuota {
     ProviderQuota {
         provider: label.clone(),
+        account_label: None,
+        account_reported: false,
         label: Some(label),
         source: None,
         plan: None,
@@ -347,6 +370,8 @@ fn adapt_provider(value: &Value, index: usize, warnings: &mut Vec<String>) -> Pr
 
     ProviderQuota {
         provider,
+        account_label: account_label(raw.get("account")),
+        account_reported: raw.get("account").and_then(object).is_some(),
         label: text(raw.get("label")),
         source: text(raw.get("source")),
         plan: text(raw.get("plan")),
@@ -671,6 +696,40 @@ mod tests {
 
         assert!(!serialized.contains("secret"));
         assert!(!serialized.contains("Secret"));
+    }
+
+    #[test]
+    fn repeated_provider_accounts_keep_only_safe_presentation_identity() {
+        let report =
+            parse_quota_response(include_str!("../../../../test/fixtures/multi-account.json"))
+                .expect("multi-account fixture must adapt");
+        let claude = report
+            .providers
+            .iter()
+            .filter(|provider| provider.provider == "claude")
+            .collect::<Vec<_>>();
+
+        assert_eq!(claude.len(), 3);
+        assert_eq!(claude[0].account_label.as_deref(), Some("p•••@example.com"));
+        assert_eq!(claude[1].account_label.as_deref(), Some("Research Team"));
+        assert_eq!(claude[2].account_label, None);
+        assert!(claude.iter().all(|provider| provider.account_reported));
+        assert_eq!(claude[0].windows.len(), 2);
+        assert_eq!(claude[1].windows.len(), 2);
+        assert_eq!(claude[2].windows.len(), 1);
+
+        let serialized = serde_json::to_string(&report).expect("safe report must serialize");
+        for secret in [
+            "opaque-account-secret",
+            "sk-secret",
+            "credentialPath",
+            "/Users/private",
+            "refreshToken",
+            "token-secret",
+            "primary.user@example.com",
+        ] {
+            assert!(!serialized.contains(secret), "leaked {secret}");
+        }
     }
 
     #[test]

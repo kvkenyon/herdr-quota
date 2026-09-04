@@ -60,6 +60,33 @@ test("36-cell sidebar shows every provider tier without scrolling", async () => 
   for (const line of output.split("\n")) assert.ok(line.length <= 36, line);
 });
 
+test("multi-account sections retain identity, windows, and explicit reset state", async () => {
+  const value = await report("multi-account");
+  const output = render(value, { height: 23 });
+  assert.match(output, /^Claude · p•••@example\.com *$/m);
+  assert.match(output, /^Claude · Research Team *$/m);
+  assert.match(output, /^Claude · Account 3 *$/m);
+  assert.match(output, /^ Session.*72%.*\d+[hd]/m);
+  assert.match(output, /^ Week.*41% n\/a/m);
+  assert.match(output, /^ Week.*8%.*\d+d/m);
+  assert.match(output, /^ Opus week.*55%.*\d+d/m);
+  assert.match(output, /^ Session.*64% n\/a/m);
+  for (const secret of [
+    "opaque-account-secret",
+    "sk-secret",
+    "/Users/private",
+    "credentialPath",
+    "refreshToken",
+    "token-secret",
+    "primary.user@example.com",
+  ])
+    assert.doesNotMatch(output, new RegExp(secret.replaceAll("/", "\\/")));
+
+  const anonymous = structuredClone(value);
+  anonymous.providers = [anonymous.providers[2]];
+  assert.match(render(anonymous), /^Claude · Account 1 *$/m);
+});
+
 test("gauges, percentages, and countdowns share one column across providers", async () => {
   const output = render(await report("complete"));
   const tiers = output

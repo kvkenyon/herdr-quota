@@ -468,8 +468,12 @@ function showsHistory(
   );
 }
 
-function resetCell(row: TierRow, now: Date): string | undefined {
-  if (!row.resetsAt) return undefined;
+function resetCell(
+  row: TierRow,
+  now: Date,
+  explicitUnavailable = false,
+): string | undefined {
+  if (!row.resetsAt) return explicitUnavailable ? "n/a" : undefined;
   const seconds = (Date.parse(row.resetsAt) - now.getTime()) / 1000;
   return Number.isFinite(seconds) ? compactCountdown(seconds) : undefined;
 }
@@ -562,7 +566,12 @@ function conclusionTone(row: TierRow, alert: boolean): Tone {
     : "yellow";
 }
 
-function tierLine(row: TierRow, columns: TierColumns, layout: Layout): string {
+function tierLine(
+  row: TierRow,
+  columns: TierColumns,
+  layout: Layout,
+  explicitReset = false,
+): string {
   const label = truncate(
     labelFor(row, columns.labelWidth),
     columns.labelWidth,
@@ -581,7 +590,7 @@ function tierLine(row: TierRow, columns: TierColumns, layout: Layout): string {
   const head = `${" ".repeat(INDENT)}${styledLabel} ${barCell(row, columns, layout)}${styledPercent}`;
 
   const { texts, alert } = conclusionCandidates(row.conclusion, layout.now);
-  const reset = resetCell(row, layout.now);
+  const reset = resetCell(row, layout.now, explicitReset);
 
   // A tier with no reset countdown gives that column back to its conclusion,
   // so a real figure is shown where a placeholder dash would otherwise sit.
@@ -607,8 +616,18 @@ function tierLine(row: TierRow, columns: TierColumns, layout: Layout): string {
   return `${base}${colorize(SEPARATOR, "dim", layout.color)}${colorize(pace, conclusionTone(row, alert), layout.color)}`;
 }
 
-function headerLine(provider: ProviderQuota, layout: Layout): string {
-  const name = displayName(provider);
+function headerLine(
+  provider: ProviderQuota,
+  layout: Layout,
+  accountIndex?: number,
+): string {
+  const account =
+    accountIndex === undefined
+      ? undefined
+      : (provider.accountLabel ?? `Account ${accountIndex + 1}`);
+  const name = account
+    ? `${displayName(provider)} · ${account}`
+    : displayName(provider);
   const annotation = providerAnnotation(provider);
   if (!annotation) {
     return colorize(truncate(name, layout.width), "bold", layout.color);
@@ -625,8 +644,9 @@ function sectionLines(
   presentation: ProviderPresentation,
   columns: TierColumns,
   layout: Layout,
+  accountIndex?: number,
 ): string[] {
-  const lines = [headerLine(provider, layout)];
+  const lines = [headerLine(provider, layout, accountIndex)];
   if (presentation.kind === "recovery") {
     lines.push(
       `${" ".repeat(INDENT)}${truncate(presentation.instruction, layout.width - INDENT)}`,
@@ -637,7 +657,7 @@ function sectionLines(
     );
   } else {
     for (const row of presentation.rows)
-      lines.push(tierLine(row, columns, layout));
+      lines.push(tierLine(row, columns, layout, accountIndex !== undefined));
   }
   return lines;
 }
@@ -846,9 +866,27 @@ function contentLines(
     ),
     layout.width,
   );
-  const detailSections = sections.map((section) =>
-    sectionLines(section.provider, section.presentation, columns, layout),
-  );
+  const counts = new Map<string, number>();
+  for (const section of sections)
+    counts.set(
+      section.provider.provider,
+      (counts.get(section.provider.provider) ?? 0) + 1,
+    );
+  const seen = new Map<string, number>();
+  const detailSections = sections.map((section) => {
+    const id = section.provider.provider;
+    const count = counts.get(id) ?? 1;
+    const index = seen.get(id) ?? 0;
+    seen.set(id, index + 1);
+    const accountAware = count > 1 || section.provider.accountReported === true;
+    return sectionLines(
+      section.provider,
+      section.presentation,
+      columns,
+      layout,
+      accountAware ? index : undefined,
+    );
+  });
   const detail = detailSections.flat();
   const attention = attentionLine(state, layout);
   const failure = failureLine(state, layout);

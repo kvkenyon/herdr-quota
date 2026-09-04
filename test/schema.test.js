@@ -40,6 +40,35 @@ test("preserves unknown window and tier ids inside allowed providers", async () 
   assert.equal(kimi.windows[2].label, "daily boost");
 });
 
+test("keeps repeated provider accounts with only safe presentation identity", async () => {
+  const report = adaptQuotaResponse(await fixture("multi-account"));
+  const claude = report.providers.filter(
+    (provider) => provider.provider === "claude",
+  );
+  assert.equal(claude.length, 3);
+  assert.deepEqual(
+    claude.map((provider) => provider.accountLabel),
+    ["p•••@example.com", "Research Team", undefined],
+  );
+  assert.ok(claude.every((provider) => provider.accountReported === true));
+  assert.deepEqual(
+    claude.map((provider) => provider.windows.map((window) => window.id)),
+    [["five_hour", "seven_day"], ["seven_day", "model:opus"], ["five_hour"]],
+  );
+
+  const safe = JSON.stringify(report);
+  for (const secret of [
+    "opaque-account-secret",
+    "sk-secret",
+    "credentialPath",
+    "/Users/private",
+    "refreshToken",
+    "token-secret",
+    "primary.user@example.com",
+  ])
+    assert.doesNotMatch(safe, new RegExp(secret.replaceAll("/", "\\/")));
+});
+
 test("isolates malformed providers instead of dropping healthy siblings", async () => {
   const raw = await fixture("partial-failure");
   raw.providers[1] = { provider: "cursor", windows: "not-an-array", state: {} };
