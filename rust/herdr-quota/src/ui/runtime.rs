@@ -40,6 +40,7 @@ use crate::ui::{
         self, PreferenceAction, PreferenceCommand, PreferenceFocus, PreferenceNotice,
         PreferencesState,
     },
+    readiness::{ProviderReadiness, provider_readiness},
     render::{
         DashboardConfig, DashboardStatus, DashboardView, InputAction, clamp_scroll, draw_dashboard,
         handle_key, visible_provider_count,
@@ -784,6 +785,7 @@ fn draw<W: io::Write>(
             frame.render_widget(
                 Paragraph::new(preference_lines(
                     preferences,
+                    state.app.report.as_ref(),
                     frame.area().width,
                     frame.area().height,
                 )),
@@ -823,6 +825,7 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
             SettingsMeterMode::Used => MeterMode::Used,
         },
         interactive: true,
+        first_run: state.settings_availability == SettingsAvailability::FirstRun,
         transition_count: state.transitions.events.len(),
         status: dashboard_status(&state.app),
         retry_minutes: retry_minutes(&state.app),
@@ -841,7 +844,12 @@ fn display_history(
     matches_report.then(|| history.current().cloned()).flatten()
 }
 
-fn preference_lines(state: &PreferencesState, width: u16, height: u16) -> Vec<Line<'static>> {
+fn preference_lines(
+    state: &PreferencesState,
+    report: Option<&QuotaReport>,
+    width: u16,
+    height: u16,
+) -> Vec<Line<'static>> {
     let dirty = if preferences::settings_changed(state) {
         " *"
     } else {
@@ -881,10 +889,7 @@ fn preference_lines(state: &PreferencesState, width: u16, height: u16) -> Vec<Li
     let order = preferences::focus_order(&state.draft);
     let mut rows = order
         .iter()
-        .map(|focus| {
-            let marker = if *focus == state.focus { ">" } else { " " };
-            format!("{marker} {}", preference_label(*focus, &state.draft, width))
-        })
+        .map(|focus| preference_row(*focus, state, report, width))
         .collect::<Vec<_>>();
     let body = usize::from(height).saturating_sub(3).max(1);
     let focus = order
@@ -919,29 +924,69 @@ fn preference_lines(state: &PreferencesState, width: u16, height: u16) -> Vec<Li
         .collect()
 }
 
+fn first_fitting(candidates: impl IntoIterator<Item = String>, width: u16) -> String {
+    candidates
+        .into_iter()
+        .find(|candidate| UnicodeWidthStr::width(candidate.as_str()) <= usize::from(width))
+        .unwrap_or_default()
+}
+
+fn preference_row(
+    focus: PreferenceFocus,
+    state: &PreferencesState,
+    report: Option<&QuotaReport>,
+    width: u16,
+) -> String {
+    let selected = focus == state.focus;
+    let marker = if selected { '>' } else { ' ' };
+    let PreferenceFocus::Provider(provider) = focus else {
+        return format!(
+            "{marker} {}",
+            preference_label(focus, &state.draft, width.saturating_sub(2))
+        );
+    };
+    let marketed = marketed(provider);
+    let readiness = report
+        .map(|report| provider_readiness(report, marketed).text())
+        .unwrap_or_else(|| ProviderReadiness::QuotaUnavailable.text());
+    let visible = !state.draft.hidden_providers.contains(&provider);
+    let check = if visible { 'x' } else { ' ' };
+    let full = marketed.label();
+    let compact = match provider {
+        SupportedProvider::Codex => "Codex",
+        SupportedProvider::Copilot => "GitHub",
+        _ => full,
+    };
+    let boundary = match provider {
+        SupportedProvider::Claude => "C",
+        SupportedProvider::Codex => "O",
+        SupportedProvider::Cursor => "U",
+        SupportedProvider::Kimi => "K",
+        SupportedProvider::Grok => "G",
+        SupportedProvider::Copilot => "H",
+    };
+    let visibility_marker = if visible { 'x' } else { '-' };
+    let candidates = if width <= 20 {
+        vec![
+            format!("{visibility_marker}{compact} {readiness}"),
+            format!("{visibility_marker}{boundary} {readiness}"),
+            format!("{visibility_marker}{boundary}"),
+        ]
+    } else {
+        vec![
+            format!("{marker} [{check}] {full} · {readiness}"),
+            format!("{marker} [{check}] {compact} {readiness}"),
+            format!("{visibility_marker}{compact} {readiness}"),
+            format!("{visibility_marker}{boundary} {readiness}"),
+            format!("{visibility_marker}{boundary}"),
+        ]
+    };
+    first_fitting(candidates, width)
+}
+
 fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings, width: u16) -> String {
     match focus {
-        PreferenceFocus::Provider(provider) => {
-            let full = marketed(provider).label();
-            let compact = match provider {
-                SupportedProvider::Codex => "Codex",
-                SupportedProvider::Copilot => "GitHub",
-                _ => full,
-            };
-            let name = if 6 + UnicodeWidthStr::width(full) <= usize::from(width) {
-                full
-            } else {
-                compact
-            };
-            format!(
-                "[{}] {name}",
-                if settings.hidden_providers.contains(&provider) {
-                    " "
-                } else {
-                    "x"
-                }
-            )
-        }
+        PreferenceFocus::Provider(_) => unreachable!("provider rows include readiness"),
         PreferenceFocus::Meter => format!(
             "Meter: {}",
             match settings.meter_mode {
@@ -1078,7 +1123,7 @@ mod tests {
     fn preference_view_keeps_focused_action_reachable_at_narrow_height() {
         let mut state = preferences::open(&DashboardSettings::default());
         state.focus = PreferenceFocus::ClearTransitions;
-        let text = preference_lines(&state, 36, 8)
+        let text = preference_lines(&state, None, 36, 8)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
@@ -1098,7 +1143,7 @@ mod tests {
         );
         let mut preferences = preferences::open(&DashboardSettings::default());
         preferences.focus = PreferenceFocus::StartupView;
-        let text = preference_lines(&preferences, 36, 12)
+        let text = preference_lines(&preferences, None, 36, 12)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
@@ -1108,7 +1153,7 @@ mod tests {
         for width in 16..=36 {
             for focus in preferences::focus_order(&preferences.draft) {
                 preferences.focus = focus;
-                let lines = preference_lines(&preferences, width, 12);
+                let lines = preference_lines(&preferences, None, width, 12);
                 assert!(
                     lines.iter().all(|line| {
                         UnicodeWidthStr::width(line.to_string().as_str()) <= usize::from(width)
@@ -1130,7 +1175,7 @@ mod tests {
                     ..preferences.clone()
                 },
             ] {
-                let lines = preference_lines(&variant, width, 12);
+                let lines = preference_lines(&variant, None, width, 12);
                 assert!(
                     lines.iter().all(|line| {
                         UnicodeWidthStr::width(line.to_string().as_str()) <= usize::from(width)
@@ -1139,7 +1184,7 @@ mod tests {
                 );
             }
             preferences.focus = PreferenceFocus::StartupView;
-            let lines = preference_lines(&preferences, width, 12);
+            let lines = preference_lines(&preferences, None, width, 12);
             let text = lines
                 .into_iter()
                 .map(|line| line.to_string())
@@ -1147,6 +1192,127 @@ mod tests {
                 .join("\n");
             assert!(text.contains("overview"));
             assert!(!text.contains(" over\n"));
+        }
+    }
+
+    #[test]
+    fn preferences_lists_every_marketed_provider_with_the_same_finite_readiness_cues() {
+        use crate::domain::provider::{ProviderStatus, SemanticsStatus};
+
+        let mut report = crate::domain::schema::parse_quota_response(include_str!(
+            "../../../../test/fixtures/launch.json"
+        ))
+        .expect("sanitized launch fixture");
+        let codex = report
+            .providers
+            .iter_mut()
+            .find(|provider| provider.provider == "codex")
+            .expect("Codex");
+        codex.state.status = ProviderStatus::AuthRequired;
+        codex.state.auth_status = Some("unusable".into());
+        let cursor = report
+            .providers
+            .iter_mut()
+            .find(|provider| provider.provider == "cursor")
+            .expect("Cursor");
+        cursor.state.status = ProviderStatus::Stale;
+        cursor.state.stale = true;
+        cursor.state.refreshed_at = Some("2026-09-03T10:00:00Z".into());
+        let kimi = report
+            .providers
+            .iter_mut()
+            .find(|provider| provider.provider == "kimi")
+            .expect("Kimi");
+        kimi.semantics_status = Some(SemanticsStatus::Partial);
+        let grok = report
+            .providers
+            .iter_mut()
+            .find(|provider| provider.provider == "grok")
+            .expect("Grok");
+        grok.state.status = ProviderStatus::Fresh;
+        grok.state.auth_status = Some("usable".into());
+        grok.semantics_status = Some(SemanticsStatus::Known);
+        report
+            .providers
+            .retain(|provider| provider.provider != "copilot");
+        let mut future = report.providers[0].clone();
+        future.provider = "future-lab".into();
+        report.providers.push(future);
+
+        let mut preferences = preferences::open(&DashboardSettings::default());
+        let cases = [
+            (SupportedProvider::Claude, "Claude", "live"),
+            (SupportedProvider::Codex, "Codex", "auth"),
+            (SupportedProvider::Cursor, "Cursor", "stale 2h"),
+            (SupportedProvider::Kimi, "Kimi", "partial"),
+            (SupportedProvider::Grok, "G", "quota unavailable"),
+            (SupportedProvider::Copilot, "GitHub", "unsupported"),
+        ];
+        for width in [36, 20] {
+            for (provider, name, readiness) in cases {
+                preferences.focus = PreferenceFocus::Provider(provider);
+                let text = preference_lines(&preferences, Some(&report), width, 12)
+                    .into_iter()
+                    .map(|line| line.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(text.contains(name), "{width}: {text}");
+                assert!(text.contains(readiness), "{width}: {text}");
+                assert!(!text.contains("Users"));
+                assert!(!text.contains("account"));
+                assert!(!text.contains("auth.json"));
+                assert!(!text.contains("future-lab"));
+            }
+        }
+    }
+
+    #[test]
+    fn narrow_preferences_preserve_visibility_and_readiness_for_focused_provider() {
+        let mut report = crate::domain::schema::parse_quota_response(include_str!(
+            "../../../../test/fixtures/launch.json"
+        ))
+        .expect("sanitized launch fixture");
+        let grok = report
+            .providers
+            .iter_mut()
+            .find(|provider| provider.provider == "grok")
+            .expect("Grok");
+        grok.state.status = crate::domain::provider::ProviderStatus::Fresh;
+        grok.state.auth_status = Some("usable".into());
+        grok.semantics_status = Some(crate::domain::provider::SemanticsStatus::Known);
+        let mut preferences = preferences::open(&DashboardSettings::default());
+        preferences.focus = PreferenceFocus::Provider(SupportedProvider::Grok);
+
+        let visible = preference_lines(&preferences, Some(&report), 20, 12)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert!(visible.iter().any(|line| line == "xG quota unavailable"));
+        assert!(visible.iter().any(|line| line.starts_with("Item ")));
+
+        preferences
+            .draft
+            .hidden_providers
+            .push(SupportedProvider::Grok);
+        let hidden = preference_lines(&preferences, Some(&report), 20, 12)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert!(hidden.iter().any(|line| line == "-G quota unavailable"));
+    }
+
+    #[test]
+    fn preferences_without_a_report_use_quota_unavailable() {
+        let mut preferences = preferences::open(&DashboardSettings::default());
+        for provider in crate::store::settings::SUPPORTED_PROVIDERS {
+            preferences.focus = PreferenceFocus::Provider(provider);
+            let text = preference_lines(&preferences, None, 20, 12)
+                .into_iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("quota unavailable"), "{provider:?}: {text}");
+            assert!(!text.contains("unsupported"), "{provider:?}: {text}");
         }
     }
 

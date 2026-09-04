@@ -11,8 +11,7 @@ use std::time::{Duration, Instant};
 use herdr_quota::collector::Collector;
 use tempfile::TempDir;
 
-const REPORT: &str =
-    r#"{"generatedAt":"2026-09-02T12:00:00.000Z","schemaVersion":5,"providers":[]}"#;
+const REPORT: &str = include_str!("../../../test/fixtures/launch.json");
 
 #[test]
 fn child_dashboard_process() {
@@ -116,6 +115,45 @@ impl DashboardChild {
             assert!(
                 Instant::now() < deadline,
                 "dashboard evidence did not render: {label}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn checkpoint(&mut self) -> usize {
+        self.drain();
+        self.output.len()
+    }
+
+    fn wait_for_quiet(&mut self, label: &str) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut last_len = self.output.len();
+        let mut quiet_since = Instant::now();
+        loop {
+            self.drain();
+            if self.output.len() != last_len {
+                last_len = self.output.len();
+                quiet_since = Instant::now();
+            }
+            if quiet_since.elapsed() >= Duration::from_millis(100) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "dashboard did not settle before {label}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_for_since(&mut self, label: &str, needle: &[u8], checkpoint: usize) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !contains(&self.output[checkpoint..], needle) {
+            self.drain();
+            assert!(
+                Instant::now() < deadline,
+                "dashboard evidence did not render: {label}; observed={}",
+                String::from_utf8_lossy(&self.output[checkpoint..]).escape_debug()
             );
             thread::sleep(Duration::from_millis(10));
         }
@@ -225,6 +263,7 @@ fn pty_journey_handles_resize_fragmented_escape_modals_refresh_and_quit() {
     let directory = TempDir::new().expect("temporary directory");
     let mut dashboard = DashboardChild::spawn(&directory, 36, 12);
     dashboard.wait_for("terminal enter", b"\x1b[?25l");
+    dashboard.wait_for("first-run readiness", b"4 ready");
     dashboard.send(b"rrr");
     dashboard.wait_for("wide in-place refresh", b"refreshing");
     dashboard.send(b"p");
@@ -234,9 +273,12 @@ fn pty_journey_handles_resize_fragmented_escape_modals_refresh_and_quit() {
     dashboard.send(b"B");
     dashboard.send(b"xn");
     dashboard.send(b"c");
+    dashboard.wait_for_quiet("the narrow refresh");
     dashboard.resize(20, 12);
+    dashboard.wait_for_quiet("capturing the 20-column frame");
+    let narrow_checkpoint = dashboard.checkpoint();
     dashboard.send(b"rrr");
-    dashboard.wait_for("narrow in-place refresh", "↻".as_bytes());
+    dashboard.wait_for_since("narrow in-place refresh", "↻".as_bytes(), narrow_checkpoint);
     dashboard.send(b"pjjjjjjjjjjjj\r");
     thread::sleep(Duration::from_millis(150));
     dashboard.drain();
@@ -246,6 +288,29 @@ fn pty_journey_handles_resize_fragmented_escape_modals_refresh_and_quit() {
     dashboard.send(b"q");
     let output = dashboard.finish(None);
     assert!(contains(&output, b"Preferences"));
+    assert!(contains(&output, b"sign-in"));
+    assert!(contains(&output, b"live"));
+    assert!(contains(&output, b"auth"));
+    assert!(contains(&output, b"enter"));
+}
+
+#[test]
+fn exact_20x12_refresh_marker_uses_the_fixed_activity_slot_without_resize() {
+    let directory = TempDir::new().expect("temporary directory");
+    let mut dashboard = DashboardChild::spawn(&directory, 20, 12);
+    dashboard.wait_for("terminal enter", b"\x1b[?25l");
+    dashboard.wait_for("first-run readiness", b"4 ready");
+    dashboard.wait_for_quiet("the direct 20-column refresh");
+
+    let refresh_checkpoint = dashboard.checkpoint();
+    dashboard.send(b"r");
+    dashboard.wait_for_since(
+        "direct 20-column fixed-slot marker",
+        "↻".as_bytes(),
+        refresh_checkpoint,
+    );
+    dashboard.send(b"q");
+    dashboard.finish(None);
 }
 
 #[test]

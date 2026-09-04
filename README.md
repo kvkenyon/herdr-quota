@@ -6,13 +6,13 @@
 herdr plugin install kvkenyon/herdr-quota --yes
 ```
 
-![AI Quota open in Herdr from the first frame, preserving the limiting provider and exhaustion time while a compact title marker and keyboard footer expose one new opt-in transition cue](docs/readme-demo.gif)
+![Sanitized 36-cell Herdr Quota first screen comparing six providers, showing four ready and two needing sign-in, the next exhaustion consequence, and the keyboard path to details and Preferences](docs/readme-demo.gif)
 
 [![CI](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml/badge.svg)](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kvkenyon/herdr-quota)](https://github.com/kvkenyon/herdr-quota/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A slim, full-height sidebar leads with the known provider tier most likely to block work first, then explains actionable established change before making every trustworthy tier reachable with the allowance still remaining, reset countdown, and pace conclusion. Press `p` to keep only the providers you care about, put their sections in your order, show used instead of remaining percentage, or opt into one-shot capacity and forecast transition cues. It refreshes while it is open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
+A slim, full-height sidebar leads with the known provider tier most likely to block work first. On first run, one line summarizes providers with trustworthy live evidence and those that need sign-in; the roster then keeps all six marketed providers visible as `live`, `stale <age>`, `auth`, `partial`, `quota unavailable`, or `unsupported`. Press Enter for the selected provider's detail, or `p` to choose visibility/order, show used instead of remaining percentage, set the startup view, or opt into one-shot capacity and forecast transition cues. It refreshes while open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
 
 ## Bind `prefix+u`
 
@@ -68,7 +68,7 @@ Remove the `[[keys.command]]` block from `config.toml` and reload configuration 
 
 The sidebar refreshes immediately, then five minutes after each completed attempt without overlapping collectors. A whole-collector failure keeps the last good reading visible and retries after 10, 20, then at most 30 minutes. Pressing `r` preempts the current attempt, refreshes immediately, and resets that backoff; repeated presses while its replacement is running coalesce into that one replacement attempt.
 
-The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then the pace column steps aside while percentages and resets stay. The normal six-provider tier set fits at ordinary terminal height. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, limiting-capacity attention line, position (`Rows 5–8 of 16`), and keyboard footer stay pinned. During collection, `refreshing` (or `↻` in narrow panes) replaces the age in that existing title slot, so provider and detail rows do not shift. Actionable history gets one compact change line when the pane is at least 10 rows tall; at 6 or 8 rows it steps aside entirely for live data. Decorative provider gaps disappear before scrolling is needed and never inflate that row count. The full default footer remains `j/k · PgUp/PgDn · p prefs · r · q/esc`; only a new unacknowledged transition temporarily adds the discoverable `a alert` action and a compact `!` title marker, without adding a content row or replacing the limiting answer.
+The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then secondary reset/pace evidence steps aside while provider/state tokens remain whole. The normal six-provider roster fits at 36x12 and 20x12. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, consequence-only attention line, first-run readiness slot, detail position (`Rows 5–8 of 16`), and keyboard footer stay pinned. During collection, `refreshing` (or `↻` in narrow panes) replaces the age in the existing title slot, so provider and detail rows do not shift. Actionable history gets one compact change line when space remains; it steps aside before the live decision, readiness, provider, tier, or control text. Decorative gaps disappear before scrolling is needed and never inflate that row count. The overview footer exposes `enter details` and `p` immediately; the full navigation legend remains `j/k · PgUp/PgDn · p prefs · r · q/esc` where space permits. Only a new unacknowledged transition temporarily adds the discoverable `a alert` action and a compact `!` title marker, without adding a content row or replacing the limiting answer.
 
 Essential labels, percentages, resets, history, and state text use the terminal's default foreground so they remain legible in Herdr's light and dark themes. Bold weight is reserved for titles, provider headers, the limiting tier, focus, and severity—not every row. `!`, `=`, `?`, arrows, checkboxes, focus markers, and explicit state words carry all meaning without color; optional color only reinforces them. Unknown readings stay `--` rather than becoming a misleading zero.
 
@@ -78,7 +78,22 @@ The committed validation sheets exercise the real ANSI renderer against Herdr's 
 
 Press `p` inside the pane. Use `j`/`k` or Up/Down to move focus, Space or Enter to show/hide a provider, `u`/`d` to move a visible provider, and Left/Right or Space to change the meter or transition controls. `Capacity cue` cycles through `off`, `25%`, `10%`, and `5%`; `Forecast cue` independently turns the established forecast before reset policy on or off. Press `s` to save or `c`/Escape to cancel without changing the live dashboard. `x` opens reset confirmation; `y` resets the draft to all providers in the original order with remaining meters and transition cues off, but an explicit save is still required. `Clear transition history` has its own `y` confirmation and never deletes quota history or provider settings. The focused row and every action remain reachable in 20/24/36-column panes, including short heights.
 
-Provider order changes provider sections only. Attention still selects the most restrictive visible evidence using the established safety semantics. Hidden providers disappear from detail, attention, and the change line. The compact hidden count includes only marketed providers that are genuinely not rendered for a non-user-disabled reason; a visibly rendered unavailable card is not counted, unsupported providers remain filtered at the schema boundary, and a deliberate Preferences choice is not relabeled as hidden. If all six are hidden, the pane says `No providers shown` and gives the exact recovery instruction `Press p for Preferences` (compact `Press p for prefs` at 20 columns); it never claims that everything is on pace.
+Every marketed provider stays in the Preferences list even when it was not returned by the current collector. Each row repeats the same finite readiness cue as the roster, so a visibility choice cannot be confused with sign-in, stale evidence, partial coverage, unavailable quota, or unsupported collection. Preferences never show account names, IDs, credential paths, source-store names, or raw provider errors.
+
+### Reading readiness and provenance
+
+| Copy                | Meaning                                                                  |
+| ------------------- | ------------------------------------------------------------------------ |
+| `live`              | Current provider quota with known semantics is available.                |
+| `stale <age>`       | A last-known reading is shown, with bounded age from normalized times.   |
+| `auth`              | The provider needs sign-in; detail gives its finite recovery command.    |
+| `partial`           | Some current provider quota or tier relationship is not safely known.    |
+| `quota unavailable` | Provider access is usable or failed without a trustworthy quota value.   |
+| `unsupported`       | The current normalized collection did not return that marketed provider. |
+
+Only trustworthy `live` evidence contributes to the first-run ready count or drives the attention line, spare evidence, and detail trend. `auth` contributes to sign-in; stale, partial, quota-unavailable, and unsupported rows remain visible instead of inflating either number or driving a quota decision. The schema does not distinguish an authoritative local estimate, so the UI does not claim one.
+
+Provider order changes provider sections only. Attention still selects the most restrictive visible evidence using the established safety semantics. Hidden providers disappear from detail, attention, and the change line. Non-marketed provider records are omitted from the overview and Preferences without a hidden-count badge; unavailable and unsupported marketed providers keep their explicit readiness rows. If all six marketed providers are hidden, the pane says `No providers shown` and gives the exact recovery instruction `Press p for Preferences` (compact `Press p for prefs` at 20 columns); it never claims that everything is on pace.
 
 ### Transition cues
 

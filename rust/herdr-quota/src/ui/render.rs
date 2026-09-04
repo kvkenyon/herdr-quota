@@ -31,6 +31,7 @@ use crate::store::settings::StartupView;
 use crate::ui::{
     bar::MeterMode,
     model::{ProviderDetail, ProviderVisibility, ProviderVisibilityMap, dashboard_model},
+    readiness::{ProviderReadiness, decision_grade, provider_readiness, readiness_line},
 };
 
 /// The finite dashboard surface currently shown in the terminal.
@@ -58,6 +59,8 @@ pub struct DashboardConfig {
     pub meter_mode: MeterMode,
     /// Whether controls that require the live runtime may be advertised.
     pub interactive: bool,
+    /// Whether the compact provider-readiness summary belongs on this launch frame.
+    pub first_run: bool,
     /// Number of in-pane transition cues available for review.
     pub transition_count: usize,
     /// Current bounded collector state, when visible.
@@ -86,6 +89,7 @@ impl Default for DashboardConfig {
             provider_order: Vec::new(),
             meter_mode: MeterMode::Remaining,
             interactive: false,
+            first_run: false,
             transition_count: 0,
             status: None,
             retry_minutes: None,
@@ -164,19 +168,6 @@ fn has_trustworthy_quota(provider: &ProviderQuota) -> bool {
         && provider.effective.iter().any(decision_grade)
 }
 
-fn decision_grade(effective: &EffectiveAvailability) -> bool {
-    effective.status == EffectiveStatus::Known
-        && (effective.effective_percent_remaining.is_some()
-            || effective
-                .runway
-                .as_ref()
-                .is_some_and(|runway| runway.status != RunwayStatus::Unknown)
-            || effective
-                .pace
-                .as_ref()
-                .is_some_and(|pace| pace.status != PaceStatus::Unknown))
-}
-
 fn limiting_window_id(effective: &EffectiveAvailability) -> Option<&str> {
     effective
         .runway
@@ -216,19 +207,21 @@ fn gauge(value: Option<f64>, cells: usize) -> String {
     )
 }
 
-fn hidden_unavailable_count(report: &QuotaReport, config: &DashboardConfig) -> usize {
-    let report_ids: BTreeSet<_> = report
-        .providers
-        .iter()
-        .filter_map(provider_id)
-        .map(MarketedProvider::id)
-        .collect();
-    MarketedProvider::ALL
-        .iter()
-        .filter(|provider| {
-            !config.user_hidden.contains(provider.id()) && !report_ids.contains(provider.id())
-        })
-        .count()
+fn visible_marketed(config: &DashboardConfig) -> Vec<MarketedProvider> {
+    let mut providers = MarketedProvider::ALL
+        .into_iter()
+        .filter(|provider| !config.user_hidden.contains(provider.id()))
+        .collect::<Vec<_>>();
+    if !config.provider_order.is_empty() {
+        providers.sort_by_key(|provider| {
+            config
+                .provider_order
+                .iter()
+                .position(|id| id == provider.id())
+                .unwrap_or(usize::MAX)
+        });
+    }
+    providers
 }
 
 fn visible_model(
@@ -254,8 +247,8 @@ fn visible_model(
     model
 }
 
-pub(super) fn visible_provider_count(report: &QuotaReport, config: &DashboardConfig) -> usize {
-    visible_model(report, config).providers.len()
+pub(super) fn visible_provider_count(_report: &QuotaReport, config: &DashboardConfig) -> usize {
+    visible_marketed(config).len()
 }
 
 fn compact_provider_name(provider: MarketedProvider) -> &'static str {
@@ -271,6 +264,17 @@ fn narrow_provider_name(provider: MarketedProvider) -> &'static str {
         "GitHub"
     } else {
         compact_provider_name(provider)
+    }
+}
+
+fn boundary_provider_name(provider: MarketedProvider) -> &'static str {
+    match provider {
+        MarketedProvider::Claude => "C",
+        MarketedProvider::Codex => "O",
+        MarketedProvider::Cursor => "U",
+        MarketedProvider::Kimi => "K",
+        MarketedProvider::Grok => "G",
+        MarketedProvider::Copilot => "H",
     }
 }
 
@@ -417,18 +421,52 @@ fn hidden_sibling_unsafe(
 }
 
 fn has_decision_safe_quota(
+    report: &QuotaReport,
     section: &crate::ui::model::ProviderSection,
     provider: &ProviderQuota,
 ) -> bool {
-    has_trustworthy_quota(provider) && !hidden_sibling_unsafe(section, provider)
+    provider_readiness(report, section.provider) == ProviderReadiness::Live
+        && has_trustworthy_quota(provider)
+        && !hidden_sibling_unsafe(section, provider)
+}
+
+fn readiness_row(
+    provider: MarketedProvider,
+    readiness: &ProviderReadiness,
+    selected: bool,
+    width: usize,
+) -> SemanticRow {
+    let state = readiness.text();
+    let cursor = if selected { '>' } else { ' ' };
+    let compact = compact_provider_name(provider);
+    let narrow = narrow_provider_name(provider);
+    let marker = if selected { '>' } else { '?' };
+    let text = fitting(
+        [
+            format!("{cursor}?{compact} · {state}"),
+            format!("{cursor}?{compact} {state}"),
+            format!("{cursor}?{narrow} {state}"),
+            format!("{marker}{} {state}", boundary_provider_name(provider)),
+        ],
+        width,
+    );
+    SemanticRow {
+        text,
+        style: RowStyle::Warning,
+    }
 }
 
 fn overview_row(
     section: &crate::ui::model::ProviderSection,
     provider: &ProviderQuota,
+    report: &QuotaReport,
     selected: bool,
     width: usize,
 ) -> SemanticRow {
+    let readiness = provider_readiness(report, section.provider);
+    if readiness != ProviderReadiness::Live {
+        return readiness_row(section.provider, &readiness, selected, width);
+    }
     let current = has_current_quota(provider);
     let annotation = section.annotation.as_ref().map(|value| value.text);
     let tiers = match &section.detail {
@@ -511,20 +549,20 @@ fn overview_row(
     let prefix = format!("{cursor}{marker}{name}");
     let tier = tier.map(str::to_owned);
     let mut candidates = Vec::new();
-    if width >= 24 {
-        if let Some(displayed) = displayed {
-            candidates.push(format!(
-                "{prefix} [{}] {state}{}{}",
-                gauge(Some(displayed), 6),
-                tier.as_deref()
-                    .map(|value| format!(" {value}"))
-                    .unwrap_or_default(),
-                reset
-                    .as_deref()
-                    .map(|value| format!(" {value}"))
-                    .unwrap_or_default(),
-            ));
-        }
+    if width >= 24
+        && let Some(displayed) = displayed
+    {
+        candidates.push(format!(
+            "{prefix} [{}] {state}{}{} · live",
+            gauge(Some(displayed), 6),
+            tier.as_deref()
+                .map(|value| format!(" {value}"))
+                .unwrap_or_default(),
+            reset
+                .as_deref()
+                .map(|value| format!(" {value}"))
+                .unwrap_or_default(),
+        ));
     }
     let text_priority = if width <= 23 {
         [
@@ -543,7 +581,7 @@ fn overview_row(
     };
     for (shown_tier, shown_reset) in text_priority {
         candidates.push(format!(
-            "{prefix} {state}{}{}",
+            "{prefix} {state}{}{} · live",
             shown_tier
                 .map(|value| format!(" {value}"))
                 .unwrap_or_default(),
@@ -552,6 +590,7 @@ fn overview_row(
                 .unwrap_or_default(),
         ));
     }
+    candidates.push(format!("{prefix} {state} live"));
     let text = candidates
         .into_iter()
         .find(|candidate| UnicodeWidthStr::width(candidate.as_str()) <= width)
@@ -576,41 +615,29 @@ fn overview_row(
 fn overview_rows(report: &QuotaReport, config: &DashboardConfig, width: u16) -> Vec<SemanticRow> {
     let model = visible_model(report, config);
     let mut rows = Vec::new();
+    let providers = visible_marketed(config);
     let selected = config
         .selected_provider
-        .min(model.providers.len().saturating_sub(1));
-    for (index, section) in model.providers.iter().enumerate() {
-        let Some(provider) = report
+        .min(providers.len().saturating_sub(1));
+    for (index, marketed) in providers.into_iter().enumerate() {
+        let section = model
             .providers
             .iter()
-            .find(|provider| provider_id(provider) == Some(section.provider))
-        else {
-            continue;
-        };
-        rows.push(overview_row(
-            section,
-            provider,
-            index == selected,
-            width as usize,
-        ));
-    }
-    let hidden_unavailable = hidden_unavailable_count(report, config);
-    if hidden_unavailable > 0 {
-        let noun = if hidden_unavailable == 1 {
-            "provider"
-        } else {
-            "providers"
-        };
-        rows.push(SemanticRow {
-            text: fitting(
-                [
-                    format!("? {hidden_unavailable} unavailable {noun} hidden"),
-                    format!("? {hidden_unavailable} unavailable hidden"),
-                    format!("? {hidden_unavailable} unavailable"),
-                ],
+            .find(|section| section.provider == marketed);
+        let provider = report
+            .providers
+            .iter()
+            .find(|provider| provider_id(provider) == Some(marketed));
+        rows.push(match (section, provider) {
+            (Some(section), Some(provider)) => {
+                overview_row(section, provider, report, index == selected, width as usize)
+            }
+            _ => readiness_row(
+                marketed,
+                &ProviderReadiness::Unsupported,
+                index == selected,
                 width as usize,
             ),
-            style: RowStyle::Warning,
         });
     }
     rows
@@ -622,14 +649,14 @@ fn overview_evidence_rows(
     width: u16,
 ) -> Vec<SemanticRow> {
     let model = visible_model(report, config);
-    let selected = model
-        .providers
+    let marketed = visible_marketed(config);
+    let selected = marketed
         .get(
             config
                 .selected_provider
-                .min(model.providers.len().saturating_sub(1)),
+                .min(marketed.len().saturating_sub(1)),
         )
-        .map(|section| section.provider);
+        .copied();
     let trustworthy: Vec<_> = model
         .providers
         .iter()
@@ -638,7 +665,7 @@ fn overview_evidence_rows(
                 .providers
                 .iter()
                 .find(|provider| provider_id(provider) == Some(section.provider))
-                .filter(|provider| has_decision_safe_quota(section, provider))
+                .filter(|provider| has_decision_safe_quota(report, section, provider))
         })
         .collect();
     let decision_provider =
@@ -655,7 +682,7 @@ fn overview_evidence_rows(
         else {
             continue;
         };
-        if !has_decision_safe_quota(section, provider) {
+        if !has_decision_safe_quota(report, section, provider) {
             continue;
         }
         let Some(effective) = limiting_effective(provider) else {
@@ -808,12 +835,28 @@ fn detail_rows_with_history(
     width: u16,
 ) -> Vec<SemanticRow> {
     let model = visible_model(report, config);
-    let Some(section) = model.providers.get(
-        config
-            .selected_provider
-            .min(model.providers.len().saturating_sub(1)),
-    ) else {
+    let marketed = visible_marketed(config);
+    let Some(selected) = marketed
+        .get(
+            config
+                .selected_provider
+                .min(marketed.len().saturating_sub(1)),
+        )
+        .copied()
+    else {
         return Vec::new();
+    };
+    let Some(section) = model
+        .providers
+        .iter()
+        .find(|section| section.provider == selected)
+    else {
+        return vec![readiness_row(
+            selected,
+            &ProviderReadiness::Unsupported,
+            true,
+            width as usize,
+        )];
     };
     let mut rows = Vec::new();
     {
@@ -849,7 +892,7 @@ fn detail_rows_with_history(
             .providers
             .iter()
             .find(|provider| provider_id(provider) == Some(section.provider))
-            .is_some_and(|provider| has_decision_safe_quota(section, provider))
+            .is_some_and(|provider| has_decision_safe_quota(report, section, provider))
         {
             rows.extend(trend_row(history, section.provider, width as usize));
         }
@@ -1040,6 +1083,7 @@ fn decision_constraint<'a>(
 
 fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (String, RowStyle) {
     let model = visible_model(report, config);
+    let marketed = visible_marketed(config);
     let visible: Vec<_> = model
         .providers
         .iter()
@@ -1051,13 +1095,13 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
                 .map(|provider| (section, provider))
         })
         .collect();
-    if visible.is_empty() {
+    if marketed.is_empty() {
         return ("? No providers shown".into(), RowStyle::Warning);
     }
     let trustworthy: Vec<_> = visible
         .iter()
         .filter_map(|(section, provider)| {
-            has_decision_safe_quota(section, provider).then_some(*provider)
+            has_decision_safe_quota(report, section, provider).then_some(*provider)
         })
         .collect();
     if let Some((provider, effective)) = decision_constraint(&trustworthy) {
@@ -1133,10 +1177,20 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
             RowStyle::Warning,
         );
     }
-    if visible
+    let readiness = marketed
         .iter()
-        .any(|(_, provider)| !has_current_quota(provider))
-    {
+        .map(|provider| provider_readiness(report, *provider))
+        .filter(|state| !matches!(state, ProviderReadiness::Unsupported))
+        .collect::<Vec<_>>();
+    if readiness.iter().any(|state| {
+        matches!(
+            state,
+            ProviderReadiness::Auth
+                | ProviderReadiness::Stale(_)
+                | ProviderReadiness::QuotaUnavailable
+                | ProviderReadiness::Unsupported
+        )
+    }) {
         return (
             fitting(
                 ["? Limits non-current".into(), "? Non-current".into()],
@@ -1145,9 +1199,12 @@ fn attention(report: &QuotaReport, config: &DashboardConfig, width: usize) -> (S
             RowStyle::Warning,
         );
     }
-    if visible
+    if readiness
         .iter()
-        .any(|(section, provider)| !has_decision_safe_quota(section, provider))
+        .any(|state| matches!(state, ProviderReadiness::Partial))
+        || visible
+            .iter()
+            .any(|(section, provider)| !has_decision_safe_quota(report, section, provider))
     {
         return (
             fitting(
@@ -1381,18 +1438,17 @@ fn render_frame(
         }
     };
     let title = if config.view == DashboardView::Details {
-        let model = visible_model(report_value, config);
-        model
-            .providers
+        let marketed = visible_marketed(config);
+        marketed
             .get(
                 config
                     .selected_provider
-                    .min(model.providers.len().saturating_sub(1)),
+                    .min(marketed.len().saturating_sub(1)),
             )
-            .map(|section| {
+            .map(|provider| {
                 fitting(
                     [
-                        format!("Herdr Quota · {}", compact_provider_name(section.provider)),
+                        format!("Herdr Quota · {}", compact_provider_name(*provider)),
                         "Herdr Quota".into(),
                     ],
                     width,
@@ -1424,7 +1480,10 @@ fn render_frame(
         (DashboardView::TransitionReview, false, _) => "a/enter ack · esc",
         (DashboardView::Preferences, _, _) => unreachable!("handled above"),
     };
-    let body_start = if config.view == DashboardView::Details && height >= 5 {
+    let show_readiness = config.first_run && !no_report && config.view == DashboardView::Overview;
+    let body_start = if show_readiness {
+        3.min(height)
+    } else if config.view == DashboardView::Details && height >= 5 {
         3
     } else {
         2.min(height)
@@ -1432,15 +1491,15 @@ fn render_frame(
     let footer = height.saturating_sub(1);
     let body_end = footer.max(body_start);
     let viewport = body_end.saturating_sub(body_start);
-    if config.view == DashboardView::Overview {
-        if let Some(report) = report {
-            let spare = viewport.saturating_sub(rows.len());
-            rows.extend(
-                overview_evidence_rows(report, config, width as u16)
-                    .into_iter()
-                    .take(spare),
-            );
-        }
+    if config.view == DashboardView::Overview
+        && let Some(report) = report
+    {
+        let spare = viewport.saturating_sub(rows.len());
+        rows.extend(
+            overview_evidence_rows(report, config, width as u16)
+                .into_iter()
+                .take(spare),
+        );
     }
     let scroll = if config.view == DashboardView::Overview {
         config
@@ -1466,6 +1525,12 @@ fn render_frame(
         output[1] = SemanticRow {
             text: frame_text(&attention, width),
             style: attention_style,
+        };
+    }
+    if show_readiness && height > 2 {
+        output[2] = SemanticRow {
+            text: frame_text(&readiness_line(report_value), width),
+            style: RowStyle::Heading,
         };
     }
     if height > 2 && config.view == DashboardView::Details {
@@ -2017,7 +2082,7 @@ mod tests {
         assert_eq!(first[1], later[1]);
         assert_eq!(first[11], later[11]);
         assert!(first[2].starts_with(">!Claude"));
-        assert!(later[3].starts_with(">?Codex ? partial"));
+        assert!(later[3].contains("Codex · partial"));
     }
 
     #[test]
@@ -2038,12 +2103,12 @@ mod tests {
     }
 
     #[test]
-    fn includes_required_text_markers_and_unknown_is_not_zero() {
+    fn includes_required_text_markers_and_valueless_quota_is_unavailable() {
         let report = report(vec![provider("claude", None, ProviderStatus::Fresh)]);
         let output = render_lines(&report, 36, 12, &DashboardConfig::default()).join("\n");
         assert!(output.contains("Herdr Quota"));
-        assert!(output.contains("? Quota data partial"));
-        assert!(output.contains("? unknown"));
+        assert!(output.contains("? Limits non-current"));
+        assert!(output.contains("Claude · quota unavailable"));
         assert!(output.contains("j/k · enter details · p · q"));
     }
 
@@ -2053,8 +2118,14 @@ mod tests {
         assert!(
             lines
                 .iter()
-                .any(|line| line.trim_end() == "? No providers shown")
+                .any(|line| line.contains("Claude · unsupported"))
         );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Copilot · unsupported"))
+        );
+        assert!(lines.iter().all(|line| !line.contains("providers hidden")));
         assert!(lines.iter().all(|line| !line.contains("prefs")));
         assert!(lines.iter().all(|line| !line.contains("Press p")));
     }
@@ -2223,7 +2294,7 @@ mod tests {
             );
             let lines = reachable_lines(&report, columns, rows, &plain);
             assert!(lines.iter().any(|line| line.starts_with(">!Claude")));
-            assert!(lines.iter().any(|line| line.starts_with(" ?Cursor")));
+            assert!(lines.iter().any(|line| line.contains("quota unavailable")));
             let buffer = render_buffer(&report, columns, rows, &plain);
             assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
             assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
@@ -2291,7 +2362,11 @@ mod tests {
                 );
                 let lines = reachable_lines(&report, columns, rows, &plain);
                 assert_eq!(lines[1].trim_end(), "? Limits non-current");
-                assert!(lines.iter().any(|line| line.starts_with(">?")));
+                assert!(lines.iter().any(|line| {
+                    line.contains("auth")
+                        || line.contains("stale")
+                        || line.contains("quota unavailable")
+                }));
                 assert!(lines.iter().all(|line| !line.starts_with(">!")));
                 let buffer = render_buffer(&report, columns, rows, &plain);
                 assert!(buffer.content.iter().all(|cell| cell.fg == Color::Reset));
@@ -2327,11 +2402,7 @@ mod tests {
                 };
                 let lines = reachable_lines(&auth_report, columns, rows, &plain);
                 assert_eq!(lines[1].trim_end(), "? Limits non-current");
-                assert!(
-                    lines
-                        .iter()
-                        .any(|line| { line.starts_with(">?Codex signed out") })
-                );
+                assert!(lines.iter().any(|line| line.contains("Codex · auth")));
                 assert!(lines.iter().all(|line| !line.starts_with(">!")));
                 assert_eq!(
                     render_lines(&auth_report, columns, rows, &plain),
@@ -2393,6 +2464,36 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn keychain_unavailable_provider_cannot_drive_decisions_or_history() {
+        let mut keychain = provider("claude", Some(40.0), ProviderStatus::Fresh);
+        keychain.state.reason = Some("keychain_access_required".into());
+        keychain.windows[0].resets_at = Some("2026-09-05T12:00:00Z".into());
+        let runway = keychain.effective[0].runway.as_mut().unwrap();
+        runway.status = RunwayStatus::ProjectedExhaustion;
+        runway.projected_exhausted_at = Some("2026-09-03T12:00:00Z".into());
+        runway.projection_confidence = Some(ProjectionConfidence::Established);
+        let available = provider("kimi", Some(80.0), ProviderStatus::Fresh);
+        let report = report(vec![keychain, available]);
+
+        let overview = DashboardConfig {
+            selected_provider: 3,
+            ..DashboardConfig::default()
+        };
+        let lines = render_lines(&report, 36, 12, &overview);
+        assert_eq!(lines[1].trim_end(), "? Limits non-current");
+        assert!(overview_evidence_rows(&report, &overview, 36).is_empty());
+
+        let details =
+            render_lines_with_history(&report, Some(&trend_history()), 36, 12, &detail_config());
+        assert!(
+            details
+                .iter()
+                .any(|line| line.contains("Keychain approval"))
+        );
+        assert!(details.iter().all(|line| !line.contains("18pp")));
     }
 
     #[test]
@@ -2505,7 +2606,15 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("--")));
 
         let signed_out = provider("copilot", Some(50.0), ProviderStatus::AuthRequired);
-        let lines = render_lines(&report(vec![signed_out]), 16, 12, &details);
+        let lines = render_lines(
+            &report(vec![signed_out]),
+            16,
+            12,
+            &DashboardConfig {
+                selected_provider: 5,
+                ..details.clone()
+            },
+        );
         assert!(lines.iter().any(|line| line.trim() == "? sign in"));
 
         let mut approval = provider("claude", Some(50.0), ProviderStatus::Fresh);
@@ -2548,6 +2657,7 @@ mod tests {
                 12,
                 &DashboardConfig {
                     view: DashboardView::Details,
+                    selected_provider: if expected.contains("GitHub") { 5 } else { 0 },
                     ..DashboardConfig::default()
                 },
             );
@@ -2592,10 +2702,10 @@ mod tests {
         };
 
         for (report, expected) in [
-            (no_windows, "? Quota data partial"),
+            (no_windows, "? Limits non-current"),
             (unknown_semantics, "? Quota data partial"),
             (partial_semantics, "? Quota data partial"),
-            (incomplete_siblings, "? Quota data partial"),
+            (incomplete_siblings, "? Limits non-current"),
             (codex_with_unreported_sibling, "? Quota data partial"),
             (codex_projected, "? Quota data partial"),
             (with_pace(PaceStatus::Ahead), "? Pace needs review"),
@@ -2625,7 +2735,7 @@ mod tests {
     }
 
     #[test]
-    fn hidden_summary_only_counts_nonrendered_non_user_hidden_providers() {
+    fn marketed_roster_omits_non_marketed_records_without_a_hidden_badge() {
         let partial_report = report(vec![
             provider("claude", Some(50.0), ProviderStatus::Fresh),
             provider("codex", Some(50.0), ProviderStatus::Unavailable),
@@ -2643,8 +2753,9 @@ mod tests {
         )
         .join("\n");
         assert!(output.contains(">=Claude") || output.contains(">?Claude"));
-        assert!(output.contains(" ?Codex unavailable"));
-        assert!(output.contains("3 unavailable providers hidden"));
+        assert!(output.contains("Codex · quota unavailable"));
+        assert!(output.contains("Grok · unsupported"));
+        assert!(!output.contains("unavailable providers hidden"));
         let complete = report(
             MarketedProvider::ALL
                 .iter()
@@ -2665,8 +2776,15 @@ mod tests {
             &DashboardConfig::default(),
         )
         .join("\n");
-        assert!(output.contains(">?Claude unavailable"));
+        assert!(output.contains(">?Claude · quota unavailable"));
         assert!(!output.contains("unavailable provider"));
+
+        let mut future = provider("future-lab", Some(50.0), ProviderStatus::Fresh);
+        future.provider = "future-lab".into();
+        let output =
+            render_lines(&report(vec![future]), 36, 23, &DashboardConfig::default()).join("\n");
+        assert!(!output.contains("future-lab"));
+        assert!(!output.contains("provider hidden"));
     }
 
     #[test]
@@ -2675,7 +2793,15 @@ mod tests {
         codex.label = Some("collector label".into());
         codex.windows[0].id = "weekly".into();
         codex.windows[0].label = "collector weekly label".into();
-        let lines = render_lines(&report(vec![codex]), 36, 23, &detail_config());
+        let lines = render_lines(
+            &report(vec![codex]),
+            36,
+            23,
+            &DashboardConfig {
+                selected_provider: 1,
+                ..detail_config()
+            },
+        );
         assert!(lines.iter().any(|line| line.starts_with("> OpenAI Codex")));
         assert!(lines.iter().any(|line| line.starts_with("  Week")));
         assert!(
@@ -2689,7 +2815,15 @@ mod tests {
             Some(50.0),
             ProviderStatus::Unavailable,
         )]);
-        let lines = render_lines(&unavailable, 36, 23, &detail_config());
+        let lines = render_lines(
+            &unavailable,
+            36,
+            23,
+            &DashboardConfig {
+                selected_provider: 1,
+                ..detail_config()
+            },
+        );
         assert!(
             lines
                 .iter()
@@ -2740,9 +2874,11 @@ mod tests {
         assert_eq!(lines[0].trim_end(), "Herdr Quota");
         assert!(lines[1].starts_with("? Quota data partial"));
         assert!(lines[2].starts_with(">=Claude"));
-        assert!(lines[3].starts_with(" ?Codex ? partial"));
+        assert!(lines[3].contains("Codex · partial"));
         assert!(lines[4].starts_with(" =Cursor"));
         assert!(lines[5].starts_with(" =Kimi"));
+        assert!(lines[6].contains("Grok · unsupported"));
+        assert!(lines[7].contains("Copilot · unsupported"));
         assert_eq!(lines[11].trim_end(), "j/k · enter details · p · q");
     }
 
@@ -2762,7 +2898,7 @@ mod tests {
         kimi.windows[0].resets_at = Some("2026-09-06T12:00:00Z".into());
         let report = report(vec![claude, kimi]);
         let config = DashboardConfig {
-            selected_provider: 1,
+            selected_provider: 3,
             ..DashboardConfig::default()
         };
 
@@ -2770,9 +2906,9 @@ mod tests {
 
         assert!(lines[1].contains("out 09/03 12:00"), "{lines:?}");
         assert!(lines[2].starts_with(" !Claude"), "{lines:?}");
-        assert!(lines[3].starts_with(">=Kimi"), "{lines:?}");
+        assert!(lines[5].starts_with(">=Kimi"), "{lines:?}");
         assert!(
-            lines[4..11]
+            lines[8..11]
                 .iter()
                 .all(|line| !line.contains("Claude") && !line.contains("Kimi")),
             "{lines:?}"
@@ -2800,6 +2936,73 @@ mod tests {
     }
 
     #[test]
+    fn first_run_launch_frame_keeps_decision_readiness_roster_and_controls_at_36_and_20() {
+        let report = crate::domain::schema::parse_quota_response(include_str!(
+            "../../../../test/fixtures/launch.json"
+        ))
+        .expect("sanitized launch fixture");
+        let config = DashboardConfig {
+            first_run: true,
+            ..DashboardConfig::default()
+        };
+
+        for width in [36, 20] {
+            let lines = render_lines(&report, width, 12, &config);
+            assert_eq!(lines[0].trim_end(), "Herdr Quota");
+            assert!(lines[1].starts_with("! out "));
+            assert!(!lines[1].contains("Claude"));
+            assert_eq!(lines[2].trim_end(), "4 ready · 2 sign-in");
+            let roster = lines[3..9].join("\n");
+            for provider in ["Claude", "Codex", "Cursor", "Kimi", "Grok", "Copilot"] {
+                assert!(
+                    roster.contains(provider),
+                    "{width}: missing {provider} in {roster:?}"
+                );
+            }
+            assert_eq!(roster.matches("live").count(), 4);
+            assert_eq!(roster.matches("auth").count(), 2);
+            assert!(lines[11].contains("enter"));
+            assert!(lines[11].contains('p'));
+            assert!(
+                lines
+                    .iter()
+                    .all(|line| UnicodeWidthStr::width(line.as_str()) == usize::from(width))
+            );
+            for clipped in ["unavail", "unsupport", "parti", "stal"] {
+                assert!(lines.iter().all(|line| !line.trim_end().ends_with(clipped)));
+            }
+        }
+    }
+
+    #[test]
+    fn narrow_readiness_rows_keep_whole_finite_state_tokens() {
+        let mut report = crate::domain::schema::parse_quota_response(include_str!(
+            "../../../../test/fixtures/launch.json"
+        ))
+        .expect("sanitized launch fixture");
+        let grok = report
+            .providers
+            .iter_mut()
+            .find(|provider| provider.provider == "grok")
+            .expect("Grok fixture");
+        grok.state.status = ProviderStatus::Fresh;
+        grok.state.auth_status = Some("usable".into());
+        grok.semantics_status = Some(SemanticsStatus::Known);
+        let lines = render_lines(&report, 20, 12, &DashboardConfig::default());
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.trim_end() == "?G quota unavailable")
+        );
+        assert!(lines.iter().any(|line| line.contains("Copilot · auth")));
+        assert!(
+            lines
+                .iter()
+                .all(|line| !line.trim_end().ends_with("unavailab"))
+        );
+    }
+
+    #[test]
     fn overview_evidence_excludes_selected_and_decision_providers() {
         let mut claude = provider("claude", Some(40.0), ProviderStatus::Fresh);
         claude.windows[0].resets_at = Some("2026-09-05T12:00:00Z".into());
@@ -2815,7 +3018,7 @@ mod tests {
         kimi.windows[0].resets_at = Some("2026-09-06T12:00:00Z".into());
         let report = report(vec![claude, kimi]);
         let config = DashboardConfig {
-            selected_provider: 1,
+            selected_provider: 3,
             ..DashboardConfig::default()
         };
 
@@ -2823,9 +3026,9 @@ mod tests {
 
         assert!(lines[1].contains("out 09/03 12:00"), "{lines:?}");
         assert!(lines[2].starts_with(" !Claude"), "{lines:?}");
-        assert!(lines[3].starts_with(">=Kimi"), "{lines:?}");
+        assert!(lines[5].starts_with(">=Kimi"), "{lines:?}");
         assert!(
-            lines[4..11]
+            lines[8..11]
                 .iter()
                 .all(|line| !line.contains("Claude") && !line.contains("Kimi")),
             "{lines:?}"
@@ -2845,8 +3048,8 @@ mod tests {
             &DashboardConfig::default(),
         );
 
-        assert!(lines.iter().any(|line| line.contains("?Codex ? partial")));
-        assert!(lines.iter().any(|line| line.contains("?Cursor ? unknown")));
+        assert!(lines.iter().any(|line| line.contains("?Codex · partial")));
+        assert!(lines.iter().any(|line| line.contains("?Cursor · partial")));
         assert!(lines.iter().all(|line| !line.contains("Cursor 0%")));
     }
 
@@ -2857,13 +3060,36 @@ mod tests {
         let kimi_report = report(vec![kimi]);
 
         for columns in 16..=23 {
-            let lines = render_lines(&kimi_report, columns, 12, &DashboardConfig::default());
-            let row = lines[2].trim_end();
+            let lines = render_lines(
+                &kimi_report,
+                columns,
+                12,
+                &DashboardConfig {
+                    selected_provider: 3,
+                    ..DashboardConfig::default()
+                },
+            );
+            let row = lines
+                .iter()
+                .find(|line| line.contains("Kimi"))
+                .expect("Kimi row")
+                .trim_end();
             assert!(row.starts_with(">=Kimi"), "{columns}: {row:?}");
             assert!(row.contains("50%"), "{columns}: {row:?}");
             assert!(!row.contains('['), "{columns}: {row:?}");
         }
-        let row = render_lines(&kimi_report, 23, 12, &DashboardConfig::default())[2].clone();
+        let row = render_lines(
+            &kimi_report,
+            23,
+            12,
+            &DashboardConfig {
+                selected_provider: 3,
+                ..DashboardConfig::default()
+            },
+        )
+        .into_iter()
+        .find(|line| line.contains("Kimi"))
+        .expect("Kimi row");
         assert!(row.contains("9/2"));
         assert!(!row.contains("09/02"));
 
@@ -2873,13 +3099,13 @@ mod tests {
             12,
             &DashboardConfig::default(),
         );
-        assert_eq!(partial[2].trim_end(), ">Codex? partial");
+        assert!(partial.iter().any(|line| line.contains("Codex partial")));
 
         let mut unknown = provider("cursor", None, ProviderStatus::Fresh);
         unknown.semantics_status = Some(SemanticsStatus::Unknown);
         unknown.effective.clear();
         let unknown = render_lines(&report(vec![unknown]), 16, 12, &DashboardConfig::default());
-        assert_eq!(unknown[2].trim_end(), ">Cursor? unknown");
+        assert!(unknown.iter().any(|line| line.contains("Cursor partial")));
     }
 
     #[test]
@@ -2897,10 +3123,8 @@ mod tests {
         ]);
         let mut config = DashboardConfig::default();
 
-        assert_eq!(handle_key(&mut config, KeyCode::Down, 2), InputAction::None);
-        assert_eq!(config.selected_provider, 1);
         assert_eq!(
-            handle_key(&mut config, KeyCode::Enter, 2),
+            handle_key(&mut config, KeyCode::Enter, MarketedProvider::ALL.len()),
             InputAction::None
         );
         assert_eq!(config.view, DashboardView::Details);
@@ -2908,10 +3132,13 @@ mod tests {
         for label in ["primary", "tier 2", "tier 3", "tier 4"] {
             assert!(details.contains(label), "missing {label:?} in {details:?}");
         }
-        assert_eq!(handle_key(&mut config, KeyCode::Esc, 2), InputAction::None);
+        assert_eq!(
+            handle_key(&mut config, KeyCode::Esc, MarketedProvider::ALL.len()),
+            InputAction::None
+        );
         assert_eq!(config.view, DashboardView::Overview);
-        assert_eq!(config.selected_provider, 1);
-        assert!(render_lines(&report, 20, 12, &config)[3].starts_with(">=Claude"));
+        assert_eq!(config.selected_provider, 0);
+        assert!(render_lines(&report, 20, 12, &config)[2].starts_with(">=Claude"));
     }
 
     #[test]

@@ -1,0 +1,181 @@
+{
+  "generatedAt": "2026-09-03T12:00:00.000Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "claude",
+      "windows": [
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 9,
+          "resetsAt": "2026-09-08T12:00:00.000Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 9,
+            "boundedBy": ["seven_day"],
+            "limitingWindowIds": ["seven_day"],
+            "pace": {
+              "status": "ahead",
+              "worstReserveWindowId": "seven_day"
+            },
+            "runway": {
+              "status": "projected_exhaustion",
+              "projectedExhaustedAt": "2026-09-03T17:00:00.000Z",
+              "limitingWindowId": "seven_day",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-09-03T11:59:58.000Z",
+        "authStatus": "usable"
+      }
+    },
+    {
+      "provider": "codex",
+      "windows": [
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 79,
+          "resetsAt": "2026-09-09T12:00:00.000Z"
+        },
+        {
+          "id": "code_review_weekly",
+          "label": "review week",
+          "kind": "weekly",
+          "percentRemaining": 84,
+          "resetsAt": "2026-09-09T12:00:00.000Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 79,
+            "boundedBy": ["weekly"],
+            "limitingWindowIds": ["weekly"],
+            "pace": { "status": "behind", "worstReserveWindowId": "weekly" },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-09-03T11:59:57.000Z",
+        "authStatus": "usable"
+      }
+    },
+    {
+      "provider": "cursor",
+      "windows": [
+        {
+          "id": "included_usage",
+          "label": "included usage",
+          "kind": "monthly",
+          "percentRemaining": 49,
+          "resetsAt": "2026-09-30T12:00:00.000Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 49,
+            "boundedBy": ["included_usage"],
+            "limitingWindowIds": ["included_usage"],
+            "pace": {
+              "status": "behind",
+              "worstReserveWindowId": "included_usage"
+            },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-09-03T11:59:56.000Z",
+        "authStatus": "usable"
+      }
+    },
+    {
+      "provider": "kimi",
+      "windows": [
+        {
+          "id": "weekly",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 100,
+          "resetsAt": "2026-09-10T12:00:00.000Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 100,
+            "boundedBy": ["weekly"],
+            "limitingWindowIds": ["weekly"],
+            "pace": { "status": "behind", "worstReserveWindowId": "weekly" },
+            "runway": {
+              "status": "through_reset",
+              "projectionConfidence": "established"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "refreshedAt": "2026-09-03T11:59:55.000Z",
+        "authStatus": "usable"
+      }
+    },
+    {
+      "provider": "grok",
+      "windows": [],
+      "quotaSemantics": { "status": "unknown", "effectiveAvailability": [] },
+      "state": {
+        "status": "auth_required",
+        "stale": false,
+        "authStatus": "unusable"
+      }
+    },
+    {
+      "provider": "copilot",
+      "windows": [],
+      "quotaSemantics": { "status": "unknown", "effectiveAvailability": [] },
+      "state": {
+        "status": "auth_required",
+        "stale": false,
+        "authStatus": "unusable"
+      }
+    }
+  ]
+}

@@ -54,12 +54,9 @@ item has separate parts. The later PR is the completion owner.
 | PF-03 Transition-audit file                     | **12**                | Transition store                                   |
 | PF-04 Sidebar coordination file                 | **16**                | Versioned sidebar state                            |
 
-At the FI-10/FI-11 Ratatui renderer seam, explicitly disabled providers are
-excluded from both the hidden-provider summary count and its shared row/scroll
-accounting. Visible unavailable providers retain a textual recovery state and
-do not count as hidden. A marketed provider counts only when it is genuinely
-not rendered for a separate non-user-disabled reason; a zero count renders no
-summary line.
+The post-PR 23 marketed-roster and readiness/provenance contract supersedes the
+earlier FI-10/FI-11 hidden-provider summary. Its authoritative boundary is
+documented in [data-sources.md](data-sources.md#readiness-and-provenance-boundary).
 
 PR 18 is the manifest cutover. It retires all listed items in the released
 product only after the owner PRs are complete and the cutover smoke is
