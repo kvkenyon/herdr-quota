@@ -23,8 +23,9 @@ use crate::store::sidebar_state::SidebarOwnershipGuard;
 use crate::store::{
     history::LocalHistory,
     settings::{
-        DashboardSettings, MeterMode as SettingsMeterMode, RemainingThreshold as SettingsThreshold,
-        SettingsAvailability, SettingsStore, StartupView, SupportedProvider,
+        DashboardSettings, MeterMode as SettingsMeterMode, ProviderIdentityMode,
+        RemainingThreshold as SettingsThreshold, SettingsAvailability, SettingsStore, StartupView,
+        SupportedProvider,
     },
     transitions::{
         self, HistoryDataHealth, HistoryFact, HistoryProjectionConfidence, HistoryProviderSnapshot,
@@ -824,6 +825,8 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
             SettingsMeterMode::Remaining => MeterMode::Remaining,
             SettingsMeterMode::Used => MeterMode::Used,
         },
+        provider_identity: state.settings.provider_identity,
+        logo_glyphs: terminal_logo_glyphs_supported(),
         interactive: true,
         first_run: state.settings_availability == SettingsAvailability::FirstRun,
         transition_count: state.transitions.events.len(),
@@ -835,6 +838,19 @@ fn dashboard_config(state: &RuntimeState) -> DashboardConfig {
         startup_view: state.settings.startup_view,
         ..DashboardConfig::default()
     }
+}
+
+fn terminal_logo_glyphs_supported() -> bool {
+    if std::env::var("TERM").is_ok_and(|term| term == "dumb") {
+        return false;
+    }
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+        .is_none_or(|locale| {
+            let locale = locale.to_ascii_lowercase();
+            locale.contains("utf-8") || locale.contains("utf8")
+        })
 }
 
 fn display_history(
@@ -993,6 +1009,24 @@ fn preference_label(focus: PreferenceFocus, settings: &DashboardSettings, width:
                 SettingsMeterMode::Remaining if width < 18 => "left",
                 SettingsMeterMode::Remaining => "remaining",
                 SettingsMeterMode::Used => "used",
+            }
+        ),
+        PreferenceFocus::ProviderIdentity => format!(
+            "{}: {}",
+            if width >= 30 {
+                "Provider identity"
+            } else if width >= 21 {
+                "Identity"
+            } else {
+                "ID"
+            },
+            match settings.provider_identity {
+                ProviderIdentityMode::LogoOnly if width < 21 => "logo",
+                ProviderIdentityMode::LogoOnly => "logo only",
+                ProviderIdentityMode::LogoAndName if width < 21 => "logo+name",
+                ProviderIdentityMode::LogoAndName => "logo + name",
+                ProviderIdentityMode::NameOnly if width < 21 => "name",
+                ProviderIdentityMode::NameOnly => "name only",
             }
         ),
         PreferenceFocus::StartupView => format!(

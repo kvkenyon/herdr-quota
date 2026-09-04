@@ -1,13 +1,15 @@
 //! Pure reducer for the finite Preferences surface.
 
 use crate::store::settings::{
-    DashboardSettings, MeterMode, RemainingThreshold, StartupView, SupportedProvider,
+    DashboardSettings, MeterMode, ProviderIdentityMode, RemainingThreshold, StartupView,
+    SupportedProvider,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PreferenceFocus {
     Provider(SupportedProvider),
     Meter,
+    ProviderIdentity,
     StartupView,
     Threshold,
     Forecast,
@@ -76,6 +78,7 @@ pub fn focus_order(settings: &DashboardSettings) -> Vec<PreferenceFocus> {
         .map(PreferenceFocus::Provider)
         .chain([
             PreferenceFocus::Meter,
+            PreferenceFocus::ProviderIdentity,
             PreferenceFocus::StartupView,
             PreferenceFocus::Threshold,
             PreferenceFocus::Forecast,
@@ -137,6 +140,19 @@ fn toggle_focused(mut state: PreferencesState, direction: isize) -> PreferencesS
                 MeterMode::Remaining => MeterMode::Used,
                 MeterMode::Used => MeterMode::Remaining,
             };
+        }
+        PreferenceFocus::ProviderIdentity => {
+            const VALUES: [ProviderIdentityMode; 3] = [
+                ProviderIdentityMode::LogoOnly,
+                ProviderIdentityMode::LogoAndName,
+                ProviderIdentityMode::NameOnly,
+            ];
+            let current = VALUES
+                .iter()
+                .position(|value| *value == state.draft.provider_identity)
+                .unwrap_or(1);
+            state.draft.provider_identity =
+                VALUES[(current as isize + direction).rem_euclid(VALUES.len() as isize) as usize];
         }
         PreferenceFocus::StartupView => {
             state.draft.startup_view = match state.draft.startup_view {
@@ -351,6 +367,22 @@ mod tests {
         state = focused(state, PreferenceFocus::Meter);
         state = reduce(state, PreferenceAction::Next, 4).state;
         assert_eq!(state.draft.meter_mode, MeterMode::Used);
+        state = focused(state, PreferenceFocus::ProviderIdentity);
+        state = reduce(state, PreferenceAction::Next, 4).state;
+        assert_eq!(
+            state.draft.provider_identity,
+            ProviderIdentityMode::NameOnly
+        );
+        state = reduce(state, PreferenceAction::Next, 4).state;
+        assert_eq!(
+            state.draft.provider_identity,
+            ProviderIdentityMode::LogoOnly
+        );
+        state = reduce(state, PreferenceAction::Next, 4).state;
+        assert_eq!(
+            state.draft.provider_identity,
+            ProviderIdentityMode::LogoAndName
+        );
         state = focused(state, PreferenceFocus::StartupView);
         state = reduce(state, PreferenceAction::Activate, 4).state;
         assert_eq!(state.draft.startup_view, StartupView::Details);
@@ -398,7 +430,7 @@ mod tests {
         );
         let state = reduce(state, PreferenceAction::PageDown, 6).state;
         assert_eq!(state.focus, PreferenceFocus::Meter);
-        let state = reduce(state, PreferenceAction::PageDown, 5).state;
+        let state = reduce(state, PreferenceAction::PageDown, 6).state;
         assert_eq!(state.focus, PreferenceFocus::Cancel);
         let state = reduce(state, PreferenceAction::FocusDown, 4).state;
         assert_eq!(state.focus, PreferenceFocus::Reset);

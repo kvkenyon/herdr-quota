@@ -1,5 +1,8 @@
 # Changelog
 
+- The default overview now exposes the complete provider → safe account → quota-window hierarchy with exact percentages, honest fractional rails, and reset timestamp/countdown or `reset unavailable`; narrow and short panes scroll the same exhaustive semantic rows.
+- Persisted settings schema v5 adds exactly `logo only`, `logo + name` (default), and `name only` provider identity modes. The live cell renderer uses documented logo-derived Unicode marks with explicit ASCII fallback, while preview SVGs carry accessible text equivalents.
+
 ## 0.4.0 — 2026-09-03
 
 ### Added
