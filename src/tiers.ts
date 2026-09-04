@@ -197,19 +197,6 @@ export function providerTiers(provider: ProviderQuota): TierRow[] {
       limiting: limiting.has(window.id),
     };
   });
-  if (
-    provider.provider.toLowerCase() === "codex" &&
-    provider.windows.length > 0 &&
-    !provider.windows.some((window) => window.id.startsWith("code_review_"))
-  ) {
-    rows.push({
-      id: "code_review",
-      label: "Code review",
-      compactLabel: "Review",
-      conclusion: { kind: "not_reported" },
-      limiting: false,
-    });
-  }
   return rows;
 }
 

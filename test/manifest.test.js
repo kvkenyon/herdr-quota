@@ -103,11 +103,11 @@ test("first-use docs provide the supported binding and reload path", () => {
 });
 
 test("user docs name Preferences, exact navigation, and safe failure states", () => {
-  assert.match(readme, /j\/k · PgUp\/PgDn · p prefs · r · q\/esc/);
+  assert.match(readme, /`j`\/`k` and Page Down\/Page Up/);
   assert.match(readme, /settings\.json/);
   assert.match(readme, /remaining.*used/s);
   assert.match(readme, /0o600|0600/);
-  assert.match(readme, /Rows 5–8 of 16/);
+  assert.match(readme, /scrollable detail/);
   for (const label of [
     "Quota check timed out",
     "quota-axi missing",
@@ -121,5 +121,5 @@ test("user docs name Preferences, exact navigation, and safe failure states", ()
   assert.match(readme, /transitions-v1\.json/);
   assert.match(readme, /25%.*10%.*5%/s);
   assert.match(readme, /forecast before reset/i);
-  assert.match(readme, /a alert/);
+  assert.match(readme, /Review and acknowledge a new transition cue/);
 });

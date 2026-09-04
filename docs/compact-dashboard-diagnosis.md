@@ -1,0 +1,86 @@
+# Compact quota dashboard: diagnosis and verification
+
+Inspected 2026-09-04, starting from `e424ff6405c8b1e7f67e6f661744488c60647688`. The change removes a proven local presentation defect and compacts the shipped Rust dashboard. Collection, credentials, dependencies, and host graphics configuration are unchanged.
+
+## Installed path
+
+The inspected plugin registry reference was `github:kvkenyon/herdr-quota@e424ff6405c8b1e7f67e6f661744488c60647688`. Herdr is **0.8.2**, at `/opt/homebrew/bin/herdr`.
+
+The installed root is `/Users/kevin/.config/herdr/plugins/github/herdr-quota-4863a798075f`. Its manifest uses `sh -c` to exec `$HERDR_PLUGIN_ROOT/target/release/herdr-quota dashboard` (or `sidebar` for the action). A named Herdr lab's process inspection confirmed that exact release executable and its installed working directory.
+
+The Rust collector invokes:
+
+```text
+<installed-root>/node_modules/.bin/quota-axi
+  --json --full --provider claude,codex,cursor,kimi,grok,copilot
+```
+
+That symlink resolves to `<installed-root>/node_modules/quota-axi/dist/bin/quota-axi.js`, **quota-axi 0.1.29**, launched through Node. The collector sets `NO_COLOR=1`, `TERM=dumb`, and the installed working directory; it inherits other environment. The observed dashboard had `HERDR_PLUGIN_ROOT` set to the installed root. `QUOTA_AXI_CODEX_BINARY`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, `KIMI_CODE_HOME`, `CURSOR_STATE_DB`, `CURSOR_CLI_CONFIG`, and `XDG_CACHE_HOME` were unset. Only these allow-listed path overrides were inspected in process-environment output.
+
+The PATH command `/run/current-system/sw/bin/quota-axi` is **0.1.17**, resolved into the Nix firstmate tools package. It is **not** this dashboard's collector. No `npx`, global collector selection, update, or new collector option was introduced.
+
+Installed `--help` lists `quota`, `auth`, `models`; `--provider`, `--json`, `--full`, `--tui`, `--refresh`, `--once`, `--allow-keychain-prompt`, `--intelligence`, and `--sort`. The installed README and compiled `dist/src/providers/{codex,claude,cursor,kimi,grok,copilot}.js`, `cache.js`, and schema-v5 output were inspected before diagnosis. The dashboard uses the existing JSON contract, not the collector's separate TUI.
+
+## Reproduction and causal boundary
+
+Expected: each reported quota window has an honest remaining percentage and reset, while absent entitlements do not imply a failed request. Observed: the rejected screenshot and installed lab dashboard show working Codex Week/Spark windows followed by `Code review unavailable` and `reset unavailable`.
+
+The normal installed collection at **21:28:53 UTC** completed in **0.91 seconds**, exit 0, schema 5. A second collection with a temporary fetch observer produced the same window set. The observer cloned responses and retained only field presence, numeric quota evidence, HTTP status, and boolean account consistency checks. Request credentials, account identifiers, response bodies, and secret environment values were neither logged nor committed. The real installed dashboard reproduced the review row again at approximately 21:36 UTC.
+
+- **Initiating trigger:** adapting a successful Codex response whose `code_review_rate_limit` is null while ordinary quota windows exist.
+- **Masking condition:** a real reported `code_review_*` window prevents the synthetic fallback; ordinary weekly/Spark success makes the surrounding account look healthy. Neither cache nor a failed request was required.
+- **Visible symptom:** an invented review row, a redundant missing-reset row, and false `partial` readiness despite known normalized Codex semantics.
+
+The first meaningful divergence is in herdr-quota's tier presentation, after parsing: quota-axi correctly omits a null review container; `provider_tiers` appended an unreported row, and readiness separately treated the absence as partial. Git blame traces the Rust fallback to `b876b732` (#18), ported from the TypeScript tier design in `1fb8803` (#3). The recent exhaustive UI exposed that older behavior more prominently; it did not cause the missing source field.
+
+**Smallest counterfactual:** using the installed `normalizeCodexUsage`, change only `code_review_rate_limit` from null to a valid weekly window. Output changes from `[weekly]` to `[weekly, code_review_weekly]`, and the original weekly window is byte-equivalent. In the product regression, adding only a real review window yields `Review wk 63%`; the ordinary window remains unchanged.
+
+**Disconfirming check:** if the live source contained a review window that the parser discarded, this diagnosis would be false. The observed HTTP 200 body had `code_review_rate_limit: null`, while its ordinary and named Spark containers carried numeric values and reset timestamps. Both the collector counterfactual and product regression preserve an actual review window. Thus no source-mapping fix or entitlement claim is justified for this account.
+
+## Sanitized field-level matrix
+
+Each provider below had at most one live account record. “Account A” is a per-provider pseudonym, not a claim that the providers share an identity. Percentage changes between observations are expected live usage.
+
+| Expected item                               | Authenticated source field                                                                                    | Raw presence/state                                                                             | quota-axi collection                                       | Product/UI state                                                           | Supported cause                                                                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Codex review, account A                     | OAuth `GET /backend-api/wham/usage`, `code_review_rate_limit`                                                 | HTTP 200; null                                                                                 | No review window; fresh OAuth                              | Parser omits it; old tiers invented unavailable + reset; fixed UI omits it | Local synthetic-row/false-partial defect. Source does not report review; unsupported versus not-entitled cannot be distinguished |
+| Codex account quota                         | Same response, `rate_limit.primary_window`                                                                    | `limit_window_seconds=604800`, `used_percent=60` then 61, numeric reset; secondary absent/null | `weekly`, 40% then 39% remaining                           | Week meter/reset preserved                                                 | Working path. A weekly primary is correctly normalized by duration, not mistaken for a missing 5h session                        |
+| Codex Spark 5h/week                         | `additional_rate_limits[].rate_limit.{primary_window,secondary_window}`                                       | Numeric 18000/604800-second windows, used=0, numeric resets                                    | Two `model:codex_bengalfox:*` windows, 100% remaining      | Separate Spark 5h/Spark wk rows                                            | Working path; no fallback/cache involved                                                                                         |
+| Claude session/week/Fable, account A        | Approved account-scoped Keychain OAuth; `/api/oauth/usage` fixed fields and active `limits[]`                 | HTTP 200 at initial capture; utilization/percent=0, resets null                                | Three fresh windows, 100%, reset absent                    | Known bars; no invented reset; missing-reset explanation in account detail | Source-reported values and missing resets, not a parser zero/default                                                             |
+| Claude extra usage                          | `extra_usage.{is_enabled,utilization,used_credits,monthly_limit,decimal_places}`                              | Enabled, 100%, 50219/50000 minor units, 2 decimals; no reset field                             | `extra_usage`, 0% remaining, $502.19/$500, no reset        | Genuine exhausted meter; no repeated overview reset warning                | Source reports exhaustion but no reset schedule; not unavailable quota                                                           |
+| Cursor included/Auto/third-party, account A | Read-only editor `state.vscdb` auth; DashboardService `GetCurrentPeriodUsage`, `planUsage`, `billingCycleEnd` | HTTP 200; usage buckets and cycle end present                                                  | Fresh API; remaining 50%/59%/2%, same reported cycle reset | Three independent known meters                                             | Working path. “API usage” is the third-party model bucket                                                                        |
+| Kimi                                        | Pi `kimi-coding`; official Kimi Code CLI credential                                                           | Pi missing; CLI credential expired (`kimi_code_cli_credential_expired`)                        | `auth_required`, no windows, both attempts skipped         | One sign-in row; Enter gives recovery                                      | Expired/missing auth sources. No provider usage request or quota mapping failure                                                 |
+| Grok                                        | Grok CLI auth JSON; Pi `xai`                                                                                  | Both missing                                                                                   | `auth_required`, `authStatus=unusable`, no windows         | One sign-in row; Enter gives recovery                                      | Missing auth. No evidence of usable model-only auth or absent consumer entitlement in this reproduction                          |
+| Copilot                                     | Official CLI `apps.json`                                                                                      | Missing                                                                                        | `auth_required`, no windows                                | One sign-in row; Enter gives recovery                                      | Missing auth. Not an upstream quota API failure                                                                                  |
+
+During subsequent live verification, Claude’s usage endpoint returned HTTP 401 and the collector changed to `auth_required` (`Claude sign-in required`) with no windows while the same bundled collector was still in use. This is a later authentication observation, separate from the earlier HTTP-200 snapshot. The committed fixture preserves the earlier sanitized normalized observation; it does not claim Claude remains available. No credential refresh, login/logout, Keychain grant, or auth-file write was performed.
+
+## Account and cache consistency
+
+Codex's actual request bearer and `ChatGPT-Account-Id` matched the selected local auth record (only `true`/`false` results retained). The successful response's display identity is passed directly by quota-axi's normalizer; herdr-quota masks allowed display identity and discards account IDs. Claude's approved Keychain source and profile request succeeded with the same credential; the profile supplied an authoritative ID, used upstream only. Cursor used editor auth; the unused CLI Keychain source remained prompt-gated.
+
+The normalized cache is `~/.cache/quota-axi/quotas.json`, schema 1, private mode. In installed 0.1.29, it is provider-keyed and deliberately drops account identity. A missing cache identity is therefore **not** evidence of an account mismatch. Initial live records had `source=oauth/api`, `status=fresh`, `stale=false`; no cache fallback caused their missing review/reset fields. The installed adapters return one record per provider, while herdr-quota preserves repeated provider/account records and omits those providers from provider-keyed history instead of merging accounts.
+
+**Upstream recommendation, not implemented here:** quota-axi would need account-scoped collection and cache keys bound to a non-secret credential/account fingerprint before guaranteeing multi-account stale routing. In particular, Codex's provider-keyed fallback should validate account consistency and bound/prune stale windows, as its Claude/Kimi adapters already do. No cross-account cache error was reproduced, so this is a documented limitation, not the cause assigned to the observed row. No quota-axi or Herdr source was changed.
+
+## Fetching review
+
+The product boundary tolerates unknown fields, retains unknown window IDs, isolates malformed provider records, and rejects incompatible top-level schemas while preserving the last in-memory report. Missing percentages remain optional. Tests cover valid siblings beside bad providers and repeated account isolation.
+
+The existing collector has a 12-second whole-process deadline, 2 MiB output bound, cancellation fence, child cleanup, completion-relative five-minute refresh, and 10/20/30-minute failure backoff. It never overlaps collectors. The last successful report remains visible with age and failure/retry text; stale provider readings carry `last` and a stale-age label when known. Failed/stale providers retain a pinned issue count even when their row is outside the viewport.
+
+No fetching defect in herdr-quota was reproduced: initial calls took under a second. quota-axi's individual HTTP timeouts can be 15 seconds, longer than the product's total budget; that is a real boundary to investigate if a slow-provider timeout is reproduced, not evidence that it caused the current missing review/reset data. This PR changes no retry/cache/auth semantics.
+
+## Design and evidence
+
+Exact Rust-renderer replays of the same sanitized live capture: [before, 36 cells](compact-dashboard-before.svg), [after, 36 cells](compact-dashboard-replay.svg), and [after, 20 cells](compact-dashboard-narrow.svg). These supplement the installed Herdr terminal reproduction; they do not claim simultaneously live provider values.
+
+The [OpenCode quota reference](https://github.com/slkiser/opencode-quota) was inspected alongside the actual rejected September 4 screenshot. The two-pass design compared a one-line window ledger against the reference's two-line meter cards. The ledger serves the engineering question with less height: named provider, short window label, remaining bar, exact number, inline reset. At 20 cells, the reset/meter may move down; no window label or reading is silently discarded.
+
+The uniqueness review removed generic health badges, a repeated product title, fake logos, one-account counters, and an unattributed forecast. The deliberate visual choice is an aligned quota/reset ledger with ordinary windows quiet and provider headings/critical values emphasized. It inherits the user's terminal monospace font and default foreground. The preview uses the repository's Rosé Pine palette; production does not force a theme or font.
+
+Herdr 0.8.2 exposes `pane.graphics.set/clear/info/stream`, but its `src/app/api/pane_graphics.rs` rejects drawing unless `experimental.kitty_graphics` is enabled; the setting defaults false. The manifest has no stable provider-logo facility. All three saved identity preferences therefore use readable names, with an explicit Preferences fallback label. No genuine logos are claimed; no host switch or upgrade is required.
+
+Self-critique: the captured ten windows plus three secondary providers fit in 18 content/header rows, compared with the old two-line windows and repeated account/status framing. The design preserves working weekly and Spark evidence without a fake review row. Narrow rows keep fractional bars and exact values, but full account labels and dates require detail. Twenty columns cannot show every provider simultaneously; keyboard selection, detail scrolling, and the pinned failure count retain access. Real multi-account behavior could not be reproduced from this collector; that part is covered by sanitized multi-account fixtures and direct PTYs, explicitly not live-account evidence.
+
+Validation includes exact 20/24/36-cell render/PTY coverage, preferences persistence across reopen, remaining versus used semantics, unknown/missing/error/stale distinctions, genuine review preservation, auth explanations, lifecycle restoration, and the repository's full Rust/frontend gates. The default local Rust toolchain lacked Clippy; the already-installed nightly Clippy was used without upgrading any tool. CI runs the repository's pinned Rust 1.88 gate on macOS and Linux.

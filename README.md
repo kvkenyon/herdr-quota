@@ -8,13 +8,13 @@
 herdr plugin install kvkenyon/herdr-quota --yes
 ```
 
-![Sanitized 36-cell Herdr Quota first screen comparing six providers, showing four ready and two needing sign-in, the next exhaustion consequence, and the keyboard path to details and Preferences](docs/readme-demo.gif)
+![Compact 36-cell quota dashboard with provider names, remaining bars, exact percentages, and inline reset timing](docs/dashboard-preview.svg)
 
 [![CI](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml/badge.svg)](https://github.com/kvkenyon/herdr-quota/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kvkenyon/herdr-quota)](https://github.com/kvkenyon/herdr-quota/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A slim, full-height sidebar leads with the known provider tier most likely to block work first. The default overview is exhaustive and scrollable: every marketed provider, every boundary-sanitized account, and every applicable quota window stays visible with an exact percentage, proportional eighth-cell rail, and reset time/countdown or explicit `reset unavailable`. On first run, one line summarizes providers with trustworthy live evidence and those that need sign-in. Press Enter for secondary detail, or `p` to choose visibility/order, provider identity, used instead of remaining percentage, startup view, or one-shot transition cues. It refreshes while open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
+A compact sidebar answers what quota remains and when it resets. Active providers lead with one row per window: a proportional remaining bar, exact percentage, and inline reset countdown. Multiple reported accounts stay separate, with a safe label or numbered fallback only when needed. Providers without quota use one selectable secondary row; Enter opens their explanation. Fetch failures and stale data also keep a pinned issue indicator. Unknown values never become 0% or 100%. Collection remains read-only through the plugin-local `quota-axi`.
 
 ## Bind `prefix+u`
 
@@ -68,17 +68,17 @@ Remove the `[[keys.command]]` block from `config.toml` and reload configuration 
 
 The sidebar refreshes immediately, then five minutes after each completed attempt without overlapping collectors. A whole-collector failure keeps the last good reading visible and retries after 10, 20, then at most 30 minutes. Pressing `r` preempts the current attempt, refreshes immediately, and resets that backoff; repeated presses while its replacement is running coalesce into that one replacement attempt.
 
-The sidebar targets 36 terminal cells on ordinary wide screens and scales down when the tab is narrow: labels compact first, then the gauge gives up its cells, then secondary reset/pace evidence steps aside while provider/state tokens remain whole. The normal six-provider roster fits at 36x12 and 20x12. In shorter panes, `j`/`k` and Page Down/Page Up scroll only whole provider/detail rows. The title and freshness, consequence-only attention line, first-run readiness slot, detail position (`Rows 5–8 of 16`), and keyboard footer stay pinned. During collection, `refreshing` (or `↻` in narrow panes) replaces the age in the existing title slot, so provider and detail rows do not shift. Actionable history gets one compact change line when space remains; it steps aside before the live decision, readiness, provider, tier, or control text. Decorative gaps disappear before scrolling is needed and never inflate that row count. The overview footer exposes `enter details` and `p` immediately; the full navigation legend remains `j/k · PgUp/PgDn · p prefs · r · q/esc` where space permits. Only a new unacknowledged transition temporarily adds the discoverable `a alert` action and a compact `!` title marker, without adding a content row or replacing the limiting answer.
+The sidebar targets 36 terminal cells and supports narrow 20-cell panes. At narrow widths a reset or meter can move beneath its window instead of losing the label or reading. `j`/`k` and Page Down/Page Up select providers/accounts; Enter opens scrollable detail, Escape returns, and `p` opens Preferences. The compact title shows freshness or `refreshing`; a forecast appears only with authoritative evidence and identifies its provider. Healthy status summaries and redundant account headings are omitted. A footer keeps controls and any data-issue count visible while the body scrolls.
 
-Essential labels, percentages, resets, history, and state text use the terminal's default foreground so they remain legible in Herdr's light and dark themes. Bold weight is reserved for titles, provider headers, the limiting tier, focus, and severity—not every row. `!`, `=`, `?`, arrows, checkboxes, focus markers, and explicit state words carry all meaning without color; optional color only reinforces them. Unknown readings stay `--` rather than becoming a misleading zero.
+Essential labels, percentages, resets, history, and state text use the terminal's default foreground so they remain legible in Herdr's light and dark themes. Bold weight is reserved for titles, provider headers, the limiting tier, focus, and severity—not every row. `!`, `=`, `?`, arrows, checkboxes, focus markers, and explicit state words carry all meaning without color; optional color only reinforces them. Unknown readings stay `unknown` with no bar rather than becoming a misleading zero.
 
-The committed validation sheets exercise the real ANSI renderer against Herdr's [light](docs/theme-preview-light.svg) and [dark](docs/theme-preview-dark.svg) Rosé Pine terminal palettes at 20/24/36 columns and normal/short heights; the same matrix also runs in a real PTY and with `NO_COLOR` during `npm run check`.
+The development TypeScript validation sheets exercise its ANSI renderer against Herdr's [light](docs/theme-preview-light.svg) and [dark](docs/theme-preview-dark.svg) Rosé Pine terminal palettes at 20/24/36 columns and normal/short heights; the same matrix also runs in a real PTY and with `NO_COLOR` during `npm run check`.
 
 ### Preferences
 
-Press `p` inside the pane. Use `j`/`k` or Up/Down to move focus, Space or Enter to show/hide a provider, `u`/`d` to move a visible provider, and Left/Right or Space to change the meter, provider identity, or transition controls. Provider identity has exactly three modes: `logo only`, `logo + name` (default), and `name only`. `Capacity cue` cycles through `off`, `25%`, `10%`, and `5%`; `Forecast cue` independently turns the established forecast before reset policy on or off. Press `s` to save or `c`/Escape to cancel without changing the live dashboard. `x` opens reset confirmation; `y` resets the draft to all providers in the original order with logo + name identity, remaining meters, and transition cues off, but an explicit save is still required. `Clear transition history` has its own `y` confirmation and never deletes quota history or provider settings. The focused row and every action remain reachable in 20/24/36-column panes, including short heights.
+Press `p` inside the pane. Use `j`/`k` or Up/Down to move focus, Space or Enter to show/hide a provider, `u`/`d` to move a visible provider, and Left/Right or Space to change the meter, provider identity, or transition controls. Provider identity retains exactly three saved modes: `logo only`, `logo + name` (default), and `name only`. Herdr 0.8.2 exposes pane images only behind experimental graphics, so all three currently render readable names. Preferences marks logo modes as falling back to names; there are no fake glyph logos and no host configuration change. `Capacity cue` cycles through `off`, `25%`, `10%`, and `5%`; `Forecast cue` independently turns the established forecast before reset policy on or off. Press `s` to save or `c`/Escape to cancel without changing the live dashboard. `x` opens reset confirmation; `y` resets the draft to all providers in the original order with logo + name identity, remaining meters, and transition cues off, but an explicit save is still required. `Clear transition history` has its own `y` confirmation and never deletes quota history or provider settings. The focused row and every action remain reachable in 20/24/36-column panes, including short heights.
 
-Every marketed provider stays in the Preferences list even when it was not returned by the current collector. Each row repeats the same finite readiness cue as the roster, so a visibility choice cannot be confused with sign-in, stale evidence, partial coverage, unavailable quota, or unsupported collection. Preferences never show account names, IDs, credential paths, source-store names, or raw provider errors.
+Every marketed provider stays in the Preferences list even when it was not returned by the current collector. Each row includes a finite readiness cue, so a visibility choice cannot be confused with sign-in, stale evidence, partial coverage, unavailable quota, or unsupported collection. Preferences never show account names, IDs, credential paths, source-store names, or raw provider errors.
 
 ### Reading readiness and provenance
 
@@ -91,9 +91,9 @@ Every marketed provider stays in the Preferences list even when it was not retur
 | `quota unavailable` | Provider access is usable or failed without a trustworthy quota value.   |
 | `unsupported`       | The current normalized collection did not return that marketed provider. |
 
-Only trustworthy `live` evidence contributes to the first-run ready count or drives the attention line, spare evidence, and detail trend. `auth` contributes to sign-in; stale, partial, quota-unavailable, and unsupported rows remain visible instead of inflating either number or driving a quota decision. The schema does not distinguish an authoritative local estimate, so the UI does not claim one.
+Only trustworthy `live` evidence drives the attention line and detail trend. Stale, partial, quota-unavailable, and unsupported states stay accessible without driving a quota decision. The schema does not distinguish an authoritative local estimate, so the UI does not claim one.
 
-Provider order changes provider sections only. Attention still selects the most restrictive visible evidence using the established safety semantics. Hidden providers disappear from detail, attention, and the change line. Non-marketed provider records are omitted from the overview and Preferences without a hidden-count badge; unavailable and unsupported marketed providers keep their explicit readiness rows. If all six marketed providers are hidden, the pane says `No providers shown` and gives the exact recovery instruction `Press p for Preferences` (compact `Press p for prefs` at 20 columns); it never claims that everything is on pace.
+Provider order applies within the active and secondary groups. Attention still selects the most restrictive visible evidence using the established safety semantics. Hidden providers disappear from detail, attention, and the change line. Non-marketed provider records are omitted from the overview and Preferences without a hidden-count badge; unavailable and unsupported marketed providers keep their explicit readiness rows. If all six marketed providers are hidden, the pane says `No providers shown` with `p` in the footer; it never claims that everything is on pace.
 
 ### Transition cues
 
@@ -137,32 +137,32 @@ Provider detail can add one compact 6–8-cell trace before its tier rows when r
 
 ### Reading the gauges
 
-By default each window draws the shared fractional rail for what is **still remaining**. Fill is clamped to 0–100 and floored at one-eighth-cell resolution, so rendering never overstates availability; the exact numeric percentage remains adjacent. In Preferences, `used` changes only this presentation: for a known bounded percentage it shows `100 - remaining`. The title adds `· used` so a screenshot and no-color output cannot be misread. Unknown, unavailable, stale, signed-out, error, and non-percentage evidence never turn into zero or 100, and reset, pace, runway, history, and attention calculations continue using the original upstream data.
+Every bar shows **percentage remaining**, floored at one-eighth-cell resolution. The adjacent numeric percentage is exact to two decimal places. In Preferences, `used` changes the number to `100 - remaining`; the title says `Used · bars left` and the row labels its number `used`. Bar direction, resets, pace, runway, history, and attention retain their original meanings.
 
-| Gauge  | Meaning                                                  |
-| ------ | -------------------------------------------------------- |
-| `████` | Exactly 100% in the selected meter mode.                 |
-| `██──` | Half of the selected remaining/used measure.             |
-| `▏───` | Near zero; any positive selected measure keeps a sliver. |
-| `────` | Exactly 0% in the selected meter mode.                   |
-| blank  | No reading. Nothing is drawn, so empty is never implied. |
+| Gauge  | Meaning                                                                     |
+| ------ | --------------------------------------------------------------------------- |
+| `████` | Exactly 100% remaining.                                                     |
+| `██──` | 50% remaining.                                                              |
+| `▏───` | A small amount remains.                                                     |
+| `────` | Zero or less than one eighth-cell of remaining fill; read the exact number. |
+| blank  | Unknown; no quota claim.                                                    |
 
-Gauges are drawn to an eighth of a cell, so tiers a few points apart stay apart on screen. The filled part and percentage use the same presentation mode, and the tier that limits the provider is shown in bold.
+A stale numeric reading is labeled `last`, and its provider retains a data issue. Unavailable and error states cannot manufacture a percentage. Overview resets are omitted when unreported; account detail explains `reset not reported`.
 
 Tier rows follow each provider's own quota model:
 
 - **Claude** - session, week, optional Opus and per-model weekly windows (for example `Fable week`), and extra usage with its spend.
-- **OpenAI Codex** - account session/week windows, per-model windows such as `Spark week`, and code-review windows. When no code-review window is returned, an explicit `Code review -- not reported` row says so instead of pretending review shares the base quota.
+- **OpenAI Codex** - account session/week windows, per-model windows such as `Spark week`, and code-review windows. Only reported review windows appear; a missing review entitlement is not invented or treated as a fetch failure.
 - **Cursor** - `Included`, `Auto`, and `3rd-party models` (Cursor's "API usage" bucket, which meters third-party model calls, not your own API keys).
 - **Kimi** - session, week, and any additional limits Kimi describes, in provider order.
-- **Grok** - `Consumer quota` and any product limits Grok reports. A usable Grok CLI or Pi `xai` login can have no consumer quota reading. The pane says `consumer quota unavailable` in this case.
+- **Grok** - `Consumer quota` and any product limits Grok reports. A usable Grok CLI or Pi `xai` login can have no consumer quota reading. Its secondary row says `not reported`; detail explains `Consumer quota unavailable`.
 - **GitHub Copilot** - Chat, Completions, Premium, and other reported windows. Copilot does not report trusted window relationships. The pane shows each window and does not make a combined quota claim.
 
 Unknown providers are not queried or rendered. The six providers above are part of this product. Pi has no provider card.
 
 ### When a provider is signed out
 
-A provider that needs authentication shows `signed out` and a single recovery command instead of numbers, so an unavailable reading is never mistaken for zero quota:
+A provider that needs authentication has one `sign in` row. Select it and press Enter for its recovery command; no quota is implied:
 
 | Provider       | Sign in with                    |
 | -------------- | ------------------------------- |

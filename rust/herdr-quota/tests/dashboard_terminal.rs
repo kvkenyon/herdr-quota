@@ -340,7 +340,7 @@ fn pty_journey_handles_resize_fragmented_escape_modals_refresh_and_quit() {
     let directory = TempDir::new().expect("temporary directory");
     let mut dashboard = DashboardChild::spawn(&directory, 36, 12);
     dashboard.wait_for("terminal enter", b"\x1b[?25l");
-    dashboard.wait_for("first-run readiness", b"4 ready");
+    dashboard.wait_for("first-run readiness", b"79%");
     dashboard.send(b"rrr");
     dashboard.wait_for("wide in-place refresh", b"refreshing");
     dashboard.send(b"p");
@@ -365,7 +365,7 @@ fn pty_journey_handles_resize_fragmented_escape_modals_refresh_and_quit() {
     dashboard.send(b"q");
     let output = dashboard.finish(None);
     assert!(contains(&output, b"Preferences"));
-    assert!(contains(&output, b"sign-in"));
+    assert!(contains(&output, b"auth"));
     assert!(contains(&output, b"live"));
     assert!(contains(&output, b"auth"));
     assert!(contains(&output, b"enter"));
@@ -376,7 +376,7 @@ fn exact_20x12_refresh_marker_uses_the_fixed_activity_slot_without_resize() {
     let directory = TempDir::new().expect("temporary directory");
     let mut dashboard = DashboardChild::spawn(&directory, 20, 12);
     dashboard.wait_for("terminal enter", b"\x1b[?25l");
-    dashboard.wait_for("first-run readiness", b"4 ready");
+    dashboard.wait_for("first-run readiness", b"79%");
     dashboard.wait_for_quiet("the direct 20-column refresh");
 
     let refresh_checkpoint = dashboard.checkpoint();
@@ -397,14 +397,14 @@ fn multi_account_rows_and_resets_are_reachable_at_sidebar_widths() {
         let mut dashboard =
             DashboardChild::spawn_with_report(&directory, width, 12, MULTI_ACCOUNT_REPORT);
         dashboard.wait_for("terminal enter", b"\x1b[?25l");
-        dashboard.wait_for("multi-account collection", b"Account");
+        dashboard.wait_for("multi-account collection", b"72%");
         dashboard.wait_for_quiet("multi-account overview");
         let overview = dashboard.screen_text(width, 12);
         assert!(overview.contains("Claude"), "{width}: {overview}");
-        assert!(overview.contains("Account 1"), "{width}: {overview}");
+        assert!(overview.contains("p•••@example.com"), "{width}: {overview}");
         assert!(overview.contains("72%"), "{width}: {overview}");
         assert!(
-            overview.contains("reset unavailable"),
+            !overview.contains("reset unavailable"),
             "{width}: {overview}"
         );
 
@@ -412,7 +412,10 @@ fn multi_account_rows_and_resets_are_reachable_at_sidebar_widths() {
         dashboard.wait_for_quiet("second account detail");
         let second = dashboard.screen_text(width, 12);
         assert!(second.contains("Account 2"), "{width}: {second}");
-        assert!(second.contains("reset"), "{width}: {second}");
+        assert!(
+            second.contains("reset") || second.contains("↻"),
+            "{width}: {second}"
+        );
         assert!(
             second.contains("09/05") || second.contains("9/5"),
             "{width}: {second}"
@@ -423,7 +426,7 @@ fn multi_account_rows_and_resets_are_reachable_at_sidebar_widths() {
         let third = dashboard.screen_text(width, 12);
         assert!(third.contains("Account 3"), "{width}: {third}");
         assert!(third.contains("64%"), "{width}: {third}");
-        assert!(third.contains("reset unavailable"), "{width}: {third}");
+        assert!(third.contains("reset not reported"), "{width}: {third}");
         dashboard.send(b"q");
         dashboard.finish(None);
     }
@@ -433,14 +436,10 @@ fn multi_account_rows_and_resets_are_reachable_at_sidebar_widths() {
 fn provider_identity_modes_render_and_persist_across_reopen() {
     let directory = TempDir::new().expect("temporary directory");
     let mut dashboard = DashboardChild::spawn(&directory, 36, 12);
-    dashboard.wait_for("initial collection", b"4 ready");
+    dashboard.wait_for("initial collection", b"79%");
     dashboard.wait_for_quiet("default identity");
     let default_mode = dashboard.screen_text(36, 12);
-    assert!(
-        default_mode
-            .lines()
-            .any(|line| line.starts_with(">✳  Claude"))
-    );
+    assert!(default_mode.lines().any(|line| line.starts_with(">Claude")));
 
     dashboard.send(b"pjjjjjjj\x1b[Cs");
     dashboard.wait_for_quiet("name-only identity");
@@ -451,7 +450,7 @@ fn provider_identity_modes_render_and_persist_across_reopen() {
     dashboard.send(b"pjjjjjjj\x1b[Cs");
     dashboard.wait_for_quiet("logo-only identity");
     let logo_only = dashboard.screen_text(36, 12);
-    assert!(logo_only.lines().any(|line| line.trim_end() == ">✳"));
+    assert!(logo_only.lines().any(|line| line.trim_end() == ">Claude"));
     dashboard.send(b"q");
     dashboard.finish(None);
 
@@ -460,15 +459,15 @@ fn provider_identity_modes_render_and_persist_across_reopen() {
     assert!(settings.contains(r#""providerIdentity":"logo_only""#));
 
     let mut reopened = DashboardChild::spawn(&directory, 36, 12);
-    reopened.wait_for("reopened collection", b"Account");
+    reopened.wait_for("reopened collection", b"79%");
     reopened.wait_for_quiet("reopened logo-only identity");
     let persisted = reopened.screen_text(36, 12);
-    assert!(persisted.lines().any(|line| line.trim_end() == ">✳"));
+    assert!(persisted.lines().any(|line| line.trim_end() == ">Claude"));
 
     reopened.send(b"pjjjjjjj\x1b[Cs");
     reopened.wait_for_quiet("restored logo-and-name identity");
     let restored = reopened.screen_text(36, 12);
-    assert!(restored.lines().any(|line| line.starts_with(">✳  Claude")));
+    assert!(restored.lines().any(|line| line.starts_with(">Claude")));
     reopened.send(b"q");
     reopened.finish(None);
 }

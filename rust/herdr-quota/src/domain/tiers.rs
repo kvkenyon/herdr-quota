@@ -256,7 +256,7 @@ fn limiting_window_ids(provider: &ProviderQuota) -> Vec<&str> {
 pub fn provider_tiers(provider: &ProviderQuota) -> Vec<TierRow> {
     let kind = provider_kind(provider);
     let limiting = limiting_window_ids(provider);
-    let mut rows = provider
+    provider
         .windows
         .iter()
         .map(|window| {
@@ -271,26 +271,7 @@ pub fn provider_tiers(provider: &ProviderQuota) -> Vec<TierRow> {
                 limiting: limiting.contains(&window.id.as_str()),
             }
         })
-        .collect::<Vec<_>>();
-
-    if kind == Some(MarketedProvider::Codex)
-        && !provider.windows.is_empty()
-        && !provider
-            .windows
-            .iter()
-            .any(|window| window.id.starts_with("code_review_"))
-    {
-        rows.push(TierRow {
-            id: "code_review".into(),
-            label: "Code review".into(),
-            compact_label: "Review".into(),
-            percent_remaining: None,
-            resets_at: None,
-            conclusion: TierConclusion::NotReported,
-            limiting: false,
-        });
-    }
-    rows
+        .collect::<Vec<_>>()
 }
 
 /// True only when the provider cannot safely use its existing sign-in.
@@ -465,13 +446,10 @@ mod tests {
     }
 
     #[test]
-    fn codex_keeps_the_review_workload_explicit() {
+    fn codex_does_not_invent_an_unreported_review_entitlement() {
         let rows = provider_tiers(&provider("codex", vec![window("weekly")]));
-        assert!(matches!(
-            rows.last().unwrap().conclusion,
-            TierConclusion::NotReported
-        ));
-        assert_eq!(rows.last().unwrap().label, "Code review");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "Week");
     }
 
     #[test]

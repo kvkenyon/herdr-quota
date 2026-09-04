@@ -165,7 +165,7 @@ test("used meters complement only bounded known values and label the mode", asyn
   assert.match(output.split("\n")[0], /AI Quota · used/);
   assert.match(output, /^ Session {5}████ 100%/m);
   assert.match(output, /^ Week {8}──── {3}0%/m);
-  assert.match(output, /^ Code review {8}--/m);
+  assert.doesNotMatch(output, /Code review/);
 
   for (const fixture of [
     "partial-failure.json",
@@ -313,7 +313,7 @@ test("NO_COLOR retains every severity, state, and selection marker", () => {
   );
   assert.match(dashboard, /^! Claude Fable · out 13h/m);
   assert.match(dashboard, /Fable week.*9%.*out 13h/);
-  assert.match(dashboard, /Code review.*-- not reported/);
+  assert.doesNotMatch(dashboard, /Code review/);
   assert.match(dashboard, /p prefs/);
 
   const surface = renderDashboard(
