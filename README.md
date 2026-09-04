@@ -2,6 +2,8 @@
 
 **See the next Claude, OpenAI Codex, Cursor, Kimi, Grok, or GitHub Copilot limit before it stops your work—without leaving Herdr.**
 
+**Requirements:** Herdr 0.7.3 or newer, Node.js 22.19 or newer, npm, Cargo, Rust 1.88 or newer, and at least one supported provider's official app or CLI signed in locally.
+
 ```bash
 herdr plugin install kvkenyon/herdr-quota --yes
 ```
@@ -15,8 +17,6 @@ herdr plugin install kvkenyon/herdr-quota --yes
 A slim, full-height sidebar leads with the known provider tier most likely to block work first. On first run, one line summarizes providers with trustworthy live evidence and those that need sign-in; the roster then keeps all six marketed providers visible as `live`, `stale <age>`, `auth`, `partial`, `quota unavailable`, or `unsupported`. Press Enter for the selected provider's detail, or `p` to choose visibility/order, show used instead of remaining percentage, set the startup view, or opt into one-shot capacity and forecast transition cues. It refreshes while open, keeps the current tab and split arrangement intact, and restores the prior layout when closed. Unknown readings stay honest, and provider access remains read-only through the plugin-local `quota-axi`.
 
 ## Bind `prefix+u`
-
-Requirements: Herdr 0.7.3 or newer, Node.js 22.19 or newer, npm, and at least one supported provider's official app or CLI signed in locally.
 
 1. Add this command binding to `~/.config/herdr/config.toml`:
 
