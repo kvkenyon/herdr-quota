@@ -200,13 +200,13 @@ The plugin delegates provider access to its plugin-local `quota-axi@~0.1.29` exe
 - Retention is bounded to 512 snapshots or 30 days, whichever removes data first. Equivalent samples are stored at most once every 15 minutes; real normalized changes may be recorded sooner.
 - Only a usable successful collection can write history. Ineligible providers keep finite health/auth gap markers but no quota facts, and an entirely stale, signed-out, unavailable, error, or unknown-semantics report produces no write.
 - Corrupt/truncated history restarts safely; schema mismatch, permission failure, clock rollback, and interrupted writes preserve the live dashboard and collapse to a finite local-history note. No local error or file content becomes display copy.
-- Preferences persist separately at `${XDG_CONFIG_HOME:-~/.config}/herdr-quota/settings.json`. Its complete schema-v3 content is the schema version, supported-provider order, hidden-provider IDs, `remaining`/`used` meter mode, finite `off`/`25`/`10`/`5` capacity threshold, and forecast-before-reset boolean. Schema-v1 and schema-v2 files migrate in memory. A load does not rewrite the file. The next save writes schema v3.
+- Preferences persist separately at `${XDG_CONFIG_HOME:-~/.config}/herdr-quota/settings.json`. Its complete schema-v4 content is the schema version, supported-provider order, hidden-provider IDs, `remaining`/`used` meter mode, finite `off`/`25`/`10`/`5` capacity threshold, forecast-before-reset boolean, and `overview`/`details` startup view. Schemas v1-v3 migrate in memory. A load does not rewrite the file. The next explicit save writes schema v4.
 - Settings never store account IDs, quota payloads, credentials, authentication facts, raw errors, history samples, provider-output paths, or arbitrary future fields. The writer serializes only its finite schema, uses a private `0700` directory and `0600` file, syncs a private sibling temporary file, then atomically replaces the target.
 - A malformed current settings file is quarantined with private permissions before defaults recover; an unsupported future schema is preserved in place. Unknown fields and provider IDs are ignored. Symlink/non-regular targets, read-only or unwritable paths, and interrupted replacement fail closed without crashing refresh or replacing the last valid file.
 - Saving Preferences rerenders the existing last-good report immediately. It does not launch another collector, reset retry backoff, erase history, alter credentials, or require a Herdr server restart.
 - Transition audit/dedupe state is separate at `${XDG_STATE_HOME:-~/.local/state}/herdr-quota/transitions-v1.json`. Its schema is v2. Schema-v1 files migrate in memory. A load does not rewrite the file. The next state write uses schema v2. The file is bounded to 256 events or 30 days and contains only marketed provider/scope/limit identity, finite policy, reset-cycle identity, transition kind, event timestamp, and optional acknowledgement timestamp. It uses the same private `0700` directory, `0600` file, no-symlink, owner, atomic sibling-replacement boundary as settings. It never contains percentages, quota payloads, account IDs, credentials, paths, raw output/errors, tokens, source text, or arbitrary provider fields; event wording recovers the displayed percentage from the separately sanitized quota-history sample when retained.
 - Schema-v1 history files migrate in memory. A load does not rewrite the file. The next history write uses schema v2. The `history-v1.json` and `transitions-v1.json` file names do not change.
-- Herdr Quota 0.3.x sees settings v3, history v2, and transition state v2 as future schemas. It does not replace or delete these files. The six provider IDs are `claude`, `codex`, `cursor`, `kimi`, `grok`, and `copilot`.
+- Herdr Quota 0.3.x sees settings v4 as a future schema and does not replace or delete it. History and transition state keep their schema-v2 files through the cutover. The six provider IDs are `claude`, `codex`, `cursor`, `kimi`, `grok`, and `copilot`.
 - Clearing transition history is separately confirmed inside Preferences. It neither writes nor deletes quota history or provider settings, and unsupported/read-only settings documents remain untouched. A fresh baseline is established before future evaluation resumes.
 - Automatic refresh exists only while the pane process is alive: five minutes after success, with bounded 10/20/30-minute whole-collector failure backoff.
 - Raw responses, account identifiers, credentials, and credential paths are never logged.
@@ -252,7 +252,7 @@ The Keychain grant only lets `quota-axi` read a credential that already works. E
 
 **Refresh times out.** The sidebar terminates `quota-axi` after 12 seconds so an unavailable vendor cannot strand the pane. Provider-level results from a valid report remain visible; a whole-check timeout keeps the previous good report.
 
-**The plugin does not build.** Confirm `node --version` is at least 22.19 and `npm --version` works, then rerun installation. Herdr retains the previous managed install when an update build fails.
+**The plugin does not build.** Confirm Node.js 22.19 or newer, npm, Cargo, and Rust 1.88 or newer are available, then rerun installation. Herdr retains the previous managed install when an update build fails.
 
 ## Develop
 
@@ -260,9 +260,10 @@ The Keychain grant only lets `quota-axi` read a credential that already works. E
 npm ci
 npm run check
 npm run preview
+cargo test --workspace
 ```
 
-`npm run check` formats, lints, type-checks, runs the selector/refresh/layout/history/settings/transition suites, drives the real app through a POSIX PTY, and regenerates the sanitized no-color preview. Exact responsive input/render fixtures cover 20/24/36 columns and 6/8/12/23 rows, every reachable row, pinned context, fragmented Escape sequences, Preferences save/cancel/reset/order/visibility/meter/policy/clear controls, immediate rerender without collector overlap, transition review/acknowledgement, light/dark ANSI safety, all-hidden recovery, settings failure containment, dynamic scroll clamping, safe whole-check failures, retry timing, current Codex model session/week labels, bounded atomic local files, privacy allow-listing, reset segmentation, auth/data gaps, and deterministic actionable change/transition timelines. The runtime provider boundary lives in `src/schema.ts` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
+`npm run check` validates the TypeScript support surface and regenerates the sanitized Rust no-color preview; `cargo test --workspace` validates the shipped dashboard, sidebar, stores, and PTY behavior. Exact responsive Rust tests cover 20/24/36 columns and short heights, every reachable row, pinned context, fragmented Escape sequences, Preferences controls, immediate rerender without collector overlap, transition review, light/dark ANSI safety, settings failure containment, retry timing, bounded atomic local files, privacy allow-listing, auth/data gaps, and deterministic actionable timelines. The runtime provider boundary lives in `rust/herdr-quota/src/domain/schema.rs` and [docs/data-sources.md](docs/data-sources.md); provider credential or endpoint changes belong upstream in `quota-axi`.
 
 ## License and references
 

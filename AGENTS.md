@@ -13,7 +13,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `herdr plugin link/install` mutate a plugin registry shared across all sessions, including the live default one. After lab-testing a worktree via `plugin link`, unlink it and reinstall the original GitHub source at its previous commit.
 - A headless lab session never resizes a plugin pane's PTY, so the width in `herdr pane read` is not the width users see. Use the lab for lifecycle (open, refresh, close, layout restore, residue) and check layout at an exact width in the direct PTY harness. Invoke its Rust tests from a non-interactive Cargo process: an additional outer controlling TTY can mask the nested 36/20-cell winsize.
 - Herdr plugin manifests do not own keybindings. Document actions as explicit `[[keys.command]]` entries in `config.toml`, followed by `herdr server reload-config`.
-- Settings migration uses one active runtime. Rust-only storage locks do not coordinate with the TypeScript writer; add shared coordination at cutover before both runtimes can write concurrently.
+- Settings migration has one production owner: both v0.4 manifest entrypoints invoke Rust, while the TypeScript implementation is development-only. Keep the cutover atomic so the runtimes cannot write concurrently.
 
 ## Maintaining this file
 

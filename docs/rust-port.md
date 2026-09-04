@@ -19,8 +19,8 @@ finite `overview` or `details` startup view; schemas v1-v3 default it to
 `overview` in memory. The six provider IDs do not change. Stores do not write
 during a load; the next Rust settings save writes schema v4.
 
-Herdr Quota 0.3.x sees these documents as future versions. It preserves the
-file bytes. The file paths do not change.
+Herdr Quota 0.3.x sees settings v4 as a future version and preserves its bytes.
+History and transition state keep their schema-v2 paths through the cutover.
 
 Each later Rust ship brief must include this rule in substance. Once its
 feature is reachable through the Rust dashboard, it must also state the
@@ -58,15 +58,18 @@ The post-PR 23 marketed-roster and readiness/provenance contract supersedes the
 earlier FI-10/FI-11 hidden-provider summary. Its authoritative boundary is
 documented in [data-sources.md](data-sources.md#readiness-and-provenance-boundary).
 
-PR 18 is the manifest cutover. It retires all listed items in the released
-product only after the owner PRs are complete and the cutover smoke is
-recorded. It does not replace an owner PR.
+The v0.4.0 manifest cutover retires all listed items in the released product.
+Installation keeps `npm ci` only for the plugin-local `quota-axi`, builds the
+locked Rust release binary, and routes both production entrypoints to it. The
+TypeScript implementation remains development history, not a production
+settings writer. Rust alone migrates schemas v1-v3 in memory and writes schema
+v4 on the next explicit save.
 
 ## Scope limits
 
 - Keep the plugin-local `quota-axi --json --full` schema-v5 boundary.
 - Keep persisted data in its stated finite allow-lists.
-- Keep the manifest and production runtime on TypeScript until PR 18.
+- Keep both production entrypoints on the Rust binary after the v0.4.0 cutover.
 - Do not add a fixture generator, a golden output, a snapshot comparison, or a
   differential test layer to this program.
 
