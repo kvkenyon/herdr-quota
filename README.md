@@ -93,7 +93,7 @@ Every marketed provider stays in the Preferences list even when it was not retur
 
 Only trustworthy `live` evidence contributes to the first-run ready count. `auth` contributes to sign-in; stale, partial, quota-unavailable, and unsupported rows remain visible instead of inflating either number. The schema does not distinguish an authoritative local estimate, so the UI does not claim one.
 
-Provider order changes provider sections only. Attention still selects the most restrictive visible evidence using the established safety semantics. Hidden providers disappear from detail, attention, and the change line. The compact hidden count covers only unrecognized provider records filtered at the schema boundary; a visibly rendered unavailable or unsupported marketed row is not counted, and a deliberate Preferences choice is not relabeled as hidden. If all six are hidden, the pane says `No providers shown` and gives the exact recovery instruction `Press p for Preferences` (compact `Press p for prefs` at 20 columns); it never claims that everything is on pace.
+Provider order changes provider sections only. Attention still selects the most restrictive visible evidence using the established safety semantics. Hidden providers disappear from detail, attention, and the change line. Non-marketed provider records are omitted from the overview and Preferences without a hidden-count badge; unavailable and unsupported marketed providers keep their explicit readiness rows. If all six marketed providers are hidden, the pane says `No providers shown` and gives the exact recovery instruction `Press p for Preferences` (compact `Press p for prefs` at 20 columns); it never claims that everything is on pace.
 
 ### Transition cues
 

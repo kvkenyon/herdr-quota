@@ -2702,7 +2702,7 @@ mod tests {
     }
 
     #[test]
-    fn hidden_summary_only_counts_nonrendered_non_user_hidden_providers() {
+    fn marketed_roster_omits_non_marketed_records_without_a_hidden_badge() {
         let partial_report = report(vec![
             provider("claude", Some(50.0), ProviderStatus::Fresh),
             provider("codex", Some(50.0), ProviderStatus::Unavailable),
