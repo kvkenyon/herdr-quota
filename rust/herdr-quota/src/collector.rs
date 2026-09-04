@@ -100,7 +100,9 @@ impl Default for Collector {
 impl Collector {
     /// Collect from this plugin's own quota-axi installation.
     pub fn new() -> Self {
-        Self::with_executable(local_quota_axi_executable(), plugin_root(), DEFAULT_TIMEOUT)
+        let plugin_root = plugin_root();
+        let executable = quota_axi_executable(&plugin_root);
+        Self::with_executable(executable, plugin_root, DEFAULT_TIMEOUT)
     }
 
     /// Construct a collector around an explicitly selected executable.
@@ -216,14 +218,29 @@ impl Collection {
 
 /// Return the exact plugin-local quota-axi executable path.
 pub fn local_quota_axi_executable() -> PathBuf {
-    plugin_root()
+    quota_axi_executable(&plugin_root())
+}
+
+fn quota_axi_executable(plugin_root: &Path) -> PathBuf {
+    plugin_root
         .join("node_modules")
         .join(".bin")
         .join("quota-axi")
 }
 
 fn plugin_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    let runtime_root = std::env::var_os("HERDR_PLUGIN_ROOT");
+    plugin_root_from(
+        runtime_root.as_deref(),
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    )
+}
+
+fn plugin_root_from(runtime_root: Option<&std::ffi::OsStr>, manifest_dir: &Path) -> PathBuf {
+    if let Some(runtime_root) = runtime_root.filter(|root| !root.is_empty()) {
+        return PathBuf::from(runtime_root);
+    }
+    manifest_dir
         .ancestors()
         .nth(2)
         .expect("the Rust package is nested beneath the plugin root")
@@ -393,8 +410,27 @@ async fn stop_drain(drain: JoinHandle<()>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{CollectorFailure, DEFAULT_TIMEOUT, QUOTA_AXI_ARGUMENTS};
+    use super::{CollectorFailure, DEFAULT_TIMEOUT, QUOTA_AXI_ARGUMENTS, plugin_root_from};
+    use std::ffi::OsStr;
+    use std::path::Path;
     use std::time::Duration;
+
+    #[test]
+    fn runtime_plugin_root_overrides_the_build_checkout() {
+        let root = plugin_root_from(
+            Some(OsStr::new("installed-plugin")),
+            Path::new("checkout/rust/herdr-quota"),
+        );
+
+        assert_eq!(root, Path::new("installed-plugin"));
+    }
+
+    #[test]
+    fn build_checkout_is_the_development_fallback() {
+        let root = plugin_root_from(None, Path::new("checkout/rust/herdr-quota"));
+
+        assert_eq!(root, Path::new("checkout"));
+    }
 
     #[test]
     fn constants_preserve_the_collector_contract() {
