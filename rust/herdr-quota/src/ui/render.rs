@@ -549,20 +549,20 @@ fn overview_row(
     let prefix = format!("{cursor}{marker}{name}");
     let tier = tier.map(str::to_owned);
     let mut candidates = Vec::new();
-    if width >= 24 {
-        if let Some(displayed) = displayed {
-            candidates.push(format!(
-                "{prefix} [{}] {state}{}{} · live",
-                gauge(Some(displayed), 6),
-                tier.as_deref()
-                    .map(|value| format!(" {value}"))
-                    .unwrap_or_default(),
-                reset
-                    .as_deref()
-                    .map(|value| format!(" {value}"))
-                    .unwrap_or_default(),
-            ));
-        }
+    if width >= 24
+        && let Some(displayed) = displayed
+    {
+        candidates.push(format!(
+            "{prefix} [{}] {state}{}{} · live",
+            gauge(Some(displayed), 6),
+            tier.as_deref()
+                .map(|value| format!(" {value}"))
+                .unwrap_or_default(),
+            reset
+                .as_deref()
+                .map(|value| format!(" {value}"))
+                .unwrap_or_default(),
+        ));
     }
     let text_priority = if width <= 23 {
         [
@@ -1491,15 +1491,15 @@ fn render_frame(
     let footer = height.saturating_sub(1);
     let body_end = footer.max(body_start);
     let viewport = body_end.saturating_sub(body_start);
-    if config.view == DashboardView::Overview {
-        if let Some(report) = report {
-            let spare = viewport.saturating_sub(rows.len());
-            rows.extend(
-                overview_evidence_rows(report, config, width as u16)
-                    .into_iter()
-                    .take(spare),
-            );
-        }
+    if config.view == DashboardView::Overview
+        && let Some(report) = report
+    {
+        let spare = viewport.saturating_sub(rows.len());
+        rows.extend(
+            overview_evidence_rows(report, config, width as u16)
+                .into_iter()
+                .take(spare),
+        );
     }
     let scroll = if config.view == DashboardView::Overview {
         config
@@ -2486,14 +2486,13 @@ mod tests {
         assert_eq!(lines[1].trim_end(), "? Limits non-current");
         assert!(overview_evidence_rows(&report, &overview, 36).is_empty());
 
-        let details = render_lines_with_history(
-            &report,
-            Some(&trend_history()),
-            36,
-            12,
-            &detail_config(),
+        let details =
+            render_lines_with_history(&report, Some(&trend_history()), 36, 12, &detail_config());
+        assert!(
+            details
+                .iter()
+                .any(|line| line.contains("Keychain approval"))
         );
-        assert!(details.iter().any(|line| line.contains("Keychain approval")));
         assert!(details.iter().all(|line| !line.contains("18pp")));
     }
 
