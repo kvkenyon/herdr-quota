@@ -1,8 +1,8 @@
 # Rust port checklist
 
-This file records the Rust cutover scope. It is not executable comparison
-tooling. Keep TypeScript tests for the live TypeScript product. Do not use
-them as a Rust oracle.
+This file records the completed Rust cutover scope. It is not executable
+comparison tooling. Keep TypeScript tests for the development-only TypeScript
+support surface. Do not use them as a Rust oracle.
 
 ## Required verification rule
 
