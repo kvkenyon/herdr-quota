@@ -1,4 +1,4 @@
-//! The finite schema-v4 dashboard settings store.
+//! The finite schema-v5 dashboard settings store.
 
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 use super::atomic::{self, AtomicError, ReplaceError};
 
 /// The current settings schema.
-pub const SETTINGS_SCHEMA_VERSION: u64 = 4;
+pub const SETTINGS_SCHEMA_VERSION: u64 = 5;
 
 /// A provider that this product can show and persist.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -87,6 +87,28 @@ impl Serialize for MeterMode {
     }
 }
 
+/// The provider identity treatment used by the terminal renderer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProviderIdentityMode {
+    LogoOnly,
+    #[default]
+    LogoAndName,
+    NameOnly,
+}
+
+impl Serialize for ProviderIdentityMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            Self::LogoOnly => "logo_only",
+            Self::LogoAndName => "logo_and_name",
+            Self::NameOnly => "name_only",
+        })
+    }
+}
+
 /// The screen shown when the dashboard starts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StartupView {
@@ -137,6 +159,7 @@ pub struct DashboardSettings {
     pub provider_order: Vec<SupportedProvider>,
     pub hidden_providers: Vec<SupportedProvider>,
     pub meter_mode: MeterMode,
+    pub provider_identity: ProviderIdentityMode,
     pub remaining_threshold: RemainingThreshold,
     pub forecast_before_reset: bool,
     pub startup_view: StartupView,
@@ -149,6 +172,7 @@ impl Default for DashboardSettings {
             provider_order: SUPPORTED_PROVIDERS.to_vec(),
             hidden_providers: Vec::new(),
             meter_mode: MeterMode::Remaining,
+            provider_identity: ProviderIdentityMode::LogoAndName,
             remaining_threshold: RemainingThreshold::Off,
             forecast_before_reset: false,
             startup_view: StartupView::Overview,
@@ -235,6 +259,16 @@ pub fn parse_settings_document(value: &Value) -> Result<DashboardSettings, Setti
         Some("used") => MeterMode::Used,
         _ => return Err(SettingsError::Corrupt),
     };
+    let provider_identity = if schema_version < 5 {
+        ProviderIdentityMode::LogoAndName
+    } else {
+        match object.get("providerIdentity").and_then(Value::as_str) {
+            Some("logo_only") => ProviderIdentityMode::LogoOnly,
+            Some("logo_and_name") => ProviderIdentityMode::LogoAndName,
+            Some("name_only") => ProviderIdentityMode::NameOnly,
+            _ => return Err(SettingsError::Corrupt),
+        }
+    };
     let remaining_threshold = if schema_version == 1 {
         RemainingThreshold::Off
     } else {
@@ -263,6 +297,7 @@ pub fn parse_settings_document(value: &Value) -> Result<DashboardSettings, Setti
         provider_order: provider_list(object.get("providerOrder"), true)?,
         hidden_providers: provider_list(object.get("hiddenProviders"), false)?,
         meter_mode,
+        provider_identity,
         remaining_threshold,
         forecast_before_reset,
         startup_view,
@@ -278,6 +313,7 @@ pub fn normalize_settings(
         provider_order: normalize_provider_list(&settings.provider_order, true)?,
         hidden_providers: normalize_provider_list(&settings.hidden_providers, false)?,
         meter_mode: settings.meter_mode,
+        provider_identity: settings.provider_identity,
         remaining_threshold: settings.remaining_threshold,
         forecast_before_reset: settings.forecast_before_reset,
         startup_view: settings.startup_view,
@@ -369,6 +405,7 @@ struct SettingsDocument<'a> {
     provider_order: &'a [SupportedProvider],
     hidden_providers: &'a [SupportedProvider],
     meter_mode: MeterMode,
+    provider_identity: ProviderIdentityMode,
     remaining_threshold: RemainingThreshold,
     forecast_before_reset: bool,
     startup_view: StartupView,
@@ -379,11 +416,12 @@ impl Serialize for SettingsDocument<'_> {
     where
         S: serde::Serializer,
     {
-        let mut document = serializer.serialize_struct("SettingsDocument", 7)?;
+        let mut document = serializer.serialize_struct("SettingsDocument", 8)?;
         document.serialize_field("schemaVersion", &self.schema_version)?;
         document.serialize_field("providerOrder", self.provider_order)?;
         document.serialize_field("hiddenProviders", self.hidden_providers)?;
         document.serialize_field("meterMode", &self.meter_mode)?;
+        document.serialize_field("providerIdentity", &self.provider_identity)?;
         document.serialize_field("remainingThreshold", &self.remaining_threshold)?;
         document.serialize_field("forecastBeforeReset", &self.forecast_before_reset)?;
         document.serialize_field("startupView", &self.startup_view)?;
@@ -397,6 +435,7 @@ fn serialize_settings(settings: &DashboardSettings) -> Result<Vec<u8>, SettingsE
         provider_order: &settings.provider_order,
         hidden_providers: &settings.hidden_providers,
         meter_mode: settings.meter_mode,
+        provider_identity: settings.provider_identity,
         remaining_threshold: settings.remaining_threshold,
         forecast_before_reset: settings.forecast_before_reset,
         startup_view: settings.startup_view,
@@ -529,9 +568,9 @@ fn home_directory() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        DashboardSettings, MeterMode, RemainingThreshold, SETTINGS_SCHEMA_VERSION,
-        SUPPORTED_PROVIDERS, SettingsAvailability, SettingsError, SettingsStore, StartupView,
-        SupportedProvider, parse_settings_document, settings_path,
+        DashboardSettings, MeterMode, ProviderIdentityMode, RemainingThreshold,
+        SETTINGS_SCHEMA_VERSION, SUPPORTED_PROVIDERS, SettingsAvailability, SettingsError,
+        SettingsStore, StartupView, SupportedProvider, parse_settings_document, settings_path,
     };
     use serde_json::{Value, json};
     use std::ffi::OsStr;
@@ -578,8 +617,8 @@ mod tests {
     }
 
     #[test]
-    fn defaults_and_path_use_the_v4_contract() {
-        assert_eq!(SETTINGS_SCHEMA_VERSION, 4);
+    fn defaults_and_path_use_the_v5_contract() {
+        assert_eq!(SETTINGS_SCHEMA_VERSION, 5);
         assert_eq!(
             SUPPORTED_PROVIDERS,
             [
@@ -594,10 +633,11 @@ mod tests {
         assert_eq!(
             DashboardSettings::default(),
             DashboardSettings {
-                schema_version: 4,
+                schema_version: 5,
                 provider_order: SUPPORTED_PROVIDERS.to_vec(),
                 hidden_providers: Vec::new(),
                 meter_mode: MeterMode::Remaining,
+                provider_identity: ProviderIdentityMode::LogoAndName,
                 remaining_threshold: RemainingThreshold::Off,
                 forecast_before_reset: false,
                 startup_view: StartupView::Overview,
@@ -636,6 +676,10 @@ mod tests {
             assert_eq!(loaded.settings.remaining_threshold, threshold);
             assert_eq!(loaded.settings.forecast_before_reset, forecast);
             assert_eq!(loaded.settings.startup_view, StartupView::Overview);
+            assert_eq!(
+                loaded.settings.provider_identity,
+                ProviderIdentityMode::LogoAndName
+            );
             assert_eq!(fs::read_to_string(&path).expect("read fixture"), text);
         }
 
@@ -657,6 +701,10 @@ mod tests {
         let loaded = SettingsStore::new(&path).load();
         assert_eq!(loaded.availability, SettingsAvailability::Ready);
         assert_eq!(loaded.settings.startup_view, StartupView::Overview);
+        assert_eq!(
+            loaded.settings.provider_identity,
+            ProviderIdentityMode::LogoAndName
+        );
         assert_eq!(fs::read_to_string(&path).expect("read v3 fixture"), v3);
     }
 
@@ -685,6 +733,32 @@ mod tests {
     }
 
     #[test]
+    fn provider_identity_has_exactly_three_persisted_modes() {
+        assert_eq!(
+            DashboardSettings::default().provider_identity,
+            ProviderIdentityMode::LogoAndName
+        );
+        for (text, expected) in [
+            ("logo_only", ProviderIdentityMode::LogoOnly),
+            ("logo_and_name", ProviderIdentityMode::LogoAndName),
+            ("name_only", ProviderIdentityMode::NameOnly),
+        ] {
+            let parsed = parse_settings_document(&json!({
+                "schemaVersion": 5,
+                "providerOrder": ["claude"],
+                "hiddenProviders": [],
+                "meterMode": "remaining",
+                "providerIdentity": text,
+                "remainingThreshold": "off",
+                "forecastBeforeReset": false,
+                "startupView": "overview"
+            }))
+            .expect("parse provider identity");
+            assert_eq!(parsed.provider_identity, expected);
+        }
+    }
+
+    #[test]
     fn save_writes_only_the_finite_schema_and_a_private_file() {
         let directory = TestDirectory::new();
         let path = directory.path().join("config/herdr-quota/settings.json");
@@ -708,7 +782,7 @@ mod tests {
             .expect("save settings");
         assert_eq!(
             fs::read_to_string(&path).expect("read settings"),
-            "{\"schemaVersion\":4,\"providerOrder\":[\"cursor\",\"claude\",\"kimi\",\"codex\",\"grok\",\"copilot\"],\"hiddenProviders\":[\"kimi\"],\"meterMode\":\"used\",\"remainingThreshold\":\"off\",\"forecastBeforeReset\":false,\"startupView\":\"details\"}\n"
+            "{\"schemaVersion\":5,\"providerOrder\":[\"cursor\",\"claude\",\"kimi\",\"codex\",\"grok\",\"copilot\"],\"hiddenProviders\":[\"kimi\"],\"meterMode\":\"used\",\"providerIdentity\":\"logo_and_name\",\"remainingThreshold\":\"off\",\"forecastBeforeReset\":false,\"startupView\":\"details\"}\n"
         );
         assert_eq!(
             fs::read_dir(path.parent().expect("settings parent"))
@@ -800,7 +874,7 @@ mod tests {
     fn future_versions_stay_in_place_and_cannot_be_replaced() {
         let directory = TestDirectory::new();
         let path = directory.path().join("settings.json");
-        let future = b"{\"schemaVersion\":5,\"future\":\"keep\"}\n";
+        let future = b"{\"schemaVersion\":6,\"future\":\"keep\"}\n";
         fs::write(&path, future).expect("write future settings");
         let store = SettingsStore::new(&path);
 
@@ -851,6 +925,7 @@ mod tests {
         assert_eq!(parsed.hidden_providers, vec![SupportedProvider::Cursor]);
         assert_eq!(parsed.remaining_threshold, RemainingThreshold::Percent10);
         assert_eq!(parsed.startup_view, StartupView::Details);
+        assert_eq!(parsed.provider_identity, ProviderIdentityMode::LogoAndName);
     }
 
     #[cfg(unix)]
@@ -921,6 +996,16 @@ mod tests {
     #[test]
     fn invalid_finite_values_are_corrupt() {
         for value in [
+            json!({
+                "schemaVersion": 5,
+                "providerOrder": ["claude"],
+                "hiddenProviders": [],
+                "meterMode": "remaining",
+                "providerIdentity": "icon_and_name",
+                "remainingThreshold": "off",
+                "forecastBeforeReset": false,
+                "startupView": "overview"
+            }),
             json!({
                 "schemaVersion": 4,
                 "providerOrder": ["claude", "claude"],

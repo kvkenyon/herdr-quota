@@ -14,12 +14,13 @@ dashboard, also run the applicable manual dashboard smoke checks.
 ## Persistence preparation
 
 Rust program PR 3 reserved closed schema versions before provider work. Quota
-history and transition state use v2. Rust settings use v4 after PR 20 added the
-finite `overview` or `details` startup view; schemas v1-v3 default it to
-`overview` in memory. The six provider IDs do not change. Stores do not write
-during a load; the next Rust settings save writes schema v4.
+history and transition state use v2. Rust settings use v5 for the finite
+provider identity modes alongside the `overview` or `details` startup view;
+schemas v1-v4 default identity to `logo_and_name`, and schemas v1-v3 default
+startup to `overview` in memory. The six provider IDs do not change. Stores do
+not write during a load; the next Rust settings save writes schema v5.
 
-Herdr Quota 0.3.x sees settings v4 as a future version and preserves its bytes.
+Older Herdr Quota releases see settings v5 as a future version and preserve its bytes.
 History and transition state keep their schema-v2 paths through the cutover.
 
 Each later Rust ship brief must include this rule in substance. Once its

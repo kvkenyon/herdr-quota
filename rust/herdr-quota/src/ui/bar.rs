@@ -34,14 +34,11 @@ pub fn remaining_bar(percent: Option<f64>, width: usize) -> String {
     };
     let capacity = width * 8;
     let percent = percent.clamp(0.0, 100.0);
-    let mut eighths = ((percent / 100.0) * capacity as f64).floor() as usize;
-    if percent >= 100.0 {
-        eighths = capacity;
-    } else if percent <= 0.0 {
-        eighths = 0;
+    let eighths = if percent >= 100.0 {
+        capacity
     } else {
-        eighths = eighths.clamp(1, capacity - 1);
-    }
+        ((percent / 100.0) * capacity as f64).floor() as usize
+    };
     let solid = eighths / 8;
     let partial = eighths % 8;
     let mut result = String::with_capacity(width * 3);
@@ -92,11 +89,23 @@ mod tests {
     }
 
     #[test]
-    fn non_endpoint_values_keep_a_visible_notch_or_sliver() {
+    fn fractional_fill_is_floored_and_never_overstates_the_reading() {
         assert_eq!(remaining_bar(Some(99.9), 4), "███▉");
-        assert_eq!(remaining_bar(Some(0.1), 4), "▏───");
+        assert_eq!(remaining_bar(Some(0.1), 4), "────");
+        assert_eq!(remaining_bar(Some(3.124), 4), "────");
+        assert_eq!(remaining_bar(Some(3.125), 4), "▏───");
         assert_eq!(remaining_bar(Some(69.0), 4), "██▊─");
         assert_eq!(remaining_bar(Some(74.0), 4), "██▉─");
+    }
+
+    #[test]
+    fn clamps_out_of_range_inputs_and_does_not_round_across_cell_boundaries() {
+        assert_eq!(remaining_bar(Some(-12.0), 4), "────");
+        assert_eq!(remaining_bar(Some(140.0), 4), "████");
+        assert_eq!(remaining_bar(Some(24.99), 4), "▉───");
+        assert_eq!(remaining_bar(Some(25.01), 4), "█───");
+        assert_eq!(filled_eighths(&remaining_bar(Some(24.99), 4)), 7);
+        assert_eq!(filled_eighths(&remaining_bar(Some(25.01), 4)), 8);
     }
 
     #[test]

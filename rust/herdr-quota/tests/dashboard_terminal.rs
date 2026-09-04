@@ -397,12 +397,16 @@ fn multi_account_rows_and_resets_are_reachable_at_sidebar_widths() {
         let mut dashboard =
             DashboardChild::spawn_with_report(&directory, width, 12, MULTI_ACCOUNT_REPORT);
         dashboard.wait_for("terminal enter", b"\x1b[?25l");
-        dashboard.wait_for("multi-account collection", b"A1");
+        dashboard.wait_for("multi-account collection", b"Account");
         dashboard.wait_for_quiet("multi-account overview");
         let overview = dashboard.screen_text(width, 12);
-        assert!(overview.contains("Claude A1"), "{width}: {overview}");
-        assert!(overview.contains("Claude A2"), "{width}: {overview}");
-        assert!(overview.contains("Claude A3"), "{width}: {overview}");
+        assert!(overview.contains("Claude"), "{width}: {overview}");
+        assert!(overview.contains("Account 1"), "{width}: {overview}");
+        assert!(overview.contains("72%"), "{width}: {overview}");
+        assert!(
+            overview.contains("reset unavailable"),
+            "{width}: {overview}"
+        );
 
         dashboard.send(b"j\r");
         dashboard.wait_for_quiet("second account detail");
@@ -423,6 +427,50 @@ fn multi_account_rows_and_resets_are_reachable_at_sidebar_widths() {
         dashboard.send(b"q");
         dashboard.finish(None);
     }
+}
+
+#[test]
+fn provider_identity_modes_render_and_persist_across_reopen() {
+    let directory = TempDir::new().expect("temporary directory");
+    let mut dashboard = DashboardChild::spawn(&directory, 36, 12);
+    dashboard.wait_for("initial collection", b"4 ready");
+    dashboard.wait_for_quiet("default identity");
+    let default_mode = dashboard.screen_text(36, 12);
+    assert!(
+        default_mode
+            .lines()
+            .any(|line| line.starts_with(">✳  Claude"))
+    );
+
+    dashboard.send(b"pjjjjjjj\x1b[Cs");
+    dashboard.wait_for_quiet("name-only identity");
+    let name_only = dashboard.screen_text(36, 12);
+    assert!(name_only.lines().any(|line| line.starts_with(">Claude")));
+    assert!(!name_only.lines().any(|line| line.starts_with(">✳")));
+
+    dashboard.send(b"pjjjjjjj\x1b[Cs");
+    dashboard.wait_for_quiet("logo-only identity");
+    let logo_only = dashboard.screen_text(36, 12);
+    assert!(logo_only.lines().any(|line| line.trim_end() == ">✳"));
+    dashboard.send(b"q");
+    dashboard.finish(None);
+
+    let settings = fs::read_to_string(directory.path().join("config/herdr-quota/settings.json"))
+        .expect("saved settings");
+    assert!(settings.contains(r#""providerIdentity":"logo_only""#));
+
+    let mut reopened = DashboardChild::spawn(&directory, 36, 12);
+    reopened.wait_for("reopened collection", b"Account");
+    reopened.wait_for_quiet("reopened logo-only identity");
+    let persisted = reopened.screen_text(36, 12);
+    assert!(persisted.lines().any(|line| line.trim_end() == ">✳"));
+
+    reopened.send(b"pjjjjjjj\x1b[Cs");
+    reopened.wait_for_quiet("restored logo-and-name identity");
+    let restored = reopened.screen_text(36, 12);
+    assert!(restored.lines().any(|line| line.starts_with(">✳  Claude")));
+    reopened.send(b"q");
+    reopened.finish(None);
 }
 
 #[test]
