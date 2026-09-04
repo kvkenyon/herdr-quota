@@ -25,11 +25,11 @@ async fn main() -> ExitCode {
                 config.first_run = true;
                 let lines = render_lines(&report, width, height, &config);
                 println!("{}", lines.join("\n"));
-                if let Some(path) = svg {
-                    if fs::write(path, preview_svg(&lines, width, height)).is_err() {
-                        eprintln!("could not write preview SVG");
-                        return ExitCode::from(1);
-                    }
+                if let Some(path) = svg
+                    && fs::write(path, preview_svg(&lines, width, height)).is_err()
+                {
+                    eprintln!("could not write preview SVG");
+                    return ExitCode::from(1);
                 }
                 ExitCode::SUCCESS
             }

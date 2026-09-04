@@ -15,10 +15,10 @@ command = ["cargo", "build", "--release", "--locked", "-p", "herdr-quota", "--ta
 id = "dashboard"
 title = "AI Quota"
 placement = "split"
-command = ["target/release/herdr-quota", "dashboard"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/target/release/herdr-quota\" dashboard"]
 
 [[actions]]
 id = "open-dashboard"
 title = "Open AI quota dashboard"
 contexts = ["workspace", "pane"]
-command = ["target/release/herdr-quota", "sidebar"]
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/target/release/herdr-quota\" sidebar"]

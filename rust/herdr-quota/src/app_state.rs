@@ -106,10 +106,8 @@ pub fn reduce(state: &mut AppState, action: AppAction) -> bool {
             delay,
             after_failure,
         } => {
-            if after_failure {
-                if let Some(failure) = state.failure.as_mut() {
-                    failure.retry_at = Some(at + delay);
-                }
+            if after_failure && let Some(failure) = state.failure.as_mut() {
+                failure.retry_at = Some(at + delay);
             }
         }
         AppAction::RefreshSettled => state.loading = false,
