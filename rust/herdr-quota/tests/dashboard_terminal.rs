@@ -433,6 +433,41 @@ fn multi_account_rows_and_resets_are_reachable_at_sidebar_widths() {
 }
 
 #[test]
+fn current_account_leads_cached_account_in_real_pty_and_detail_keeps_its_resets() {
+    let report = include_str!("../../../test/fixtures/at-a-glance.json");
+    for width in [20, 36] {
+        let directory = TempDir::new().expect("temporary directory");
+        let mut dashboard = DashboardChild::spawn_with_report(&directory, width, 12, report);
+        dashboard.wait_for("current account", b"25.5%");
+        dashboard.wait_for_quiet("current ledger");
+        let overview = dashboard.screen_text(width, 12);
+        assert!(
+            overview.contains("Personal") && overview.contains("25.5%"),
+            "{overview}"
+        );
+        assert!(!overview.contains("72%"), "{overview}");
+        dashboard.send(b"j");
+        dashboard.wait_for_quiet("cached account focus");
+        let selected = dashboard.screen_text(width, 12);
+        assert!(
+            selected.contains("Research Team") && selected.contains("stale"),
+            "{selected}"
+        );
+        dashboard.send(b"\r");
+        dashboard.wait_for_quiet("cached account detail");
+        let detail = dashboard.screen_text(width, 12);
+        assert!(
+            detail.contains("72%") && detail.contains("last"),
+            "{detail}"
+        );
+        assert!(detail.contains("16:30"), "{detail}");
+        assert!(!detail.contains("25.5%"), "{detail}");
+        dashboard.send(b"q");
+        dashboard.finish(None);
+    }
+}
+
+#[test]
 fn provider_identity_modes_render_and_persist_across_reopen() {
     let directory = TempDir::new().expect("temporary directory");
     let mut dashboard = DashboardChild::spawn(&directory, 36, 12);
