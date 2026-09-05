@@ -1,0 +1,98 @@
+{
+  "generatedAt": "2026-09-04T12:00:00Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "claude",
+      "label": "Claude",
+      "account": {
+        "organization": "Research Team"
+      },
+      "windows": [
+        {
+          "id": "five_hour",
+          "label": "session",
+          "kind": "session",
+          "percentRemaining": 72,
+          "resetsAt": "2026-09-04T16:30:00Z"
+        },
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 41
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 41,
+            "boundedBy": ["five_hour", "seven_day"],
+            "limitingWindowIds": ["seven_day"],
+            "runway": {
+              "status": "unknown"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "stale",
+        "stale": true,
+        "authStatus": "usable",
+        "refreshedAt": "2026-09-04T10:00:00Z"
+      }
+    },
+    {
+      "provider": "claude",
+      "label": "Claude",
+      "account": {
+        "organization": "Personal"
+      },
+      "windows": [
+        {
+          "id": "seven_day",
+          "label": "week",
+          "kind": "weekly",
+          "percentRemaining": 25.5,
+          "resetsAt": "2026-09-04T17:00:00Z"
+        },
+        {
+          "id": "model:opus",
+          "label": "Opus week",
+          "kind": "model",
+          "percentRemaining": 55,
+          "resetsAt": "2026-09-07T09:15:00Z"
+        },
+        {
+          "id": "future",
+          "label": "Future",
+          "kind": "limit",
+          "resetsAt": "2026-09-06T12:00:00Z"
+        }
+      ],
+      "quotaSemantics": {
+        "status": "known",
+        "effectiveAvailability": [
+          {
+            "scope": "all_models",
+            "status": "known",
+            "effectivePercentRemaining": 25.5,
+            "boundedBy": ["seven_day"],
+            "limitingWindowIds": ["seven_day"],
+            "runway": {
+              "status": "unknown"
+            }
+          }
+        ]
+      },
+      "state": {
+        "status": "fresh",
+        "stale": false,
+        "authStatus": "usable"
+      }
+    }
+  ]
+}

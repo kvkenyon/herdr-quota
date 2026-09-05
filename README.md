@@ -149,7 +149,7 @@ Every bar shows **percentage remaining**, floored at one-eighth-cell resolution.
 | `────` | Zero or less than one eighth-cell of remaining fill; read the exact number. |
 | blank  | Unknown; no quota claim.                                                    |
 
-A stale numeric reading is labeled `last`, and its provider retains a data issue. Unavailable and error states cannot manufacture a percentage. Overview resets are omitted when unreported; account detail explains `reset not reported`.
+Current numeric windows lead the overview. Cached stale/error accounts use compact secondary rows; focus reveals a safe account label when available, and Enter opens their individual last readings and resets. A stale numeric reading in detail is labeled `last`, and its provider retains a pinned data issue. Unavailable and error states cannot manufacture a percentage. Overview resets are omitted when unreported; account detail explains `reset not reported`.
 
 Tier rows follow each provider's own quota model:
 

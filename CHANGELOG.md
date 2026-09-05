@@ -1,9 +1,9 @@
 # Changelog
 
-- The default overview now exposes the complete provider → safe account → quota-window hierarchy with exact percentages, honest fractional rails, and reset timestamp/countdown or `reset unavailable`; narrow and short panes scroll the same exhaustive semantic rows.
-- Persisted settings schema v5 adds exactly `logo only`, `logo + name` (default), and `name only` provider identity modes. The live cell renderer uses documented logo-derived Unicode marks with explicit ASCII fallback, while preview SVGs carry accessible text equivalents.
-
 ## Unreleased
+
+- Put current windows before cached account readings; reveal secondary account identity on focus, retain cached meters/resets in detail, and keep account scrolling bounded to its own rows.
+- Fit narrow reset countdowns inline when label padding can yield without losing the exact percentage or remaining bar.
 
 - Compact the Rust dashboard into provider/window rows with remaining bars, exact percentages, and inline reset timing; keep inactive providers secondary and selectable, and fetch/stale issues visible.
 - Remove invented Codex review rows and the resulting false partial status. Preserve real review windows and unknown values.
